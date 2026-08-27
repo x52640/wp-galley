@@ -25,7 +25,7 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       status: database.ok ? 'ok' : 'degraded',
-      stage: 2,
+      stage: 3,
       version: ctx.version,
       startedAt: ctx.startedAt,
       uptimeSeconds: Math.round(process.uptime()),
@@ -38,8 +38,14 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
         strictness: t.manifest.strictness,
         hash: t.hash.slice(0, 12),
       })),
-      // 階段 3 才會填入真實 Agent 偵測結果。
-      agents: { detected: false, note: '階段 3 才實作 Agent 偵測' },
+      agents: (await ctx.agents.detectAll()).map((a) => ({
+        id: a.id,
+        displayName: a.displayName,
+        installed: a.installed,
+        version: a.version,
+        loginState: a.loginState,
+        available: a.available,
+      })),
     };
   });
 }

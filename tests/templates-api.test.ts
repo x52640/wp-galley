@@ -5,6 +5,8 @@ import { loadConfig } from '../src/config/env.js';
 import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { paths } from '../src/config/paths.js';
 import { createTestDatabase } from './helpers/test-db.js';
+import { AgentRegistry } from '../src/agents/registry.js';
+import { FakeAdapter } from './helpers/fake-adapter.js';
 
 const db = createTestDatabase();
 let app: FastifyInstance;
@@ -15,6 +17,8 @@ beforeAll(async () => {
     config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'silent' }),
     db: db.handle,
     templates: await loadTemplateRegistry(paths.templates),
+    // 測試一律用假 adapter，不碰真實 CLI、不消耗訂閱額度。
+    agents: new AgentRegistry({ adapters: [new FakeAdapter('codex', 'Codex')] }),
   });
   await app.ready();
 });

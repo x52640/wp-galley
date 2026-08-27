@@ -60,3 +60,55 @@ adapter，介面不變。
 - stdout 與 stderr 分開處理，log 前先過秘密遮蔽。
 
 各 CLI 的具體參數寫在對應的 adapter 檔案裡，不散落在共用程式碼中。
+
+---
+
+## 實作時踩到的坑（2026-08-27 實測記錄）
+
+`--help` 沒寫、但實際會炸的東西。CLI 改版後請重新驗證這一節。
+
+### Codex
+
+| 問題 | 處理 |
+| --- | --- |
+| `codex exec` **不接受** `--ask-for-approval`（那是互動模式的參數） | 移除；exec 本身就非互動 |
+| `--output-schema` 最終變成 OpenAI 的 `response_format`，要求**每一層物件**都有 `additionalProperties: false` | 見 `adapters/openai-strict.ts` |
+| 同上，`required` 必須列出 `properties` 的**每一個** key | 選填欄位改成 nullable 後全部列入 |
+| 同上，不支援 `minLength` / `maxLength` / `pattern` 等約束 | 送出前濾掉；**後端仍用原始 schema 驗證，約束沒少** |
+| strict mode 會把沒填的選填欄位回成 `null` | 驗證前先 `stripNulls` |
+
+### Claude Code
+
+| 問題 | 處理 |
+| --- | --- |
+| `--json-schema` 內建 draft-07 驗證器，看到 `$schema: draft/2020-12` 會直接報 `no schema with key or ref` | 送出前拿掉 `$schema`（`schemaForCli`） |
+
+### Antigravity
+
+| 問題 | 處理 |
+| --- | --- |
+| `--print` 會把下一個參數吃掉當 prompt，`--print --output-format json` 會壞掉 | 用 `--print=`（空值） |
+| `--print=` 空值時報 `empty prompt`，**agy 不從 stdin 讀純文字** | 改走 `--input-format stream-json` |
+| stream-json 的輸入訊息鍵名是 **`event`** 不是 `type`（官方說明沒寫） | `{"event":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}` |
+| 結果包兩層：`{"event":"result","result":{"response":"<真正的 JSON 字串>"}}` | output-parser 遞迴拆包 |
+| 會在輸出最外層多塞 `toolAction`、`toolSummary` | adapter 只刪這兩個已知欄位，其餘多餘欄位照樣被擋 |
+| 沒有停用工具的參數；它若自行呼叫 `read_file` 會被 headless 自動拒絕，然後**整份不輸出** | prompt 開頭明確告知沒有可用工具（`NO_TOOLS_NOTICE`） |
+
+### 共通
+
+`execFile` 不會關閉子行程的 stdin，等 EOF 的 CLI（`agy models` 就是）會一路等到逾時。
+探查一律改走 `runProcess`，它會 `stdin.end()`。
+
+## 驗收實測結果
+
+原稿：一段 84 字的日記，刻意留三個錯字（一整**夭**、錄**印**、別**忸**）。
+三家都用 `diary-v1` 模板，走完整流程到渲染出可發布的 HTML。
+
+| Agent | 耗時 | 抓到錯字 | 通過校稿 schema | 通過模板驗證 |
+| --- | --- | --- | --- | --- |
+| Codex | 13.7s | 3 / 3 | ✅ | ✅ |
+| Claude Code | 22.0s | 3 / 3 | ✅ | ✅ |
+| Antigravity | 27.3s | 3 / 3 | ✅ | ✅ |
+
+三家都正確保留了標題、沒有改動語氣、`imageBriefs` 依規則回空陣列。
+Codex 與 Claude 產出的 `contentHash` **完全相同**，代表兩者對這段文字的校正結果一字不差。

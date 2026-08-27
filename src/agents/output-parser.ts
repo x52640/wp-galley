@@ -25,16 +25,32 @@ function isObject(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** 從 `{result: ...}` 這類包裝裡取出裡層資料。 */
-function unwrapResult(value: unknown): unknown {
-  if (!isObject(value)) return value;
-  for (const key of ['result', 'output', 'response', 'content', 'text']) {
+/** 各家 CLI 用來包裝真正結果的鍵名。 */
+const WRAPPER_KEYS = ['result', 'output', 'response', 'content', 'text'] as const;
+
+/**
+ * 從 `{result: ...}` 這類包裝裡取出裡層資料。
+ *
+ * 必須遞迴：Antigravity 是包兩層的
+ *   {"event":"result","result":{...,"response":"<真正的 JSON 字串>"}}
+ * 拆一層只會拿到帶著 conversation_id、status、usage 的中介物件。
+ *
+ * 字串優先於物件：`response: "<JSON>"` 幾乎一定是最終結果，而物件型的
+ * 中介層（例如 `result`）還要再往下找。
+ */
+function unwrapResult(value: unknown, depth = 0): unknown {
+  if (depth >= 5 || !isObject(value)) return value;
+
+  for (const key of WRAPPER_KEYS) {
     const inner = value[key];
     if (typeof inner === 'string') {
       const parsed = tryParse(inner);
-      if (isObject(parsed)) return parsed;
+      if (isObject(parsed)) return unwrapResult(parsed, depth + 1);
     }
-    if (isObject(inner)) return inner;
+  }
+  for (const key of WRAPPER_KEYS) {
+    const inner = value[key];
+    if (isObject(inner)) return unwrapResult(inner, depth + 1);
   }
   return value;
 }
@@ -134,9 +150,19 @@ export type ParseResult =
  *
  * 這是計畫 §6.3 的守門：輸出不是合法 JSON、schema 不合格或漏欄位，
  * 一律拒絕該結果，讓呼叫端重試——絕不讓半成品污染草稿。
+ *
+ * `transform` 讓各 adapter 在驗證前修正自家 CLI 的怪癖（例如 Antigravity 會
+ * 多塞 toolAction 欄位、Codex 的 strict mode 會把選填欄位填成 null）。
+ * 它只能刪改已知的雜訊，**不能放寬 schema**——驗證仍然照原樣跑。
  */
-export function parseAndValidate(raw: string, schema: Record<string, unknown>, cacheKey: string): ParseResult {
-  const payload = extractJsonPayload(raw);
+export function parseAndValidate(
+  raw: string,
+  schema: Record<string, unknown>,
+  cacheKey: string,
+  transform?: (payload: Json) => Json,
+): ParseResult {
+  const extracted = extractJsonPayload(raw);
+  const payload = extracted && transform ? transform(extracted) : extracted;
   if (!payload) {
     return {
       ok: false,

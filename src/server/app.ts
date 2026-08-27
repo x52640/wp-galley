@@ -11,12 +11,15 @@ import { applyLocalOnlyGuard } from './plugins/local-only.js';
 import { AppError, errorCodes, toErrorBody } from './errors.js';
 import { healthRoutes } from './routes/health.js';
 import { templateRoutes } from './routes/templates.js';
+import { agentRoutes } from './routes/agents.js';
+import type { AgentRegistry } from '../agents/registry.js';
 import type { TemplateRegistry } from '../templates/registry.js';
 
 export interface AppContext {
   readonly config: AppConfig;
   readonly db: DatabaseSync;
   readonly templates: TemplateRegistry;
+  readonly agents: AgentRegistry;
   readonly version: string;
   readonly startedAt: string;
 }
@@ -25,6 +28,7 @@ export interface BuildAppOptions {
   readonly config: AppConfig;
   readonly db: DatabaseSync;
   readonly templates: TemplateRegistry;
+  readonly agents: AgentRegistry;
   readonly version?: string;
 }
 
@@ -43,6 +47,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     config,
     db,
     templates: options.templates,
+    agents: options.agents,
     version: options.version ?? '0.1.0',
     startedAt: new Date().toISOString(),
   };
@@ -72,6 +77,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(healthRoutes);
   await app.register(templateRoutes);
+  await app.register(agentRoutes);
 
   // 正式啟動時提供已建置的 UI；開發時用 Vite dev server，這裡不存在也不報錯。
   if (existsSync(paths.uiDist)) {

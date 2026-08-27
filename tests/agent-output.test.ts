@@ -44,6 +44,30 @@ describe('extractJsonPayload：從各家 CLI 的包裝裡挖出資料', () => {
     expect(extractJsonPayload(jsonl)).toEqual({ title: '甲' });
   });
 
+  it('Antigravity 的 stream-json 包了兩層', () => {
+    const jsonl = [
+      JSON.stringify({ event: 'init', init: { cwd: '/tmp', tools: ['a', 'b'] } }),
+      JSON.stringify({
+        event: 'result',
+        result: {
+          conversation_id: 'abc',
+          status: 'SUCCESS',
+          response: '{"title":"甲"}',
+          duration_seconds: 1.2,
+          usage: { input_tokens: 10 },
+        },
+      }),
+    ].join('\n');
+    expect(extractJsonPayload(jsonl)).toEqual({ title: '甲' });
+  });
+
+  it('拆包有深度上限，不會無限往下鑽', () => {
+    let nested: unknown = { title: '甲' };
+    for (let i = 0; i < 12; i += 1) nested = { result: nested };
+    // 拆不到底也不該當掉或回傳錯的東西
+    expect(() => extractJsonPayload(JSON.stringify(nested))).not.toThrow();
+  });
+
   it('完全沒有 JSON 就回 null', () => {
     expect(extractJsonPayload('我不知道怎麼做')).toBeNull();
     expect(extractJsonPayload('')).toBeNull();

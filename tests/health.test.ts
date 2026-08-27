@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
 import { loadConfig } from '../src/config/env.js';
 import { createTestDatabase } from './helpers/test-db.js';
+import { AgentRegistry } from '../src/agents/registry.js';
+import { FakeAdapter } from './helpers/fake-adapter.js';
 import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { paths } from '../src/config/paths.js';
 
@@ -22,6 +24,8 @@ beforeAll(async () => {
     }),
     db: db.handle,
     templates: await loadTemplateRegistry(paths.templates),
+    // 測試一律用假 adapter，不碰真實 CLI、不消耗訂閱額度。
+    agents: new AgentRegistry({ adapters: [new FakeAdapter('codex', 'Codex')] }),
   });
   // 必須在 ready() 之前註冊。
   app.get('/api/__boom', async () => {
@@ -43,7 +47,7 @@ describe('GET /api/health', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.status).toBe('ok');
-    expect(body.stage).toBe(2);
+    expect(body.stage).toBe(3);
     expect(body.templates).toHaveLength(2);
     expect(body.database.ok).toBe(true);
     expect(body.database.migrations).toBeGreaterThan(0);

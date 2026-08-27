@@ -5,8 +5,13 @@
  * 1. 送給 CLI 的 `--output-schema` / `--json-schema`，讓模型端就先受約束。
  * 2. 回來之後由後端再驗一次——Agent 說自己合格不算數。
  *
- * `templateData` 的形狀由各模板的 schema.json 決定，所以這裡只宣告它是物件，
- * 實際內容交給 templates/ 的渲染流程驗證。這樣新增模板不必改這個檔案。
+ * `templateData` 的形狀由各模板的 schema.json 決定，所以這裡放的是「骨架」，
+ * 實際使用時用 `buildReviewSchema(模板 schema)` 把該模板的 schema 嵌進去。
+ *
+ * 為什麼一定要嵌進去而不是描述成「一個物件」：OpenAI 的結構化輸出要求
+ * **每一層物件都必須明寫 `additionalProperties: false`**，開放形狀會被拒絕：
+ *   `'additionalProperties' is required to be supplied and to be false`
+ * 嵌進去同時也讓 Agent 拿到精確形狀，比用文字描述可靠。
  */
 
 export interface ReviewChange {
@@ -83,6 +88,7 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
     templateData: {
       type: 'object',
+      additionalProperties: false,
       description: '符合目標模板 schema.json 的資料。後端會用該模板再驗一次。',
     },
     imageBriefs: {
@@ -106,3 +112,30 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
   },
 };
+
+
+/**
+ * 產生特定模板專用的校稿 schema。
+ *
+ * 把模板的 schema.json 整份放進 `templateData`，Agent 因此知道確切要填什麼欄位，
+ * 且整份 schema 每一層都是封閉的，符合 OpenAI 結構化輸出的要求。
+ *
+ * 後端收到結果後**仍然會**用模板的 schema 再驗一次（計畫 §4.1）——
+ * 這裡只是讓模型端先受約束，不是把驗證外包出去。
+ */
+export function buildReviewSchema(templateSchema: Record<string, unknown>): Record<string, unknown> {
+  const properties = REVIEW_OUTPUT_SCHEMA['properties'] as Record<string, unknown>;
+  const { $schema: _ignored, $id: _ignoredId, ...inlined } = templateSchema;
+
+  return {
+    ...REVIEW_OUTPUT_SCHEMA,
+    properties: {
+      ...properties,
+      templateData: {
+        ...inlined,
+        // 保險：模板 schema 若漏寫，這裡補上，否則 OpenAI 會整份拒絕。
+        additionalProperties: false,
+      },
+    },
+  };
+}
