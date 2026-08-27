@@ -1,0 +1,40 @@
+{
+  "id": "diary-v1",
+  "version": 1,
+  "contentType": "diary",
+  "strictness": "flexible",
+  "wordpressTargetKey": "diary",
+  "publishSlot": "body",
+  "requiredSlots": ["title", "body"],
+  "optionalSlots": ["slug", "category"],
+  "allowedTags": [
+    "p", "h3", "ul", "ol", "li", "a", "strong", "em",
+    "blockquote", "figure", "figcaption", "img", "br"
+  ],
+  "allowedAttributes": {
+    "a": ["href", "title", "target", "rel"],
+    "img": ["src", "alt", "width", "height", "class"],
+    "p": ["class"],
+    "h3": ["class"],
+    "ul": ["class"],
+    "ol": ["class"],
+    "figure": ["class"],
+    "figcaption": ["class"],
+    "blockquote": ["class"]
+  },
+  "allowedClasses": {
+    "p": ["wp-block-paragraph", "has-medium-font-size"],
+    "h3": ["wp-block-heading", "has-medium-font-size"],
+    "ul": ["wp-block-list"],
+    "ol": ["wp-block-list"],
+    "figure": [
+      "wp-block-image", "aligncenter", "alignleft", "alignright",
+      "size-large", "size-full", "size-medium", "is-resized"
+    ],
+    "figcaption": ["wp-element-caption"],
+    "img": ["wp-image-*"]
+  },
+  "allowedSchemes": ["https", "http", "mailto"],
+  "structureRules": {},
+  "previewStrategy": "local"
+}

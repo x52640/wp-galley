@@ -1,0 +1,29 @@
+{#
+  本機預覽用的模板。
+
+  ⚠️ 這整份 HTML 都不會被發布。送去 WordPress 的只有 manifest.publishSlot
+  指定的 body 欄位（已清理過的 HTML）。這裡的標題、日期、精選圖片只是模擬
+  Elementor single-post 模板的外框，讓使用者看得懂實際會長怎樣。
+#}
+<article class="preview-article preview-longform">
+  <header class="preview-frame" aria-label="佈景主題外框（不會發布）">
+    <p class="preview-frame-note">以下外框由網站佈景主題產生，發布台不會送出</p>
+    {% if featuredImage %}
+    <figure class="preview-featured">
+      <img src="{{ featuredImage.src }}" alt="{{ featuredImage.alt }}" />
+      {% if featuredImage.caption %}<figcaption>{{ featuredImage.caption }}</figcaption>{% endif %}
+    </figure>
+    {% endif %}
+    <h1 class="preview-title">{{ title }}</h1>
+    <p class="preview-meta">
+      <span>{{ displayDate }}</span>
+      {% if tags and tags.length %}
+      <span class="preview-tags">{% for tag in tags %}<span class="preview-tag">{{ tag }}</span>{% endfor %}</span>
+      {% endif %}
+    </p>
+  </header>
+
+  <div class="preview-body" aria-label="正文（會發布的內容）">
+    {{ body | safe }}
+  </div>
+</article>

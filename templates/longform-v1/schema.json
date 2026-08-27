@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "longform-v1",
+  "title": "思想•讀•鑰 長文資料",
+  "description": "Agent 回傳的 templateData。只有 body 會被送去 WordPress 的 content 欄位；其餘欄位對應 WordPress 的標題、slug、標籤與精選圖片。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "body"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "文章標題。外框由佈景主題輸出，正文裡不要再放一次標題。"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[_-][a-z0-9]+)*$",
+      "maxLength": 80,
+      "description": "英文小寫網址片段，例如 the_worlds_i_see。留空則由 WordPress 自動產生。"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200000,
+      "description": "正文 HTML。只能使用 manifest 允許的標籤與 class；最高階標題是 h3。"
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 30 },
+      "description": "對應 read-think-tag 分類法。"
+    },
+    "featuredImageBriefKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "指向某個 imageBrief 的 key，該圖會設為精選圖片。現有文章全部都有精選圖片。"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "diary-v1",
+  "title": "日•記 資料",
+  "description": "Agent 回傳的 templateData。只有 body 會被送去 WordPress 的 content 欄位。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "body"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "日記標題。由使用者決定，Agent 不得自行竄改；慣例是 YYYYMMDD。"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[_-][a-z0-9]+)*$",
+      "maxLength": 80,
+      "description": "網址片段，慣例與標題相同的 YYYYMMDD。"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200000,
+      "description": "正文 HTML。現有日記全部只用段落。"
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30,
+      "description": "對應 diary-category 分類法。"
+    }
+  }
+}

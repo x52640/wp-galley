@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest';
+import { sanitizeBody } from '../src/templates/sanitize.js';
+import type { TemplateManifest } from '../src/templates/types.js';
+
+const manifest = {
+  allowedTags: ['p', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'figure', 'figcaption', 'img', 'br'],
+  allowedAttributes: {
+    a: ['href', 'title', 'target', 'rel'],
+    img: ['src', 'alt', 'width', 'height', 'class'],
+    p: ['class'],
+    h3: ['class'],
+    figure: ['class'],
+  },
+  allowedClasses: {
+    p: ['wp-block-paragraph', 'has-medium-font-size'],
+    h3: ['wp-block-heading'],
+    figure: ['wp-block-image', 'aligncenter'],
+    img: ['wp-image-*'],
+  },
+  allowedSchemes: ['https', 'http', 'mailto'],
+} as unknown as TemplateManifest;
+
+const clean = (html: string) => sanitizeBody(html, manifest).html;
+
+describe('危險內容一律移除', () => {
+  it('拿掉 script', () => {
+    expect(clean('<p>安全</p><script>alert(1)</script>')).toBe('<p>安全</p>');
+  });
+
+  it('拿掉 style 標籤與行內 style 屬性', () => {
+    expect(clean('<style>body{display:none}</style><p style="color:red">字</p>')).toBe('<p>字</p>');
+  });
+
+  it('拿掉 iframe', () => {
+    expect(clean('<iframe src="https://evil.com"></iframe><p>字</p>')).toBe('<p>字</p>');
+  });
+
+  it('拿掉事件屬性', () => {
+    expect(clean('<p onclick="steal()" onmouseover="x()">字</p>')).toBe('<p>字</p>');
+  });
+
+  it('拿掉不在 allowlist 的標籤但保留文字', () => {
+    expect(clean('<div><span>保留文字</span></div>')).toBe('保留文字');
+  });
+
+  it('擋掉 javascript: 連結', () => {
+    expect(clean('<a href="javascript:alert(1)">點</a>')).toBe('<a>點</a>');
+  });
+
+  it('擋掉 data: 連結', () => {
+    expect(clean('<a href="data:text/html,<script>x</script>">點</a>')).toBe('<a>點</a>');
+  });
+
+  it('保留允許的 scheme', () => {
+    expect(clean('<a href="https://example.com">點</a>')).toBe('<a href="https://example.com">點</a>');
+    expect(clean('<a href="mailto:a@b.com">信</a>')).toBe('<a href="mailto:a@b.com">信</a>');
+  });
+});
+
+describe('class allowlist', () => {
+  it('保留允許的 class', () => {
+    expect(clean('<p class="wp-block-paragraph">字</p>')).toBe('<p class="wp-block-paragraph">字</p>');
+  });
+
+  it('移除未允許的 class', () => {
+    expect(clean('<p class="wp-block-paragraph ph-hero evil">字</p>')).toBe(
+      '<p class="wp-block-paragraph">字</p>',
+    );
+  });
+
+  it('支援萬用字元 class', () => {
+    expect(clean('<img src="https://e.com/a.png" alt="" class="wp-image-1234" />')).toContain(
+      'class="wp-image-1234"',
+    );
+    expect(clean('<img src="https://e.com/a.png" alt="" class="evil-1234" />')).not.toContain('evil');
+  });
+});
+
+describe('回報被移除了什麼', () => {
+  it('列出被拿掉的標籤，讓後端可以拒絕 Agent 的輸出', () => {
+    const result = sanitizeBody('<p>好</p><script>x</script><div>壞</div>', manifest);
+    expect(result.changed).toBe(true);
+    expect(result.removedTags).toEqual(expect.arrayContaining(['script', 'div']));
+  });
+
+  it('沒有任何改動時 changed 為 false', () => {
+    const result = sanitizeBody('<p class="wp-block-paragraph">好</p>', manifest);
+    expect(result.changed).toBe(false);
+    expect(result.removedTags).toEqual([]);
+  });
+});
