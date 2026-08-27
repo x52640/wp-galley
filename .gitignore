@@ -1,0 +1,25 @@
+# --- 秘密與本機資料：絕不進 Git ---
+.env
+.env.*
+!.env.example
+data/
+drafts/
+generated-images/
+backups/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# --- 建置產物 ---
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# --- 工具暫存 ---
+.DS_Store
+*.log
+.playwright/
+test-results/

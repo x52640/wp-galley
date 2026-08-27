@@ -1,0 +1,76 @@
+import { describe, expect, it, afterAll, beforeAll } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { buildApp } from '../src/server/app.js';
+import { loadConfig } from '../src/config/env.js';
+import { createTestDatabase } from './helpers/test-db.js';
+
+const SECRET = 'aaaa bbbb cccc dddd';
+const db = createTestDatabase();
+let app: FastifyInstance;
+
+beforeAll(async () => {
+  app = await buildApp({
+    config: loadConfig({
+      APP_HOST: '127.0.0.1',
+      APP_PORT: '3000',
+      LOG_LEVEL: 'silent',
+      WORDPRESS_URL: 'https://example.com',
+      WORDPRESS_USERNAME: 'bot',
+      WORDPRESS_APP_PASSWORD: SECRET,
+    }),
+    db: db.handle,
+  });
+  // 必須在 ready() 之前註冊。
+  app.get('/api/__boom', async () => {
+    throw new Error(`崩潰了，密碼是 ${SECRET}`);
+  });
+  await app.ready();
+});
+
+afterAll(async () => {
+  await app.close();
+  db.cleanup();
+});
+
+const localHeaders = { host: '127.0.0.1:3000' };
+
+describe('GET /api/health', () => {
+  it('回報服務狀態', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe('ok');
+    expect(body.stage).toBe(1);
+    expect(body.database.ok).toBe(true);
+    expect(body.database.migrations).toBeGreaterThan(0);
+  });
+
+  it('只回報 WordPress 是否已設定，絕不回傳 Application Password', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
+    expect(res.body).not.toContain(SECRET);
+    expect(res.json().wordpress).toEqual({
+      url: 'https://example.com',
+      username: 'bot',
+      appPasswordConfigured: true,
+    });
+  });
+});
+
+describe('錯誤格式', () => {
+  it('未知路由回傳統一錯誤結構', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/nope', headers: localHeaders });
+    expect(res.statusCode).toBe(404);
+    const body = res.json();
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(typeof body.error.message).toBe('string');
+    expect(typeof body.error.requestId).toBe('string');
+  });
+
+  it('內部錯誤不外洩堆疊與秘密', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/__boom', headers: localHeaders });
+    expect(res.statusCode).toBe(500);
+    expect(res.body).not.toContain(SECRET);
+    expect(res.body).not.toContain('at ');
+    expect(res.json().error.code).toBe('INTERNAL_ERROR');
+  });
+});
