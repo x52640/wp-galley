@@ -25,13 +25,19 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       status: database.ok ? 'ok' : 'degraded',
-      stage: 1,
+      stage: 2,
       version: ctx.version,
       startedAt: ctx.startedAt,
       uptimeSeconds: Math.round(process.uptime()),
       server: { host: safe.appHost, port: safe.appPort, nodeEnv: safe.nodeEnv },
       database,
       wordpress: safe.wordpress,
+      templates: ctx.templates.list().map((t) => ({
+        id: t.manifest.id,
+        contentType: t.manifest.contentType,
+        strictness: t.manifest.strictness,
+        hash: t.hash.slice(0, 12),
+      })),
       // 階段 3 才會填入真實 Agent 偵測結果。
       agents: { detected: false, note: '階段 3 才實作 Agent 偵測' },
     };

@@ -14,7 +14,7 @@
 - 不得新增作者沒寫過的內容，不得補充說明。
 - 不得刪段落。
 - 不得竄改標題。標題由使用者決定（慣例是 `YYYYMMDD`），你原樣帶回。
-- 不得輸出 `<h1>`、`<h2>`、`<script>`、`<style>`、`<iframe>`、`<div>`、`<span>`
+- 不得輸出 `<h1>`、`<script>`、`<style>`、`<iframe>`、`<div>`、`<span>`
   或行內樣式（`style=`）。
 
 ## 正文可以用的 HTML
@@ -26,8 +26,9 @@
 ```
 
 除非原稿本身就有清單或小標，否則就只輸出段落。真的需要時可以用
-`<h3 class="wp-block-heading has-medium-font-size">`、`<ul class="wp-block-list">`、
-`<ol class="wp-block-list">`、`<blockquote>`、`<a href>`、`<strong>`、`<em>`。
+`<h2 class="wp-block-heading">`、`<h3 class="wp-block-heading has-medium-font-size">`、
+`<ul class="wp-block-list">`、`<ol class="wp-block-list">`、`<hr class="wp-block-separator" />`、
+`<blockquote>`、`<a href>`、`<strong>`、`<em>`。
 
 連結只接受 `https:`、`http:`、`mailto:`。
 

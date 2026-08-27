@@ -42,11 +42,12 @@ describe('模板 registry', () => {
     expect(registry.get('diary-v1').manifest.strictness).toBe('flexible');
   });
 
-  it('長文只允許 h3，不允許 h2', () => {
+  it('長文允許 h2 與 h3，不允許 h1 與 h4', () => {
     const m = registry.get('longform-v1').manifest;
-    expect(m.allowedTags).toContain('h3');
-    expect(m.allowedTags).not.toContain('h2');
-    expect(m.structureRules.allowedHeadingLevels).toEqual([3]);
+    expect(m.allowedTags).toEqual(expect.arrayContaining(['h2', 'h3']));
+    expect(m.allowedTags).not.toContain('h1');
+    expect(m.allowedTags).not.toContain('h4');
+    expect(m.structureRules.allowedHeadingLevels).toEqual([2, 3]);
   });
 
   it('取不存在的模板會丟出明確錯誤', () => {

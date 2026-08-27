@@ -14,22 +14,39 @@ class 命名與 CSS 走，新版才不會跟現有樣式打架。
 
 | 檔案 | 內容 | 伺服器上的位置 | 已驗證 |
 | --- | --- | --- | --- |
-| `home-main.php.txt` | 首頁版面。**是 PHP 片段不是 HTML**，內含三處 `<?php echo get_stylesheet_directory_uri(); ?>` | `astra-child/` 底下的某個 `.php`，最可能是 `front-page.php` | ❌ 待確認 |
+| `home-main.php.txt` | 首頁版面。**是 PHP 片段不是 HTML**，內含三處 `<?php echo get_stylesheet_directory_uri(); ?>` | `astra-child/front-page.php` 的 `get_header()` 之後 | ✅ 已確認 |
 | `home-main.css` | 首頁專用樣式（1122 行） | `astra-child/assets/css/home-main.css` | ✅ SHA-256 相符 |
 | `home-main.js` | 捲動揭示與翻卡互動（189 行） | `astra-child/assets/js/home-main.js` | ✅ SHA-256 相符 |
 | （圖片不收在此） | `remus_selfie.webp`、`sales_management_profolio.webp`、`zeabur_profolio.webp` | `astra-child/assets/images/` | ✅ 路徑相符 |
 
-## ⚠️ 待確認：版面放在哪個 PHP 檔
+## 更新首頁的步驟（2026-08-27 確認）
 
-首頁 body class 是 `page-template-default`（沒有指定頁面範本），而 page 1665 的
-`content` 是空的卻仍渲染出內容——這是 `front-page.php` 的典型行為，它會整個蓋掉
-頁面內容。次要可能：`page-home.php`、`page-1665.php`。
+`astra-child` 子佈景主題只有四個項目：`style.css`、`functions.php`、`assets/`、
+`front-page.php`。首頁完全由 `front-page.php` 渲染——WordPress 的範本階層讓它
+蓋掉 page 1665 的內容，所以那個頁面的 `content` 是空的也沒關係。
 
-確認方式：WordPress 後台 → 外觀 → 佈景主題檔案編輯器 → 選「Astra Child」→
-看左側檔案清單。確認後把檔名填回這裡。
+`front-page.php` 的結構：
 
-CSS 與 JS 的載入（`wp_enqueue_style` / `wp_enqueue_script`）應該寫在
-`astra-child/functions.php`，重生首頁時如果沿用相同檔名就不必動它。
+```php
+<?php get_header(); ?>
+
+<main class="personal-home" aria-label="個人首頁主要內容">
+  ... 本資料夾的 home-main.php.txt 就是這一段 ...
+</main>
+
+<?php get_footer(); ?>
+```
+
+**不需要透過 Zeabur 傳檔。** WordPress 後台 → 外觀 → 佈景主題檔案編輯器 →
+右上角選「Astra Child」→ 點 `front-page.php` → 貼上 → 更新檔案。CSS、JS 與圖片
+要換的話，那個編輯器只看得到 `style.css` 與 `functions.php`，`assets/` 底下的
+檔案得走 Zeabur 的檔案介面。
+
+CSS 與 JS 的載入（`wp_enqueue_style` / `wp_enqueue_script`）寫在
+`functions.php`。重生首頁時沿用 `home-main.css` / `home-main.js` 這兩個檔名，
+就完全不必動 `functions.php`。
+
+⚠️ 直接編輯正式主題檔沒有還原點。改之前先把現有 `front-page.php` 全選複製存一份。
 
 ## class 命名慣例
 

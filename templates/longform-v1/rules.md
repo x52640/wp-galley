@@ -14,8 +14,8 @@
 - 不得新增作者沒寫過的事實、數字、書名、人名或引述。
 - 不得刪掉整段內容。覺得該刪要放進 `changes` 說明理由，由使用者決定。
 - 不得在正文開頭再放一次標題。標題由佈景主題輸出。
-- 不得輸出 `<h1>`、`<h2>`、`<script>`、`<style>`、`<iframe>`、`<div>`、`<span>`
-  或任何行內樣式（`style=`）。
+- 不得輸出 `<h1>`、`<h4>` 以下的標題、`<script>`、`<style>`、`<iframe>`、
+  `<div>`、`<span>` 或任何行內樣式（`style=`）。
 - 不得輸出網站的版面 class。只能用下面列出的 class。
 
 ## 正文可以用的 HTML
@@ -23,15 +23,18 @@
 | 用途 | 寫法 |
 | --- | --- |
 | 段落 | `<p class="wp-block-paragraph">…</p>` |
+| 大章節標題 | `<h2 class="wp-block-heading">…</h2>` |
 | 小節標題 | `<h3 class="wp-block-heading has-medium-font-size"><strong>…</strong></h3>` |
+| 分隔線 | `<hr class="wp-block-separator" />` |
 | 項目清單 | `<ul class="wp-block-list"><li>…</li></ul>` |
 | 編號清單 | `<ol class="wp-block-list"><li>…</li></ol>` |
 | 連結 | `<a href="https://…">…</a>` |
 | 強調 | `<strong>…</strong>`、`<em>…</em>` |
 | 引用 | `<blockquote>…</blockquote>` |
 
-**標題階層只有 `h3`。** 這個網站現有的文章沒有用過 `h2`，不要引入。
-需要更多層次時改用段落加 `<strong>` 開頭，或重新組織內容。
+**標題階層只有 `h2` 與 `h3`。** 大章節用 `h2`，章節內的小節用 `h3`。
+不要用 `h1`（標題由佈景主題輸出）或 `h4` 以下。需要更多層次時改用段落加
+`<strong>` 開頭，或重新組織內容。
 
 連結只接受 `https:`、`http:`、`mailto:`。
 

@@ -4,6 +4,8 @@ import { buildApp } from '../src/server/app.js';
 import { isAllowedHost, isAllowedOrigin, isLoopbackAddress } from '../src/server/plugins/local-only.js';
 import { loadConfig } from '../src/config/env.js';
 import { createTestDatabase } from './helpers/test-db.js';
+import { loadTemplateRegistry } from '../src/templates/registry.js';
+import { paths } from '../src/config/paths.js';
 
 let app: FastifyInstance;
 const db = createTestDatabase();
@@ -12,6 +14,7 @@ beforeAll(async () => {
   app = await buildApp({
     config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'silent' }),
     db: db.handle,
+    templates: await loadTemplateRegistry(paths.templates),
   });
   await app.ready();
 });

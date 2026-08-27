@@ -5,40 +5,128 @@
   "strictness": "hybrid",
   "wordpressTargetKey": "read-think",
   "publishSlot": "body",
-  "requiredSlots": ["title", "body"],
-  "optionalSlots": ["slug", "tags", "featuredImageBriefKey"],
+  "requiredSlots": [
+    "title",
+    "body"
+  ],
+  "optionalSlots": [
+    "slug",
+    "tags",
+    "featuredImageBriefKey"
+  ],
   "allowedTags": [
-    "p", "h3", "ul", "ol", "li", "a", "strong", "em",
-    "blockquote", "figure", "figcaption", "img", "br"
+    "p",
+    "h2",
+    "h3",
+    "ul",
+    "ol",
+    "li",
+    "a",
+    "strong",
+    "em",
+    "blockquote",
+    "figure",
+    "figcaption",
+    "img",
+    "br",
+    "hr"
   ],
   "allowedAttributes": {
-    "a": ["href", "title", "target", "rel"],
-    "img": ["src", "alt", "width", "height", "class"],
-    "p": ["class"],
-    "h3": ["class"],
-    "ul": ["class"],
-    "ol": ["class"],
-    "figure": ["class"],
-    "figcaption": ["class"],
-    "blockquote": ["class"]
+    "a": [
+      "href",
+      "title",
+      "target",
+      "rel"
+    ],
+    "img": [
+      "src",
+      "alt",
+      "width",
+      "height",
+      "class"
+    ],
+    "p": [
+      "class"
+    ],
+    "h3": [
+      "class"
+    ],
+    "ul": [
+      "class"
+    ],
+    "ol": [
+      "class"
+    ],
+    "figure": [
+      "class"
+    ],
+    "figcaption": [
+      "class"
+    ],
+    "blockquote": [
+      "class"
+    ],
+    "h2": [
+      "class"
+    ],
+    "hr": [
+      "class"
+    ]
   },
   "allowedClasses": {
-    "p": ["wp-block-paragraph", "has-medium-font-size"],
-    "h3": ["wp-block-heading", "has-medium-font-size"],
-    "ul": ["wp-block-list"],
-    "ol": ["wp-block-list"],
-    "figure": [
-      "wp-block-image", "aligncenter", "alignleft", "alignright",
-      "size-large", "size-full", "size-medium", "is-resized"
+    "p": [
+      "wp-block-paragraph",
+      "has-medium-font-size"
     ],
-    "figcaption": ["wp-element-caption"],
-    "img": ["wp-image-*"]
+    "h3": [
+      "wp-block-heading",
+      "has-medium-font-size"
+    ],
+    "ul": [
+      "wp-block-list"
+    ],
+    "ol": [
+      "wp-block-list"
+    ],
+    "figure": [
+      "wp-block-image",
+      "aligncenter",
+      "alignleft",
+      "alignright",
+      "size-large",
+      "size-full",
+      "size-medium",
+      "is-resized"
+    ],
+    "figcaption": [
+      "wp-element-caption"
+    ],
+    "img": [
+      "wp-image-*"
+    ],
+    "h2": [
+      "wp-block-heading",
+      "has-medium-font-size"
+    ],
+    "hr": [
+      "wp-block-separator",
+      "has-alpha-channel-opacity",
+      "is-style-wide",
+      "is-style-default"
+    ]
   },
-  "allowedSchemes": ["https", "http", "mailto"],
+  "allowedSchemes": [
+    "https",
+    "http",
+    "mailto"
+  ],
   "structureRules": {
-    "allowedHeadingLevels": [3],
+    "allowedHeadingLevels": [
+      2,
+      3
+    ],
     "requireTopLevelBlocks": true,
-    "maxNestingDepth": 3
+    "maxNestingDepth": 4
   },
   "previewStrategy": "local"
 }

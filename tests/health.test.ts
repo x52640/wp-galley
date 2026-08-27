@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
 import { loadConfig } from '../src/config/env.js';
 import { createTestDatabase } from './helpers/test-db.js';
+import { loadTemplateRegistry } from '../src/templates/registry.js';
+import { paths } from '../src/config/paths.js';
 
 const SECRET = 'aaaa bbbb cccc dddd';
 const db = createTestDatabase();
@@ -19,6 +21,7 @@ beforeAll(async () => {
       WORDPRESS_APP_PASSWORD: SECRET,
     }),
     db: db.handle,
+    templates: await loadTemplateRegistry(paths.templates),
   });
   // 必須在 ready() 之前註冊。
   app.get('/api/__boom', async () => {
@@ -40,7 +43,8 @@ describe('GET /api/health', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.status).toBe('ok');
-    expect(body.stage).toBe(1);
+    expect(body.stage).toBe(2);
+    expect(body.templates).toHaveLength(2);
     expect(body.database.ok).toBe(true);
     expect(body.database.migrations).toBeGreaterThan(0);
   });

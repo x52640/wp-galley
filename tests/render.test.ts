@@ -123,10 +123,29 @@ describe('正文清理', () => {
 });
 
 describe('hybrid 的結構規則（長文）', () => {
-  it('用了 h2 就拒絕', () => {
+  it('允許 h2 與 h3', () => {
+    const r = renderRevision(
+      registry.get('longform-v1'),
+      { ...longformData, body: '<h2 class="wp-block-heading">章</h2><h3>節</h3><p>字</p>' },
+      ctx,
+    );
+    expect(r.publishHtml).toContain('<h2');
+    expect(r.publishHtml).toContain('<h3');
+  });
+
+  it('用了 h4 就拒絕', () => {
     expect(() =>
-      renderRevision(registry.get('longform-v1'), { ...longformData, body: '<h2>不准</h2><p>字</p>' }, ctx),
-    ).toThrow(/h2|標題/);
+      renderRevision(registry.get('longform-v1'), { ...longformData, body: '<h4>太細</h4><p>字</p>' }, ctx),
+    ).toThrow(/h4|標題/);
+  });
+
+  it('允許 hr 當分隔線', () => {
+    const r = renderRevision(
+      registry.get('longform-v1'),
+      { ...longformData, body: '<p>上</p><hr class="wp-block-separator" /><p>下</p>' },
+      ctx,
+    );
+    expect(r.publishHtml).toContain('<hr');
   });
 
   it('日記是 flexible，不套結構規則', () => {
