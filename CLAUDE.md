@@ -4,10 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 目前狀態
 
-**階段 1／7 已完成**（安全本機骨架）。`IMPLEMENTATION_PLAN.md`（繁中）定義了範圍、安全規則、七階段順序與每階段驗收條件，是本專案的唯一真實來源；**動工前先讀它**。本檔只摘要跨檔案才看得出來的重點與硬性限制。
+**階段 1–3／7 已完成。下一步是階段 4（WordPress REST 與媒體流程）。**
 
-已實作：`src/config`（設定驗證＋秘密遮蔽）、`src/db`（SQLite migration）、`src/server`（Fastify、本機守門、health、錯誤格式）、`src/ui`（診斷頁）。
-還是空目錄：`src/core`、`src/agents`、`src/templates`、`src/wordpress`、`src/media`、`src/preview`、`src/mcp`、`templates/`。
+| 階段 | 內容 | 狀態 |
+| --- | --- | --- |
+| 1 | 安全本機骨架 | ✅ |
+| 2 | 模板 registry 與決定性渲染器 | ✅ |
+| 3 | 訂閱式 Agent 適配器 | ✅ 三家實測端到端通過 |
+| 4 | WordPress REST 與媒體流程 | ⬜ 需要使用者提供 Application Password |
+| 5 | 發布台端到端 UI | ⬜ |
+| 6 | MCP 與共用核心 | ⬜ |
+| 7 | 測試、文件與交付 | ⬜ |
+
+`IMPLEMENTATION_PLAN.md`（繁中）是原始計畫，但**有兩處已被實測推翻**，以
+`docs/SITE-FINDINGS.md` 為準：首頁移出 MVP、模板只負責正文。
+`docs/AGENT-CLI-PROBE.md` 記錄三個 CLI 的實際參數與踩過的坑。
+
+已實作：`src/config` `src/db` `src/server` `src/templates` `src/preview`
+`src/core` `src/agents` `src/ui`（診斷頁）。
+還是空目錄：`src/wordpress`（階段 4）、`src/media`（階段 4）、`src/mcp`（階段 6）。
+
+## 開始階段 4 前要跟使用者拿的東西
+
+1. 專用 WordPress 使用者名稱 + Application Password（Author 或 Editor，不可用 Administrator）
+2. 有沒有 staging site——沒有的話先全部用 mock，最後只拿一篇指定草稿做真實驗證
+
+目標網站是 www.remusplus.com，兩個 CPT：`read-think`（長文）與 `diary`（日記），
+分類法 `read-think-tag` 與 `diary-category`，兩者 `show_in_rest` 都已開啟。
 
 ## 指令
 
@@ -35,6 +58,15 @@ SQLite 用 **Node 內建的 `node:sqlite`**（`DatabaseSync`），不是 better-
 - 新增 API 錯誤一律 `throw new AppError(code, message, status)`，回應格式固定是 `{ error: { code, message, details?, requestId } }`；5xx 對外只給通用訊息。
 - 任何要輸出的東西（log、HTTP response、未來的 MCP output）都要先過 `createSecretScrubber()`；設定摘要用 `redactConfig()`，永遠不要直接序列化 `AppConfig`。
 - migration 只能往 `src/db/migrations/` 加新檔並註冊到 `index.ts`；改動已套用的 migration 會因 checksum 不符而啟動失敗。
+- **Agent 的各家怪癖只准寫在 `src/agents/adapters/<該家>.ts` 裡**，不要滲進 `process-runner`、`output-parser` 或 `output-contract`。要在驗證前修正輸出就用 `parseAndValidate` 的 `transform` 參數。
+- 送給 CLI 的 schema 可以為相容性放寬，但**後端一定要用原始 schema 再驗一次**。放寬的只是給模型端的提示，不是驗證標準。
+- 依賴方向是 `server → preview → templates → core`，`db/templates/core/preview` 全部不得 import Fastify 或 HTTP。改動前先跑一次依賴檢查。
+
+## 測試守則
+
+- 測試**絕不呼叫真實 Agent CLI**（會消耗使用者訂閱額度）。一律用 `tests/helpers/fake-adapter.ts`。
+- 真實 CLI 只在每階段收尾時手動驗收一次，腳本放 scratchpad 不進 repo。
+- 每階段除了單元測試，都要拿**真實資料**實跑一次（45 篇文章、真實 CLI）——階段 2 就是這樣抓到「h2 沒人用」是錯的結論。
 
 ## 架構要點
 
