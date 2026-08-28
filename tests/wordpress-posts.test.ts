@@ -114,7 +114,7 @@ describe('更新前的遠端變動偵測', () => {
     const remote = postBody();
     mock = await startMockWordPress((req): MockResponse => ({ body: req.method === 'GET' ? remote : postBody() }));
 
-    const expected = snapshotOf(remote as never);
+    const expected = snapshotOf(remote as never, TARGET.taxonomy);
     await updateDraft(clientFor(mock), TARGET, 1839, FIELDS, { expect: expected });
 
     expect(mock.requests[0]!.method).toBe('GET'); // 先重讀
@@ -127,7 +127,7 @@ describe('更新前的遠端變動偵測', () => {
     mock = await startMockWordPress((req): MockResponse => ({ body: req.method === 'GET' ? changed : changed }));
 
     await expect(
-      updateDraft(clientFor(mock), TARGET, 1839, FIELDS, { expect: snapshotOf(loaded as never) }),
+      updateDraft(clientFor(mock), TARGET, 1839, FIELDS, { expect: snapshotOf(loaded as never, TARGET.taxonomy) }),
     ).rejects.toBeInstanceOf(RemoteChangedError);
 
     // 只有那一次重讀，沒有任何寫入。
@@ -141,7 +141,7 @@ describe('更新前的遠端變動偵測', () => {
     mock = await startMockWordPress(() => ({ body: changed }));
 
     const error = await updateDraft(clientFor(mock), TARGET, 1839, FIELDS, {
-      expect: snapshotOf(loaded as never),
+      expect: snapshotOf(loaded as never, TARGET.taxonomy),
     }).catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(RemoteChangedError);
@@ -152,7 +152,7 @@ describe('更新前的遠端變動偵測', () => {
     mock = await startMockWordPress(() => ({ body: postBody() }));
     const createOnly = PublishTargetSchema.parse({ ...TARGET, allowUpdate: false });
     await expect(
-      updateDraft(clientFor(mock), createOnly, 1839, FIELDS, { expect: snapshotOf(postBody() as never) }),
+      updateDraft(clientFor(mock), createOnly, 1839, FIELDS, { expect: snapshotOf(postBody() as never, TARGET.taxonomy) }),
     ).rejects.toThrow('不允許更新既有內容');
     expect(mock.requests).toHaveLength(0);
   });
@@ -166,7 +166,7 @@ describe('狀態變更', () => {
     }));
 
     const result = await setStatus(clientFor(mock), TARGET, 1839, 'publish', {
-      expect: snapshotOf(remote as never),
+      expect: snapshotOf(remote as never, TARGET.taxonomy),
     });
 
     expect(mock.requests[0]!.method).toBe('GET');
@@ -178,8 +178,51 @@ describe('狀態變更', () => {
     const loaded = postBody();
     mock = await startMockWordPress(() => ({ body: postBody({ modified_gmt: '2026-08-28T09:00:00' }) }));
     await expect(
-      setStatus(clientFor(mock), TARGET, 1839, 'publish', { expect: snapshotOf(loaded as never) }),
+      setStatus(clientFor(mock), TARGET, 1839, 'publish', { expect: snapshotOf(loaded as never, TARGET.taxonomy) }),
     ).rejects.toBeInstanceOf(RemoteChangedError);
     expect(mock.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+  });
+});
+
+describe('快照比對的欄位涵蓋 buildPayload 會覆寫的每一個', () => {
+  /**
+   * 只比 modified_gmt 與內容 hash 是不夠的：我們每次更新都會覆寫標題、網址代稱、
+   * 精選圖片與分類。少比一個，別人在那個欄位上的修改就會被無聲蓋掉。
+   */
+  const cases: { name: string; changed: Record<string, unknown>; field: string }[] = [
+    { name: '標題', changed: { title: { raw: '別人改的', rendered: '別人改的' } }, field: '標題' },
+    { name: '網址代稱', changed: { slug: 'someone-else' }, field: '網址代稱' },
+    { name: '精選圖片', changed: { featured_media: 42 }, field: '精選圖片' },
+    { name: '狀態', changed: { status: 'publish' }, field: '狀態' },
+    { name: '分類', changed: { 'diary-category': [7] }, field: '分類' },
+  ];
+
+  for (const testCase of cases) {
+    it(`遠端只改了${testCase.name}也偵測得到`, async () => {
+      const loaded = postBody({ 'diary-category': [1, 2] });
+      const changed = postBody({ 'diary-category': [1, 2], ...testCase.changed });
+      mock = await startMockWordPress(() => ({ body: changed }));
+
+      const error = await updateDraft(clientFor(mock), TARGET, 1839, FIELDS, {
+        expect: snapshotOf(loaded as never, TARGET.taxonomy),
+      }).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(RemoteChangedError);
+      expect((error as RemoteChangedError).changedFields.join('')).toContain(testCase.field);
+      expect(mock.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+    });
+  }
+
+  it('分類的順序不影響比對（我們沒改它就不算改動）', async () => {
+    const loaded = postBody({ 'diary-category': [2, 1] });
+    mock = await startMockWordPress((req): MockResponse => ({
+      body: req.method === 'GET' ? postBody({ 'diary-category': [1, 2] }) : postBody(),
+    }));
+
+    await expect(
+      updateDraft(clientFor(mock), TARGET, 1839, FIELDS, {
+        expect: snapshotOf(loaded as never, TARGET.taxonomy),
+      }),
+    ).resolves.toBeDefined();
   });
 });

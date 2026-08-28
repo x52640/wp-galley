@@ -51,7 +51,7 @@ export function App(): JSX.Element {
       {fixtures && (
         <div className="fixture-bar" role="status">
           <Icon name="alert" size={14} />
-          <span>示範資料模式：畫面上的 job 都是假的，不會連到 WordPress。</span>
+          <span>示範資料模式：畫面上的稿件都是假的，不會連到 WordPress。</span>
           <button
             type="button"
             className="btn btn-quiet btn-tiny"

@@ -83,6 +83,8 @@ export interface WordPressObjectRow {
   readonly link: string | null;
   readonly remote_hash: string | null;
   readonly remote_modified_gmt: string | null;
+  /** 完整的 RemoteSnapshot（JSON）。null 代表這一列還沒有比對基準。 */
+  readonly remote_snapshot_json: string | null;
   readonly last_synced_at: string;
 }
 
@@ -484,6 +486,8 @@ export class Repository {
     link: string | null;
     remoteHash: string | null;
     remoteModifiedGmt: string | null;
+    /** 完整快照的 JSON。沒有就寫 null，代表「沒有比對基準」。 */
+    remoteSnapshotJson?: string | null;
   }): WordPressObjectRow {
     const existing = this.db
       .prepare('SELECT * FROM wordpress_objects WHERE object_type = ? AND wordpress_id = ?')
@@ -494,7 +498,7 @@ export class Repository {
         .prepare(`
           UPDATE wordpress_objects
           SET site_id = ?, job_id = ?, status = ?, link = ?, remote_hash = ?, remote_modified_gmt = ?,
-              last_synced_at = datetime('now')
+              remote_snapshot_json = ?, last_synced_at = datetime('now')
           WHERE id = ?
         `)
         .run(
@@ -504,6 +508,7 @@ export class Repository {
           input.link,
           input.remoteHash,
           input.remoteModifiedGmt,
+          input.remoteSnapshotJson ?? null,
           existing.id,
         );
       return this.wordpressObjectById(existing.id)!;
@@ -512,8 +517,9 @@ export class Repository {
     const result = this.db
       .prepare(`
         INSERT INTO wordpress_objects
-          (site_id, job_id, object_type, wordpress_id, status, link, remote_hash, remote_modified_gmt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (site_id, job_id, object_type, wordpress_id, status, link, remote_hash, remote_modified_gmt,
+           remote_snapshot_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         input.siteId,
@@ -524,6 +530,7 @@ export class Repository {
         input.link,
         input.remoteHash,
         input.remoteModifiedGmt,
+        input.remoteSnapshotJson ?? null,
       );
     return this.wordpressObjectById(rowId(result))!;
   }

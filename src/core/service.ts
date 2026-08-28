@@ -17,9 +17,19 @@ import {
   WordPressUnavailableError,
 } from './errors.js';
 import { escapeHtml, insertBlockAfter, removeBlocksWhere, replaceBlocksWhere, splitTopLevelBlocks } from './html-blocks.js';
-import { Repository, type AgentRunStatus, type EventActor, type JobRow, type MediaAssetRow, type RevisionOrigin, type RevisionRow } from './repository.js';
+import {
+  Repository,
+  type AgentRunStatus,
+  type ApprovalRow,
+  type EventActor,
+  type JobRow,
+  type MediaAssetRow,
+  type RevisionOrigin,
+  type RevisionRow,
+  type WordPressObjectRow,
+} from './repository.js';
 import { buildTemplateDataFromSource } from './source-text.js';
-import { assertTransition, canTransition, isTerminal, type JobState } from './state-machine.js';
+import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
 import { createSecretScrubber, type Scrubber } from '../config/secrets.js';
 import { paths } from '../config/paths.js';
@@ -37,6 +47,7 @@ import { toBlockMarkup } from '../wordpress/blocks.js';
 import {
   assertUnchanged,
   createDraft,
+  fetchSnapshot,
   setStatus,
   snapshotOf,
   updateDraft,
@@ -253,6 +264,26 @@ interface RevisionPayload {
   readonly featuredMediaAssetId: number | null;
 }
 
+/**
+ * 一次發布的前置檢查結果。
+ *
+ * 存在的理由是「檢查完到動手之間會經過網路」：讀遠端要幾百毫秒，那段時間裡
+ * 另一個請求可以建新 revision、撤銷核准、或取消整個 job。所以前置檢查被做成一個
+ * **可以重跑的純讀取函式**，讀完遠端之後再跑一次，比對兩次拿到的是不是同一版、
+ * 同一張核准，一致才動手。任何一個欄位被快取起來重用，那個欄位就是一個 TOCTOU 洞。
+ */
+interface PublishPlan {
+  readonly job: JobRow;
+  readonly approval: ApprovalRow;
+  readonly revisionRow: RevisionRow;
+  readonly payload: RevisionPayload;
+  readonly featured: MediaAssetRow | null;
+  readonly existing: WordPressObjectRow | null;
+  /** 要更新的既有物件 ID；null 代表這次是建立新的。 */
+  readonly targetId: number | null;
+  readonly creating: boolean;
+}
+
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -290,6 +321,15 @@ export class CoreService {
   private readonly templateRowIds: Map<string, number>;
   /** 進行中的 Agent 執行；程式重啟就沒了，反正子行程也一起沒了。 */
   private readonly activeRuns = new Map<string, { runId: string; provider: AgentId; rowId: number }>();
+  /**
+   * 正在發布中的 job。狀態機本身擋得住大部分的重複發布（第二次會看到 PUBLISHING），
+   * 但「讀遠端」那一段 await 發生在轉成 PUBLISHING **之前**，兩個請求可以同時通過
+   * 前置檢查。這個集合把那個空窗關掉，而且能給出比「狀態不對」更清楚的訊息。
+   *
+   * 只在同一個行程內有效——本機單使用者工具只有一個行程，跨行程的鎖留給真的有
+   * 第二個寫入者的時候再說。
+   */
+  private readonly publishing = new Set<string>();
 
   constructor(options: CoreServiceOptions) {
     this.repo = new Repository(options.db);
@@ -651,6 +691,11 @@ export class CoreService {
         throw new AgentError(message, this.scrub(result.issues));
       }
 
+      // Agent 跑了幾十秒到幾分鐘，這段時間內世界會變。套用結果之前要重新確認
+      // 「當初派工的那一版」還是現在這一版，否則 Agent 的輸出會靜靜蓋掉使用者
+      // 在等待期間做的編輯——使用者不會知道自己的修改被吃掉了。
+      this.assertAgentResultStillApplies(job.id, runRow.id, revisionRow);
+
       // Agent 給的是資料，HTML 由 renderRevision 產生；schema 在那裡再驗一次。
       const revision = this.createRevision(job.uuid, {
         origin: 'agent_review',
@@ -687,7 +732,40 @@ export class CoreService {
       }
       throw error;
     } finally {
-      this.activeRuns.delete(job.uuid);
+      // 只清掉「自己這一次」。取消之後使用者可能已經派了新的工，
+      // 無條件 delete 會把新那一筆的登記清掉，於是同時跑得起來兩個 Agent。
+      if (this.activeRuns.get(job.uuid)?.runId === runId) this.activeRuns.delete(job.uuid);
+    }
+  }
+
+  /**
+   * Agent 的結果還能不能套用。
+   *
+   * 三件事在等待期間都可能發生，套用前必須全部重新確認：
+   * 1. **已經被取消**——`AgentRegistry` 的 concurrency 是 1，`cancel()` 只碰得到
+   *    已經開跑的那一個；排在佇列裡才被取消的那一個照樣會跑完並回來。沒有這道
+   *    檢查，使用者按過取消還是會拿到一個新版本。
+   * 2. **內容被改過**——派工時記下的 input hash 如果已經不是目前這一版，
+   *    套用就等於拿舊稿蓋掉新稿。這時候寧可整份退回，讓使用者重新派工。
+   * 3. **job 已經不能改**（發布中、已發布、已取消）。
+   */
+  private assertAgentResultStillApplies(jobId: number, runRowId: number, dispatchedOn: RevisionRow): void {
+    const runRow = this.repo.agentRunById(runRowId);
+    if (runRow !== null && runRow.status !== 'running') {
+      throw new AgentError(`這次校稿已經是 ${runRow.status}，結果不套用`);
+    }
+
+    const fresh = this.repo.jobById(jobId);
+    if (!fresh) throw new AgentError('工作項目在 Agent 執行期間被刪除了，結果不套用');
+    this.assertMutable(fresh);
+
+    const latest = this.repo.latestRevision(jobId);
+    if (latest === null || latest.id !== dispatchedOn.id || latest.content_hash !== dispatchedOn.content_hash) {
+      throw new ContentChangedError(
+        '內容在 Agent 執行期間被改過了，這次校稿的結果是對著舊版做的，已經丟棄。' +
+          '請確認目前的內容之後重新派工。',
+        { dispatchedOn: dispatchedOn.content_hash, current: latest?.content_hash ?? null },
+      );
     }
   }
 
@@ -919,6 +997,7 @@ export class CoreService {
    */
   placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Revision {
     const job = this.requireJob(uuid);
+    this.assertMutable(job);
     const asset = this.requireMedia(job, assetId);
     const template = this.requireTemplate(job);
     const revisionRow = this.requireRevision(job);
@@ -929,19 +1008,43 @@ export class CoreService {
     }
 
     const currentHtml = revisionRow.rendered_html ?? '';
-    const blockCount = splitTopLevelBlocks(currentHtml).length;
-    if (afterBlockIndex < -1 || afterBlockIndex > blockCount) {
-      throw new InvalidInputError(`插入位置 ${afterBlockIndex} 超出範圍（目前有 ${blockCount} 個區塊）`);
+    const blocks = splitTopLevelBlocks(currentHtml);
+    const blockCount = blocks.length;
+
+    // 上限是 blockCount - 1，不是 blockCount。「插在最後一塊後面」已經是最大的
+    // 合法位置了；再多一格從來就不存在，以前是被 insertBlockAfter 默默夾回去，
+    // 使用者以為自己指定了位置，其實系統幫他改了一個。寧可回報錯誤。
+    const maxIndex = blockCount - 1;
+    if (afterBlockIndex < -1 || afterBlockIndex > maxIndex) {
+      throw new InvalidInputError(
+        `插入位置 ${afterBlockIndex} 超出範圍（目前有 ${blockCount} 個區塊，可用的位置是 -1 到 ${maxIndex}）`,
+      );
     }
 
+    // 這張圖已經在正文裡就是「搬家」，不是「再放一張」。先把舊的拿掉再插，
+    // 否則同一張圖會出現兩次，而 toMedia() 只回報第一個，畫面上完全看不出來。
+    const marker = `wp-image-${asset.wordpress_media_id}`;
+    const existingIndexes = blocks
+      .map((block, index) => (block.html.includes(marker) ? index : -1))
+      .filter((index) => index >= 0);
+
+    // 被移除的區塊如果排在目標位置前面，目標位置就要往前挪同樣的格數——
+    // 使用者指的是**他現在看到的**第幾塊。
+    const removedBefore = existingIndexes.filter((index) => index <= afterBlockIndex).length;
+    const baseHtml =
+      existingIndexes.length === 0
+        ? currentHtml
+        : removeBlocksWhere(currentHtml, (block) => block.html.includes(marker)).html;
+    const targetIndex = afterBlockIndex - removedBefore;
+
     const figure = buildFigureHtml(url, asset.alt_text ?? '', asset.caption, asset.wordpress_media_id);
-    const nextBody = insertBlockAfter(currentHtml, afterBlockIndex, figure);
+    const nextBody = insertBlockAfter(baseHtml, targetIndex, figure);
     const payload = this.payloadOf(revisionRow);
 
     return this.createRevision(uuid, {
       origin: 'media',
       templateData: { ...payload.templateData, [template.manifest.publishSlot]: nextBody },
-      reason: '插入圖片',
+      reason: existingIndexes.length > 0 ? '移動圖片位置' : '插入圖片',
     });
   }
 
@@ -1015,14 +1118,164 @@ export class CoreService {
    * 五道前置檢查依序跑，**任何一項沒過就不送出任何請求**。順序是刻意的：
    * 先確認人核准過（1、2），再確認這次操作被 target 允許（3、4），
    * 最後才去讀遠端確認沒被別人改過（5）——第 5 項要連線，前四項不必。
+   *
+   * 第 5 項要等網路，而**等待就是一個空窗**：那幾百毫秒裡，另一個請求可以建新
+   * revision、撤銷核准、或整個取消 job。所以第 1、2、3 項在讀完遠端之後會**再跑
+   * 一次**，而且比對兩次拿到的是不是同一版、同一張核准——不一致就中止。
+   * 同一個 job 同時只能有一次發布在跑（`publishing`），第二次直接拒絕而不是默默跟進。
    */
   async publish(uuid: string, input: PublishInput): Promise<PublishResult> {
     const job = this.requireJob(uuid);
     const target = this.targetOf(job);
     if (!target) throw new PublishBlockedError('這個工作項目沒有綁定發布目標');
-    const template = this.templates.get(target.templateId);
+    this.templates.get(target.templateId); // 模板不見了要現在就炸，不要發到一半才發現
     const client = this.requireWordPress();
     const actor: EventActor = input.actor ?? 'ui';
+
+    if (this.publishing.has(job.uuid)) {
+      throw this.rejectPublish(job, actor, '這個工作項目已經有一次發布在進行中，等它結束再試');
+    }
+    this.publishing.add(job.uuid);
+    try {
+      return await this.runPublish(job.uuid, target, input, actor, client);
+    } finally {
+      this.publishing.delete(job.uuid);
+    }
+  }
+
+  private async runPublish(
+    uuid: string,
+    target: PublishTarget,
+    input: PublishInput,
+    actor: EventActor,
+    client: WordPressClient,
+  ): Promise<PublishResult> {
+    // 檢查 1–4。全部是讀取，所以待會兒可以原封不動重跑一次。
+    const planned = this.preflightPublish(uuid, target, input, actor);
+
+    // 5. 更新既有內容時，遠端不能在我們載入之後被改過。
+    let expect: RemoteSnapshot | null = null;
+    if (!planned.creating) {
+      expect = await this.baselineFor(client, target, planned, actor);
+      await assertUnchanged(client, target, planned.targetId!, expect);
+    }
+
+    // 讀遠端要等網路。等完之後世界可能已經不一樣了，所以重跑一次檢查，
+    // 而且**後面用的全部是重跑的結果**——沿用上面那份就等於發布一個沒被檢查過的版本。
+    const plan = this.preflightPublish(uuid, target, input, actor);
+    if (
+      plan.revisionRow.id !== planned.revisionRow.id ||
+      plan.revisionRow.content_hash !== planned.revisionRow.content_hash ||
+      plan.approval.id !== planned.approval.id
+    ) {
+      throw this.rejectPublish(
+        plan.job,
+        actor,
+        '內容或核准在檢查遠端狀態的期間變動了，這次發布已中止。請重新預覽並核准後再發布',
+      );
+    }
+
+    const { job, approval, revisionRow, payload, featured, creating, targetId } = plan;
+
+    // 前置檢查全過，才開始真的動遠端。
+    assertTransition(job.state, 'PUBLISHING');
+    this.repo.updateJobState(job.id, 'PUBLISHING');
+    this.repo.insertEvent({
+      jobId: job.id,
+      revisionId: revisionRow.id,
+      approvalId: approval.id,
+      actor,
+      eventType: 'publish',
+      status: 'started',
+      detail: this.scrub({ status: input.status, targetKey: target.key, creating }),
+    });
+
+    try {
+      const conversion = toBlockMarkup(revisionRow.rendered_html ?? '');
+      const terms = await this.resolveTargetTerms(client, target, payload.templateData);
+
+      const fields: PostFields = {
+        title: this.titleOf(payload.templateData) ?? job.title ?? '未命名',
+        content: conversion.markup,
+        ...(typeof payload.templateData['slug'] === 'string'
+          ? { slug: payload.templateData['slug'] as string }
+          : {}),
+        ...(featured?.wordpress_media_id ? { featuredMediaId: featured.wordpress_media_id } : {}),
+        ...(target.taxonomy && terms.ids.length > 0 ? { terms: { [target.taxonomy]: terms.ids } } : {}),
+      };
+
+      let post = creating
+        ? await createDraft(client, target, fields)
+        : await updateDraft(client, target, targetId!, fields, { expect: expect! });
+
+      if (input.status === 'publish') {
+        post = await setStatus(client, target, post.id, 'publish', {
+          expect: snapshotOf(post, target.taxonomy),
+        });
+      }
+
+      // 快照整包存下來，下一次更新才有東西可以比對（見 baselineFor）。
+      const snapshot = snapshotOf(post, target.taxonomy);
+      this.repo.upsertWordPressObject({
+        siteId: this.siteId,
+        jobId: job.id,
+        objectType: target.postType,
+        wordpressId: post.id,
+        status: post.status,
+        link: post.link,
+        remoteHash: snapshot.contentHash,
+        remoteModifiedGmt: snapshot.modifiedGmt,
+        remoteSnapshotJson: JSON.stringify(snapshot),
+      });
+
+      this.repo.updateJobState(job.id, 'PUBLISHED');
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: revisionRow.id,
+        approvalId: approval.id,
+        actor,
+        eventType: 'publish',
+        status: 'succeeded',
+        detail: this.scrub({ wordpressId: post.id, status: post.status, unknownTerms: terms.unknown }),
+      });
+
+      return {
+        wordpressId: post.id,
+        status: post.status,
+        link: post.link,
+        created: creating,
+        unknownTerms: [...terms.unknown],
+        fallbackBlocks: conversion.fallbackCount,
+      };
+    } catch (error) {
+      this.repo.updateJobState(job.id, 'FAILED');
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: revisionRow.id,
+        approvalId: approval.id,
+        actor,
+        eventType: 'publish',
+        status: 'failed',
+        detail: this.scrub({ message: error instanceof Error ? error.message : String(error) }),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * 發布前置檢查 1–4。**純讀取、可以重跑**，這一點是刻意的：
+   * 讀遠端之前跑一次、讀完之後再跑一次，才擋得住等待期間的變動。
+   *
+   * 每一次都從 DB 重新讀 job、核准與 revision，不接受呼叫端傳進來的快取值——
+   * 傳得進來就代表可以傳一份過期的進來。
+   */
+  private preflightPublish(
+    uuid: string,
+    target: PublishTarget,
+    input: PublishInput,
+    actor: EventActor,
+  ): PublishPlan {
+    const job = this.requireJob(uuid);
 
     // 1. 狀態必須是 APPROVED。
     if (job.state !== 'APPROVED') {
@@ -1061,97 +1314,56 @@ export class CoreService {
       throw this.rejectPublish(job, actor, `發布目標 ${target.key} 必須設定精選圖片`);
     }
 
-    // 5. 更新既有文章時，遠端不能在我們載入之後被改過。
-    let expect: RemoteSnapshot | null = null;
-    if (!creating) {
-      expect = {
-        id: targetId,
-        status: existing?.status ?? 'draft',
-        modifiedGmt: existing?.remote_modified_gmt ?? null,
-        contentHash: existing?.remote_hash ?? '',
-      };
-      await assertUnchanged(client, target, targetId, expect);
-    }
+    return { job, approval, revisionRow, payload, featured, existing, targetId, creating };
+  }
 
-    // 前置檢查全過，才開始真的動遠端。
-    assertTransition(job.state, 'PUBLISHING');
-    this.repo.updateJobState(job.id, 'PUBLISHING');
-    this.repo.insertEvent({
-      jobId: job.id,
-      revisionId: revisionRow.id,
-      approvalId: approval.id,
-      actor,
-      eventType: 'publish',
-      status: 'started',
-      detail: this.scrub({ status: input.status, targetKey: target.key, creating }),
+  /**
+   * 更新既有內容時要拿來比對的基準快照。
+   *
+   * 只有**我們自己寫過**那個物件之後才會有基準。綁定 `fixedObjectId` 的 target
+   * （首頁那一類）第一次發布時沒有——以前這裡塞一個空字串當 content hash，跟任何
+   * 真實的 SHA-256 都不會相等，於是第一次更新永遠失敗，訊息還說「遠端被改過了」，
+   * 是純粹的誤報。
+   *
+   * 正確的做法不是「沒有基準就照發」——那等於不管線上是什麼都蓋掉，正是首頁最不能
+   * 出的事。改成：把遠端現況抓下來存成基準，然後**中止這一次**並說清楚原因。
+   * 使用者確認過線上那份確實可以覆蓋，再按一次發布，第二次就有真正的變動偵測了。
+   */
+  private async baselineFor(
+    client: WordPressClient,
+    target: PublishTarget,
+    plan: PublishPlan,
+    actor: EventActor,
+  ): Promise<RemoteSnapshot> {
+    const targetId = plan.targetId!;
+    const existing = plan.existing;
+
+    const stored =
+      existing !== null && existing.wordpress_id === targetId
+        ? parseSnapshot(existing.remote_snapshot_json, targetId)
+        : null;
+    if (stored !== null) return stored;
+
+    const snapshot = await fetchSnapshot(client, target, targetId, target.taxonomy);
+    this.repo.upsertWordPressObject({
+      siteId: this.siteId,
+      jobId: plan.job.id,
+      objectType: target.postType,
+      wordpressId: targetId,
+      status: snapshot.status,
+      link: existing?.link ?? null,
+      remoteHash: snapshot.contentHash,
+      remoteModifiedGmt: snapshot.modifiedGmt,
+      remoteSnapshotJson: JSON.stringify(snapshot),
     });
 
-    try {
-      const conversion = toBlockMarkup(revisionRow.rendered_html ?? '');
-      const terms = await this.resolveTargetTerms(client, target, payload.templateData);
-
-      const fields: PostFields = {
-        title: this.titleOf(payload.templateData) ?? job.title ?? '未命名',
-        content: conversion.markup,
-        ...(typeof payload.templateData['slug'] === 'string'
-          ? { slug: payload.templateData['slug'] as string }
-          : {}),
-        ...(featured?.wordpress_media_id ? { featuredMediaId: featured.wordpress_media_id } : {}),
-        ...(target.taxonomy && terms.ids.length > 0 ? { terms: { [target.taxonomy]: terms.ids } } : {}),
-      };
-
-      let post = creating
-        ? await createDraft(client, target, fields)
-        : await updateDraft(client, target, targetId, fields, { expect: expect! });
-
-      if (input.status === 'publish') {
-        post = await setStatus(client, target, post.id, 'publish', { expect: snapshotOf(post) });
-      }
-
-      const snapshot = snapshotOf(post);
-      this.repo.upsertWordPressObject({
-        siteId: this.siteId,
-        jobId: job.id,
-        objectType: target.postType,
-        wordpressId: post.id,
-        status: post.status,
-        link: post.link,
-        remoteHash: snapshot.contentHash,
-        remoteModifiedGmt: snapshot.modifiedGmt,
-      });
-
-      this.repo.updateJobState(job.id, 'PUBLISHED');
-      this.repo.insertEvent({
-        jobId: job.id,
-        revisionId: revisionRow.id,
-        approvalId: approval.id,
-        actor,
-        eventType: 'publish',
-        status: 'succeeded',
-        detail: this.scrub({ wordpressId: post.id, status: post.status, unknownTerms: terms.unknown }),
-      });
-
-      return {
-        wordpressId: post.id,
-        status: post.status,
-        link: post.link,
-        created: creating,
-        unknownTerms: [...terms.unknown],
-        fallbackBlocks: conversion.fallbackCount,
-      };
-    } catch (error) {
-      this.repo.updateJobState(job.id, 'FAILED');
-      this.repo.insertEvent({
-        jobId: job.id,
-        revisionId: revisionRow.id,
-        approvalId: approval.id,
-        actor,
-        eventType: 'publish',
-        status: 'failed',
-        detail: this.scrub({ message: error instanceof Error ? error.message : String(error) }),
-      });
-      throw error;
-    }
+    throw this.rejectPublish(
+      plan.job,
+      actor,
+      `發布台還沒有 WordPress 上第 ${targetId} 號內容的比對基準，無法判斷它有沒有被別人改過。` +
+        `已經把現況記下來了（狀態 ${snapshot.status}，最後修改 ${snapshot.modifiedGmt ?? '未知'}）。` +
+        '請先確認那份內容確實可以被這次發布覆蓋，然後再按一次發布。',
+    );
   }
 
   /** 稽核紀錄。UI 的「這一步」面板與日後的除錯都靠它。 */
@@ -1416,8 +1628,15 @@ export class CoreService {
     return blockers;
   }
 
+  /**
+   * 這個 job 現在還能不能改內容。
+   *
+   * 判斷交給 `isContentMutable()`（state-machine.ts），因為那是從轉移表推出來的，
+   * 不是散在這裡的另一套規則。`PUBLISHED` 也在不可改之列——它只能轉到 `SUPERSEDED`，
+   * 沒有回到 `RENDERED` 的路，改了內容核准就退不回去了。
+   */
   private assertMutable(job: JobRow): void {
-    if (isTerminal(job.state) || job.state === 'PUBLISHING') {
+    if (!isContentMutable(job.state)) {
       throw new InvalidInputError(`工作項目目前是 ${job.state}，不能再改內容`);
     }
   }
@@ -1467,6 +1686,45 @@ export class CoreService {
 }
 
 // --- 純函式 -----------------------------------------------------------------
+
+/**
+ * 讀回存下來的遠端快照。
+ *
+ * 讀不出來、形狀不對、或 id 對不上就回傳 null——也就是「沒有比對基準」。
+ * 硬湊一份殘缺的基準出來比對，會變成隨機的假衝突或隨機的漏偵測，兩種都比誠實地
+ * 說「沒有基準」糟。
+ */
+function parseSnapshot(json: string | null, expectedId: number): RemoteSnapshot | null {
+  if (json === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const value = parsed as Partial<RemoteSnapshot>;
+  if (
+    value.id !== expectedId ||
+    typeof value.status !== 'string' ||
+    typeof value.contentHash !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.slug !== 'string' ||
+    typeof value.featuredMediaId !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    status: value.status,
+    modifiedGmt: typeof value.modifiedGmt === 'string' ? value.modifiedGmt : null,
+    contentHash: value.contentHash,
+    title: value.title,
+    slug: value.slug,
+    featuredMediaId: value.featuredMediaId,
+    terms: Array.isArray(value.terms) ? [...value.terms] : null,
+  };
+}
 
 /**
  * 圖片區塊。class 全部在模板 allowlist 裡（見各模板的 manifest.json），

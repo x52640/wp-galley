@@ -206,6 +206,14 @@ export interface CreateRevisionInput {
   /** null = 清除精選圖片；不給 = 沿用。 */
   featuredMediaId?: number | null;
   reason?: string;
+  /**
+   * 這次編輯是根據哪一版算出來的（那一版的 content hash）。
+   *
+   * `templateData` 是**整份取代**，所以兩個面板各自送出時，晚到的那一份會把先
+   * 到的欄位蓋掉。帶上這個值，後端就能在對不上時直接拒絕，而不是默默覆蓋。
+   * 後端還沒支援時會被 zod 忽略（不會報錯），畫面行為不變。
+   */
+  expectedContentHash?: string;
 }
 
 export interface AgentReviewInput {
@@ -276,6 +284,13 @@ export interface PublisherApi {
   render(uuid: string): Promise<RenderOutcome>;
   /** 預覽 HTML 的原始碼。iframe 用 srcdoc 載入，見 ProofView 的說明。 */
   fetchPreview(uuid: string): Promise<string>;
+  /**
+   * 校樣回應的 ETag，也就是**後端當下算出來的** content hash。
+   *
+   * 核准要綁的是使用者眼睛看到的那一份，而 `GET /api/jobs/:uuid` 的 hash 有可能
+   * 已經比校樣新（或舊）。拿不到 ETag 時回 null，代表「無法確認」。
+   */
+  fetchPreviewHash(uuid: string): Promise<string | null>;
 
   runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   cancelAgent(uuid: string): Promise<void>;

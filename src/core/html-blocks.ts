@@ -43,6 +43,18 @@ function textOf(node: Node): string {
 }
 
 /**
+ * 出現在頂層時要併進同一個段落，而不是各自成為一個區塊。
+ *
+ * 這份清單是**唯一**的一份：`wordpress/block-parse.ts` 直接 import 它。
+ * 兩邊各自維護一份的話，預覽數出來的區塊數就會跟發布出去的區塊數不一樣，
+ * 校對符號與「插在第幾塊後面」又會標錯段。
+ */
+export const INLINE_TAGS: ReadonlySet<string> = new Set([
+  'a', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'span', 'br',
+  'sub', 'sup', 'small', 'mark', 'abbr', 'cite', 'q', 'time', 'del', 'ins',
+]);
+
+/**
  * 拆成頂層區塊。裸文字節點（沒被段落包住）也算一個區塊，
  * 否則 flexible 模式下的內容會憑空少掉一段，索引就全錯了。
  */
@@ -72,6 +84,68 @@ export function splitTopLevelBlocks(html: string): TopLevelBlock[] {
 /** 比對用的正規化：摺疊空白。中文標點與英文字母都原樣保留。 */
 export function normalizeText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 把頂層的裸文字與行內標籤包進 `<p>`，讓正文的頂層節點**全部都是元素**。
+ *
+ * 為什麼一定要做：同一份正文有三套人在數「第幾個區塊」——
+ *   1. `splitTopLevelBlocks()`：文字節點也算一塊
+ *   2. 前端量的 `body.children`：文字節點不算
+ *   3. `toBlockMarkup()`：連續的裸文字與行內標籤會被併成**一個**段落區塊
+ * 三套數出來不一樣，校對符號就會標到隔壁段，圖片也會插錯位置。
+ *
+ * 修法選在渲染這一端而不是改任何一套數法：包起來之後三套自然一致，
+ * 而且預覽會更誠實——使用者看到的段落就是實際會發布出去的段落。
+ * 分組規則刻意跟 `block-parse.ts` 的 `parseNodes` 一模一樣。
+ *
+ * 沒有東西需要包時**原樣回傳**，不重新序列化——否則既有內容的 content hash
+ * 會因為空白與屬性引號的正規化而平白改變，核准就全部失效了。
+ */
+export function wrapBareTopLevelText(html: string): string {
+  const fragment = parseFragment(html) as unknown as Node;
+  const children = childrenOf(fragment);
+
+  const needsWrapping = children.some((child) => {
+    if (child.nodeName === '#text') {
+      return (child as DefaultTreeAdapterMap['textNode']).value.trim().length > 0;
+    }
+    return isElement(child) && INLINE_TAGS.has((child as DefaultTreeAdapterMap['element']).tagName);
+  });
+  if (!needsWrapping) return html;
+
+  const out: string[] = [];
+  let inline: string[] = [];
+
+  const flush = (): void => {
+    const joined = inline.join('').trim();
+    inline = [];
+    if (joined.length > 0) out.push(`<p class="wp-block-paragraph">${joined}</p>`);
+  };
+
+  for (const child of children) {
+    if (child.nodeName === '#text') {
+      const value = (child as DefaultTreeAdapterMap['textNode']).value;
+      // 區塊之間的空白是排版；一段行內內容中間的空白有意義，要留著。
+      if (value.trim().length === 0) {
+        if (inline.length > 0) inline.push(value);
+        continue;
+      }
+      inline.push(escapeTextNode(value));
+      continue;
+    }
+
+    if (isElement(child) && INLINE_TAGS.has((child as DefaultTreeAdapterMap['element']).tagName)) {
+      inline.push(serializeOuter(child as DefaultTreeAdapterMap['element']));
+      continue;
+    }
+
+    flush();
+    out.push(serializeOuter(child as DefaultTreeAdapterMap['element']));
+  }
+
+  flush();
+  return out.join('\n');
 }
 
 /**
@@ -122,4 +196,16 @@ const ESCAPES: Record<string, string> = {
 /** 純文字 → HTML 文字節點／屬性值。 */
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ESCAPES[char] ?? char);
+}
+
+/**
+ * 文字節點 → HTML。只動 `& < >`，引號原樣保留。
+ *
+ * 跟 `escapeHtml` 分開是刻意的：引號在文字節點裡沒有語意，包成 `&quot;` 會讓
+ * `wrapBareTopLevelText()` 包過的段落跟 `toBlockMarkup()` 自己併出來的段落
+ * 產生位元組差異，區塊標記就不再是同一份東西了。
+ * `wordpress/block-parse.ts` 直接 import 這一個，兩邊只有一份實作。
+ */
+export function escapeTextNode(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

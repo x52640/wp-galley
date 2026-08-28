@@ -27,6 +27,14 @@ export class FakeAdapter implements AgentAdapter {
       result?: AgentResult<unknown>;
       delayMs?: number;
       models?: ModelOption[];
+      /**
+       * 在「Agent 已經開跑、結果還沒回來」的那一刻執行。
+       *
+       * 用來模擬真實世界唯一會發生但很難重現的事：Agent 跑那幾十秒裡，
+       * 使用者去改了內容、或按了取消。真實 CLI 一次要花好幾分鐘又會消耗訂閱額度，
+       * 所以那個時間窗只能這樣測。
+       */
+      onRun?: (runId: string) => void | Promise<void>;
     } = {},
   ) {}
 
@@ -57,6 +65,7 @@ export class FakeAdapter implements AgentAdapter {
     if (this.behaviour.delayMs) {
       await new Promise((resolve) => setTimeout(resolve, this.behaviour.delayMs));
     }
+    if (this.behaviour.onRun) await this.behaviour.onRun(runId);
     return (this.behaviour.result ?? {
       ok: true,
       data: { title: '假結果' },

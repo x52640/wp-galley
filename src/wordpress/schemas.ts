@@ -79,18 +79,28 @@ export const TermListSchema = z.array(TermSchema);
  * 文章。`date_gmt` 與 `modified_gmt` 是首頁保護與遠端變動偵測的依據
  * （計畫 §8.4）：發布前重讀一次，跟上次載入的值不一樣就代表別人改過。
  */
-export const PostSchema = z.object({
-  id: z.number().int(),
-  status: z.string(),
-  link: z.string(),
-  slug: z.string(),
-  title: RenderedField,
-  content: RenderedField,
-  excerpt: RenderedField.optional(),
-  featured_media: z.number().int().default(0),
-  date_gmt: z.string().nullable(),
-  modified_gmt: z.string().nullable(),
-});
+export const PostSchema = z
+  .object({
+    id: z.number().int(),
+    status: z.string(),
+    link: z.string(),
+    slug: z.string(),
+    title: RenderedField,
+    content: RenderedField,
+    excerpt: RenderedField.optional(),
+    featured_media: z.number().int().default(0),
+    date_gmt: z.string().nullable(),
+    modified_gmt: z.string().nullable(),
+  })
+  /**
+   * 分類法掛在文章上時，鍵名就是分類法的 slug（`diary-category`、`read-think-tag`），
+   * 那是**站台設定**，不是協定的一部分，寫不進固定欄位。留著未知鍵才讀得到它們——
+   * 遠端變動偵測要比對分類，被 zod 剝掉就永遠比不出分類被改過。
+   *
+   * 只是「留著」，不是「信任」：讀取一律指名鍵（見 posts.ts 的 `termsOf`），
+   * 不會有任何程式去遍歷外掛塞進來的東西。
+   */
+  .catchall(z.unknown());
 
 export type Post = z.infer<typeof PostSchema>;
 

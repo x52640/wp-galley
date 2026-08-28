@@ -87,10 +87,13 @@ export function StepPanel({
   job,
   refresh,
   blocks,
+  previewHash,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
   blocks: { index: number; text: string }[];
+  /** 校樣回應的 ETag。核准面板拿它跟稿件的 hash 對帳，null = 無法確認。 */
+  previewHash: string | null;
 }): JSX.Element {
   const primary = primaryPanel(job.state);
   const [open, setOpen] = useState<PanelKey | null>(primary);
@@ -134,7 +137,9 @@ export function StepPanel({
             {card.key === 'agent' && <AgentPanel job={job} refresh={refresh} />}
             {card.key === 'media' && <MediaPanel job={job} refresh={refresh} blocks={blocks} />}
             {card.key === 'taxonomy' && <TaxonomyPanel job={job} refresh={refresh} />}
-            {card.key === 'approve' && <ApprovePanel job={job} refresh={refresh} />}
+            {card.key === 'approve' && (
+              <ApprovePanel job={job} refresh={refresh} previewHash={previewHash} />
+            )}
             {card.key === 'publish' && <PublishPanel job={job} refresh={refresh} />}
           </PanelCard>
         ))}

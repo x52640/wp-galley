@@ -32,7 +32,7 @@ interface FixtureJob extends JobDetail {
  * 尤其是「印章被撕掉」這種很難在真實流程裡湊出來的狀態。
  *
  * 加 `?fixtures=1` 開啟。開啟時畫面上方永遠掛一條橫幅，不會有人把示範資料
- * 誤認成真的 job。
+ * 誤認成真的稿件。
  */
 
 const DIARY_TARGET: JobTarget = {
@@ -368,7 +368,7 @@ function clone<T>(value: T): T {
 
 function mustGet(uuid: string): FixtureJob {
   const job = store.get(uuid);
-  if (!job) throw new Error(`示範資料裡沒有這個 job：${uuid}`);
+  if (!job) throw new Error(`示範資料裡沒有這篇稿件：${uuid}`);
   return job;
 }
 
@@ -487,6 +487,12 @@ export const fixtureApi: PublisherApi = {
   async fetchPreview(uuid: string) {
     await delay(160);
     return previewDocument(mustGet(uuid));
+  },
+
+  // 示範資料沒有真的 HTTP 回應，校樣一定是照目前這一版畫的，所以直接回它的 hash。
+  async fetchPreviewHash(uuid: string) {
+    await delay(60);
+    return mustGet(uuid).currentRevision?.contentHash ?? null;
   },
 
   async runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult> {

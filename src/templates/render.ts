@@ -4,6 +4,7 @@ import { sanitizeBody, type SanitizeReport } from './sanitize.js';
 import { validateStructure } from './structure.js';
 import { validateAgainstSchema } from './schema-validator.js';
 import { computeRevisionHash } from '../core/content-hash.js';
+import { wrapBareTopLevelText } from '../core/html-blocks.js';
 
 /**
  * 決定性渲染器。
@@ -74,7 +75,9 @@ export function renderRevision(
     throw new RenderError(`publishSlot 欄位 ${manifest.publishSlot} 必須是字串`, [manifest.publishSlot]);
   }
   const sanitizeReport = sanitizeBody(rawBody, manifest);
-  const publishHtml = sanitizeReport.html.trim();
+  // 頂層的裸文字包成段落。預覽與發布用的是同一份 HTML，所以「使用者看到幾段」
+  // 與「WordPress 收到幾個區塊」從這一步開始就一致（見 wrapBareTopLevelText）。
+  const publishHtml = wrapBareTopLevelText(sanitizeReport.html.trim());
 
   if (publishHtml.length === 0) {
     throw new RenderError('正文清理後變成空的，拒絕發布空內容', [

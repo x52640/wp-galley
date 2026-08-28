@@ -1,7 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { probeSite, unconfiguredProbe } from '../../wordpress/site.js';
 import { fetchPostTypes } from '../../wordpress/site.js';
 import { validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
+import { listTerms, resolveTerms } from '../../wordpress/terms.js';
+import type { WordPressClient } from '../../wordpress/client.js';
+import { AppError, errorCodes } from '../errors.js';
+import { mapCoreError } from './jobs.js';
 
 /**
  * WordPress 連線狀態 API。
@@ -37,6 +42,120 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
 
     return { ...probe, targetIssues, publishTargets: summarize(targets) };
   });
+
+  /**
+   * 分類項目清單。UI 的分類挑選器靠它，沒有它使用者只能盲打——打錯就變成
+   * 「對不上的名稱」，發布出去的文章沒有分類。
+   */
+  app.get<{ Querystring: { taxonomy?: string } }>('/api/wordpress/terms', async (request) => {
+    const taxonomy = requireKnownTaxonomy(app, request.query.taxonomy);
+    const client = requireClient(app);
+    return guard(async () => ({ terms: await listTerms(client, taxonomy) }));
+  });
+
+  /**
+   * 建立分類項目。
+   *
+   * **必須經過該 target 的 `allowCreateTerms`**（兩個 target 目前都是 false）。
+   * 這個開關存在的理由寫在 wordpress/terms.ts：自動建立近義詞會把分類變成垃圾場，
+   * 所以只有使用者在設定檔裡明確打開才准建。開放一個「反正是本機工具」的後門，
+   * 階段 6 的 MCP 就從同一個洞進來了。
+   *
+   * 實際建立走 `resolveTerms(..., { allowCreate: true })` 而不是自己寫一份 POST：
+   * 同名的既有項目會直接回傳，不會建出第二個。
+   */
+  app.post('/api/wordpress/terms', async (request, reply) => {
+    const body = parseBody(CreateTermBody, request.body);
+    const target = requireTargetForTaxonomy(app, body.taxonomy);
+    if (!target.allowCreateTerms) {
+      throw new AppError(
+        errorCodes.PUBLISH_BLOCKED,
+        `發布目標 ${target.key} 沒有開啟「可以建立新的分類項目」。` +
+          `請先在既有項目裡挑一個，或在 config/publish-targets.json 把 allowCreateTerms 改成 true。`,
+        403,
+      );
+    }
+
+    const client = requireClient(app);
+    const resolution = await guard(() =>
+      resolveTerms(client, target.taxonomy, [body.name], { allowCreate: true }),
+    );
+    const term = resolution.resolved[0]?.term;
+    if (!term) {
+      throw new AppError(errorCodes.VALIDATION_FAILED, `分類項目名稱不能是空白：${body.name}`, 400);
+    }
+
+    // 已經存在就回 200，這次真的建出來才回 201。
+    reply.status(resolution.created.length > 0 ? 201 : 200);
+    return term;
+  });
+}
+
+const CreateTermBody = z.object({
+  taxonomy: z.string().min(1).max(64),
+  name: z.string().min(1).max(120),
+});
+
+function parseBody<T>(schema: z.ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new AppError(
+      errorCodes.VALIDATION_FAILED,
+      '請求格式不正確',
+      400,
+      result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`),
+    );
+  }
+  return result.data;
+}
+
+/** 錯誤翻譯跟 /api/jobs 用同一套，同一種失敗在兩邊不能回不同的 code。 */
+async function guard<T>(fn: () => T | Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw mapCoreError(error);
+  }
+}
+
+function requireClient(app: FastifyInstance): WordPressClient {
+  const client = app.ctx.wordpress;
+  if (!client) {
+    throw new AppError(
+      errorCodes.WORDPRESS_UNAVAILABLE,
+      'WordPress 尚未設定。請在 .env 填好連線資訊後重新啟動',
+      503,
+    );
+  }
+  return client;
+}
+
+/**
+ * 分類法只接受**設定檔裡真的用到的那幾個**。
+ *
+ * 這是硬性禁令「不得提供能呼叫任意 REST endpoint 的介面」在這條路由上的落點：
+ * taxonomy 會被直接接到 `/wp/v2/<taxonomy>` 後面，放行任意字串就等於開了一個
+ * 任意 GET 代理。允許清單從 publish-targets.json 來，不是寫死的。
+ */
+type TaxonomyTarget = PublishTarget & { taxonomy: string };
+
+function requireTargetForTaxonomy(app: FastifyInstance, taxonomy: string | undefined): TaxonomyTarget {
+  const available = app.ctx.targets
+    .list()
+    .filter((target): target is TaxonomyTarget => target.taxonomy !== null);
+  const target = taxonomy === undefined ? undefined : available.find((entry) => entry.taxonomy === taxonomy);
+  if (!target) {
+    throw new AppError(
+      errorCodes.VALIDATION_FAILED,
+      `未知的分類法 ${taxonomy ?? '(未指定)'}；可用的是 ${available.map((entry) => entry.taxonomy).join('、') || '（無）'}`,
+      400,
+    );
+  }
+  return target;
+}
+
+function requireKnownTaxonomy(app: FastifyInstance, taxonomy: string | undefined): string {
+  return requireTargetForTaxonomy(app, taxonomy).taxonomy;
 }
 
 /** 只回報 UI 需要的欄位。設定檔沒有秘密，但也沒必要整包吐出去。 */

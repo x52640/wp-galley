@@ -78,6 +78,23 @@ export function isTerminal(state: JobState): boolean {
   return TERMINAL_STATES.includes(state);
 }
 
+/**
+ * 內容還能不能改。
+ *
+ * 從上面那張轉移表讀出來的，不是另訂一套規則：`PUBLISHED` 只能轉到 `SUPERSEDED`，
+ * `PUBLISHING` 只能轉到 `PUBLISHED`／`FAILED`，終止狀態哪裡都去不了——這三類都**沒有
+ * 回到 `RENDERED` 的路**。而「改內容就撤銷核准並退回 RENDERED」是核准失效機制的
+ * 全部內容，退不回去就等於改了內容卻留著一個仍然有效的核准。
+ *
+ * 已發布的內容要再改，正確的做法是另開一個 job（`PUBLISHED → SUPERSEDED`），
+ * 而不是就地改掉一份已經在線上的東西。
+ */
+export const IMMUTABLE_STATES: readonly JobState[] = [...TERMINAL_STATES, 'PUBLISHING', 'PUBLISHED'];
+
+export function isContentMutable(state: JobState): boolean {
+  return !IMMUTABLE_STATES.includes(state);
+}
+
 export function canTransition(from: JobState, to: JobState): boolean {
   return TRANSITIONS[from].includes(to);
 }

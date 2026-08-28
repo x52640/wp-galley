@@ -95,7 +95,10 @@ export function applyLocalOnlyGuard(app: FastifyInstance): void {
     if (isPreviewPath(request.url)) {
       reply.header(
         'Content-Security-Policy',
-        "frame-ancestors 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*",
+        // CSP 的 host-source 不接受 IPv6 字面值，`http://[::1]:*` 會讓瀏覽器把
+        // 整條指令丟掉。跑在 ::1 上時 Origin 會是 http://localhost:<port>，
+        // 由下面那一項涵蓋。
+        "frame-ancestors 'self' http://127.0.0.1:* http://localhost:*",
       );
     } else {
       reply.header('X-Frame-Options', 'DENY');

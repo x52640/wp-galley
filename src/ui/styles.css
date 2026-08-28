@@ -17,7 +17,12 @@
   --shell-panel:     #23282F;
   --shell-line:      #333A43;
   --shell-text:      #C7CED6;
-  --shell-text-dim:  #7C8794;
+  /*
+    契約寫的 #7C8794 對工作台底色剛好 4.56:1，但次要文字大多印在**面板**上
+    （左軌、右面板、卡片），那裡只有 4.2:1，達不到 4.5。色相不動，亮度往上推到
+    對面板也有 5:1，對底色 5.5:1。仍然明顯比主要文字暗，該安靜的還是安靜。
+  */
+  --shell-text-dim:  #8A94A1;
 
   /* 校樣：紙 */
   --proof-bg:        #FFFFFF;
@@ -125,6 +130,22 @@ h1, h2, h3 { font-weight: 600; }
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/*
+  校樣是紙。外殼那個淺藍焦點框印在白紙上只有 1.7:1，等於看不見，所以紙上的
+  焦點改用校對符號的橘紅（對紙 5.1:1）。
+*/
+.proof-sheet :focus-visible { outline-color: var(--mark); }
+
+/*
+  「選擇圖片／換圖」是用 label 蓋住一個透明的 file input。真正拿到焦點的是那個
+  透明的 input，outline 也就跟著透明——鍵盤使用者按 Tab 會完全看不出焦點在哪。
+  把焦點框畫在看得見的 label 上。
+*/
+.btn-file:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .spin { animation: spin 900ms linear infinite; }
@@ -258,7 +279,16 @@ h1, h2, h3 { font-weight: 600; }
   border-color: var(--shell-text-dim);
   background: var(--shell-panel);
 }
-.chip-count { font-size: .7rem; opacity: .6; }
+/* opacity 會把文字壓到 1.5:1，等於看不到。要淡就用顏色，不要用透明度。 */
+.chip-count { font-size: .7rem; color: var(--shell-text-dim); }
+
+/* 選到了、但站上沒有這個項目：形狀（虛線）與圖示都有，不是只靠顏色。 */
+.chip[data-unknown='yes'] {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warn-on-shell) 55%, transparent);
+  color: var(--warn-on-shell);
+  background: color-mix(in srgb, var(--warn-on-shell) 10%, transparent);
+}
 
 .segmented { display: inline-flex; border: 1px solid var(--shell-line); border-radius: 6px; overflow: hidden; }
 .segmented-item {
@@ -364,7 +394,15 @@ h1, h2, h3 { font-weight: 600; }
   background: var(--shell-panel);
 }
 .topbar-id { min-width: 0; flex: 1; }
-.topbar-title { margin: 0; font-size: 1rem; line-height: 1.4; }
+/* 長標題不能把狀態與按鈕擠出畫面（1024px 尤其明顯）。 */
+.topbar-title {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .topbar-meta {
   display: flex;
   flex-wrap: wrap;
@@ -875,7 +913,7 @@ h1, h2, h3 { font-weight: 600; }
 .upload-pending-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .45rem; }
 .upload-filename { margin: 0; font-size: .78rem; overflow-wrap: anywhere; }
 
-/* --- job 列表與新增 ----------------------------------------------------- */
+/* --- 稿件列表與新增（class 名沿用 job，介面文案一律用「稿件」） --------- */
 
 .list-screen, .new-screen {
   width: 100%;

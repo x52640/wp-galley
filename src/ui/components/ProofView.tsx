@@ -35,16 +35,27 @@ export function ProofView({
   job,
   onBlocks,
   onPreviewed,
+  onPreviewHash,
 }: {
   job: LoadedJob;
-  /** 把量到的區塊回報上去，右面板的「插入位置」要用。 */
+  /**
+   * 把量到的區塊回報上去，右面板的「插入位置」要用。
+   *
+   * 換版本時會先回報一個空陣列。舊的區塊索引對新版本沒有意義，留著會讓使用者
+   * 把圖片插到上一版的第 3 段——那個位置在新版本可能是別的東西。
+   */
   onBlocks?: (blocks: { index: number; text: string }[]) => void;
   /**
-   * 校樣載入完就通知上層重新讀一次 job。
+   * 校樣載入完就通知上層重新讀一次稿件。
    * 後端在 GET /preview 的時候把 RENDERED 推進 PREVIEWED（「還沒看過校樣，
    * 開啟預覽後才能核准」），不重讀的話畫面會停在上一個狀態。
    */
   onPreviewed?: () => void;
+  /**
+   * 校樣回應的 ETag（後端當下算出來的 content hash），問不到時回 null。
+   * 核准要綁的是使用者眼睛看到的那一份，這個值就是拿來跟稿件的 hash 對帳的。
+   */
+  onPreviewHash?: (hash: string | null) => void;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,11 +67,21 @@ export function ProofView({
   const [showMarks, setShowMarks] = useState(true);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  /**
+   * 量測的世代編號。
+   *
+   * 上一版的 iframe 排了好幾個延後的量測（字型載完、ResizeObserver、250ms 的
+   * 保險），版本一換那些回呼還在路上，回來時會把剛清掉的舊區塊又補回去。所以
+   * 每次量測都帶著當時的世代，過期的就直接不算。
+   */
+  const measureToken = useRef(0);
   // 父層每次刷新都會給新的物件；用 ref 接住 callback，量測不必跟著重建。
   const onBlocksRef = useRef(onBlocks);
   onBlocksRef.current = onBlocks;
   const onPreviewedRef = useRef(onPreviewed);
   onPreviewedRef.current = onPreviewed;
+  const onPreviewHashRef = useRef(onPreviewHash);
+  onPreviewHashRef.current = onPreviewHash;
 
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
@@ -91,14 +112,48 @@ export function ProofView({
     };
   }, [job.uuid, revisionKey, hasRevision, fixtures]);
 
+  /**
+   * 換版本＝上一版量到的東西全部作廢。
+   *
+   * 只把 loading 打開是不夠的：舊的 blocks 還在 state 裡，右面板的「插入位置」
+   * 就還選得到上一版的第 n 段，送出去的索引會落在新版本的別的地方。所以這裡把
+   * 區塊清空並且通知父層，等新的校樣量完才會再有東西可選。
+   */
   useEffect(() => {
+    measureToken.current += 1;
     setLoading(true);
     setBodyMissing(false);
+    setBlocks([]);
+    setPinned(null);
+    onBlocksRef.current?.([]);
+    onPreviewHashRef.current?.(null);
   }, [revisionKey]);
+
+  // 校樣本體是 iframe 自己載的，header 拿不到，只能另外問一次 ETag。
+  useEffect(() => {
+    if (!hasRevision) {
+      onPreviewHashRef.current?.(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .fetchPreviewHash(job.uuid)
+      .then((hash) => {
+        if (!cancelled) onPreviewHashRef.current?.(hash);
+      })
+      .catch(() => {
+        // 問不到就當「無法確認」，不要因此擋住整個校樣。
+        if (!cancelled) onPreviewHashRef.current?.(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [job.uuid, revisionKey, hasRevision]);
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  const measure = useCallback(() => {
+  const measure = useCallback((token: number) => {
+    if (token !== measureToken.current) return;
     const frame = frameRef.current;
     const doc = frame?.contentDocument;
     if (!frame || !doc?.body) return;
@@ -124,20 +179,21 @@ export function ProofView({
   }, []);
 
   const handleLoad = useCallback(() => {
+    const token = measureToken.current;
     setLoading(false);
-    measure();
+    measure(token);
     const doc = frameRef.current?.contentDocument;
     if (!doc) return;
     // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
     setBodyMissing(doc.querySelector('.preview-body') === null);
     onPreviewedRef.current?.();
     // 字型與圖片載入完會改變高度，要再量一次。
-    void doc.fonts.ready.then(() => measure());
+    void doc.fonts.ready.then(() => measure(token));
     observerRef.current?.disconnect();
-    const observer = new ResizeObserver(() => measure());
+    const observer = new ResizeObserver(() => measure(token));
     observer.observe(doc.documentElement);
     observerRef.current = observer;
-    window.setTimeout(() => measure(), 250);
+    window.setTimeout(() => measure(token), 250);
   }, [measure]);
 
   const markGroups = groupMarks(job.marks);

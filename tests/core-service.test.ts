@@ -18,6 +18,7 @@ import {
 import { InvalidTransitionError } from '../src/core/state-machine.js';
 import { RemoteChangedError } from '../src/wordpress/posts.js';
 import { createTargetRegistry, PublishTargetSchema } from '../src/wordpress/targets.js';
+import { splitTopLevelBlocks } from '../src/core/html-blocks.js';
 import type { CoreService } from '../src/core/service.js';
 
 const SOURCE = '今天讀完這本書，想到很多事。\n\n不是書裡寫的那些，而是別的。';
@@ -51,6 +52,21 @@ const BASE_TARGET = {
   restBase: 'diary',
   templateId: 'diary-v1',
   taxonomy: 'diary-category',
+};
+
+/** 綁定固定物件的 target（首頁那一類）：不建新的，永遠更新同一個 ID。 */
+const FIXED_TARGET = {
+  key: 'fixed',
+  displayName: '固定物件',
+  contentType: 'longform',
+  postType: 'read-think',
+  restBase: 'read-think',
+  templateId: 'longform-v1',
+  taxonomy: 'read-think-tag',
+  fixedObjectId: 777,
+  allowCreate: false,
+  allowUpdate: true,
+  requireFeaturedImage: false,
 };
 
 describe('建立與讀取', () => {
@@ -423,30 +439,95 @@ describe('發布前置檢查', () => {
     expect(f.requests).toHaveLength(0);
   });
 
-  it('更新既有文章時遠端被改過就中止，不覆蓋別人的修改', async () => {
+  it('沒有比對基準時先把遠端現況存起來並要求再確認，不會誤報「遠端被改過」', async () => {
+    const f = await setup({ targets: targetsWith([FIXED_TARGET]) });
+    const uuid = f.core.createJob({ targetKey: 'fixed', sourceText: SOURCE, title: '固定頁' }).uuid;
+    approveJob(f.core, uuid);
+
+    // 以前這裡會拿空字串當 content hash 去比對，第一次更新永遠失敗且訊息說遠端被改過。
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/還沒有.*比對基準/);
+    expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
+
+    // 基準已經存下來了，再按一次就發得出去。
+    const result = await f.core.publish(uuid, { status: 'draft' });
+    expect(result.created).toBe(false);
+    expect(result.wordpressId).toBe(777);
+    expect(f.core.getJob(uuid).state).toBe('PUBLISHED');
+  });
+
+  it('有了比對基準之後，遠端被改過就中止，不覆蓋別人的修改', async () => {
+    let modified = '2026-08-28T00:00:00';
     const f = await setup({
-      targets: targetsWith([
-        {
-          key: 'fixed',
-          displayName: '固定物件',
-          contentType: 'longform',
-          postType: 'read-think',
-          restBase: 'read-think',
-          templateId: 'longform-v1',
-          taxonomy: 'read-think-tag',
-          fixedObjectId: 777,
-          allowCreate: false,
-          allowUpdate: true,
-          requireFeaturedImage: false,
-        },
-      ]),
+      targets: targetsWith([FIXED_TARGET]),
+      handler: (request) => {
+        const path = request.path.split('?')[0] ?? '';
+        if (path === '/wp-json/wp/v2/read-think-tag') return { body: [], headers: { 'X-WP-TotalPages': '1' } };
+        return {
+          body: {
+            id: 777,
+            status: 'draft',
+            link: 'https://example.test/?p=777',
+            slug: 'fixed',
+            title: { raw: '固定頁', rendered: '固定頁' },
+            content: { raw: '<p>遠端內容</p>', rendered: '<p>遠端內容</p>' },
+            featured_media: 0,
+            date_gmt: '2026-08-28T00:00:00',
+            modified_gmt: modified,
+          },
+        };
+      },
     });
     const uuid = f.core.createJob({ targetKey: 'fixed', sourceText: SOURCE, title: '固定頁' }).uuid;
     approveJob(f.core, uuid);
 
+    // 第一次：建立基準（會被擋下來，這是刻意的）。
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/比對基準/);
+
+    // 有人在後台動了那篇。
+    modified = '2026-08-28T09:30:00';
+
     await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(RemoteChangedError);
-    // 只讀了遠端，沒有送出任何寫入請求。
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
+  });
+
+  it('遠端只改了標題或狀態也算被改過（我們會覆寫那些欄位）', async () => {
+    let title = '固定頁';
+    let status = 'draft';
+    const f = await setup({
+      targets: targetsWith([FIXED_TARGET]),
+      handler: (request) => {
+        const path = request.path.split('?')[0] ?? '';
+        if (path === '/wp-json/wp/v2/read-think-tag') return { body: [], headers: { 'X-WP-TotalPages': '1' } };
+        return {
+          body: {
+            id: 777,
+            status,
+            link: 'https://example.test/?p=777',
+            slug: 'fixed',
+            title: { raw: title, rendered: title },
+            content: { raw: '<p>遠端內容</p>', rendered: '<p>遠端內容</p>' },
+            featured_media: 0,
+            date_gmt: '2026-08-28T00:00:00',
+            // 修改時間與內容都沒動——只比那兩項的話這個改動會整個漏掉。
+            modified_gmt: '2026-08-28T00:00:00',
+          },
+        };
+      },
+    });
+    const uuid = f.core.createJob({ targetKey: 'fixed', sourceText: SOURCE, title: '固定頁' }).uuid;
+    approveJob(f.core, uuid);
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/比對基準/);
+
+    title = '別人改的標題';
+    const titleError = await f.core.publish(uuid, { status: 'draft' }).catch((error: unknown) => error);
+    expect(titleError).toBeInstanceOf(RemoteChangedError);
+    expect((titleError as RemoteChangedError).changedFields).toContain('標題');
+
+    title = '固定頁';
+    status = 'publish';
+    const statusError = await f.core.publish(uuid, { status: 'draft' }).catch((error: unknown) => error);
+    expect(statusError).toBeInstanceOf(RemoteChangedError);
+    expect((statusError as RemoteChangedError).changedFields.join('')).toContain('狀態');
   });
 
   it('前置檢查被擋下來時會留下 rejected 的稽核紀錄', async () => {
@@ -649,5 +730,250 @@ describe('媒體回報的插入位置', () => {
     const uuid = newDiaryJob(core);
     await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a' });
     expect(core.getJob(uuid).media[0]).toMatchObject({ placed: false, placedAfterBlockIndex: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 以下是修掉審查發現的問題之後補的迴歸測試。
+// ---------------------------------------------------------------------------
+
+/** 一段 HTML 裡某個字串出現幾次。用來抓「同一張圖被放了兩次」。 */
+function occurrences(html: string, needle: string): number {
+  return html.split(needle).length - 1;
+}
+
+const REVIEW_OUTPUT = {
+  ok: true as const,
+  data: {
+    title: '20260828',
+    summary: '補了標點',
+    correctedSource: '今天讀完這本書，想到很多事。',
+    changes: [],
+    templateData: {
+      title: '20260828',
+      body: '<p class="wp-block-paragraph">Agent 改過的內容。</p>',
+    },
+    imageBriefs: [],
+  },
+  meta: { runId: 'r', agentId: 'codex' as const, model: null, durationMs: 1, stderrTail: '' },
+};
+
+describe('發布期間的競態', () => {
+  it('讀遠端的那段空檔裡內容被換掉，就不會把舊版發出去', async () => {
+    let onRemoteRead: (() => void) | null = null;
+    const base = defaultWordPressHandler();
+    const f = await setup({
+      targets: targetsWith([FIXED_TARGET]),
+      handler: (request) => {
+        if (request.method === 'GET') onRemoteRead?.();
+        return base(request);
+      },
+    });
+    const uuid = f.core.createJob({ targetKey: 'fixed', sourceText: SOURCE, title: '固定頁' }).uuid;
+    approveJob(f.core, uuid);
+
+    // 第一次只是建立比對基準。
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/比對基準/);
+
+    // 這一次會真的去讀遠端。讀的那一刻，「另一個請求」把內容換掉並重新核准——
+    // 前置檢查看到的與即將送出去的因此不是同一版。
+    onRemoteRead = () => {
+      onRemoteRead = null; // 只攪局一次
+      f.core.createRevision(uuid, {
+        templateData: { title: '固定頁', body: '<p class="wp-block-paragraph">趁機換掉的內容。</p>' },
+        reason: '競態',
+      });
+      f.core.render(uuid);
+      f.core.getPreviewDocument(uuid);
+      f.core.approve(uuid, {
+        contentHash: f.core.getJob(uuid).currentRevision!.contentHash,
+        actor: 'ui',
+      });
+    };
+
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/期間變動了/);
+    // 一個寫入請求都沒送出去。
+    expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
+    // 也沒有卡在 PUBLISHING。
+    expect(f.core.getJob(uuid).state).toBe('APPROVED');
+  });
+
+  it('讀遠端的空檔裡核准被撤銷，就中止發布', async () => {
+    let onRemoteRead: (() => void) | null = null;
+    const base = defaultWordPressHandler();
+    const f = await setup({
+      targets: targetsWith([FIXED_TARGET]),
+      handler: (request) => {
+        if (request.method === 'GET') onRemoteRead?.();
+        return base(request);
+      },
+    });
+    const uuid = f.core.createJob({ targetKey: 'fixed', sourceText: SOURCE, title: '固定頁' }).uuid;
+    approveJob(f.core, uuid);
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/比對基準/);
+
+    onRemoteRead = () => {
+      onRemoteRead = null;
+      f.core.revokeApproval(uuid, '使用者反悔了');
+    };
+
+    await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(PublishBlockedError);
+    expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
+    expect(f.core.getJob(uuid).state).toBe('RENDERED');
+  });
+
+  it('同一個 job 同時發兩次，第二次會被拒絕而不是跟著發', async () => {
+    const f = await setup();
+    const uuid = newDiaryJob(f.core);
+    approveJob(f.core, uuid);
+
+    const results = await Promise.allSettled([
+      f.core.publish(uuid, { status: 'draft' }),
+      f.core.publish(uuid, { status: 'draft' }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(PublishBlockedError);
+    expect(String((rejected.reason as Error).message)).toMatch(/已經有一次發布在進行中/);
+
+    // 只建立了一篇，沒有建出兩篇一樣的草稿。
+    const creates = f.requests.filter(
+      (request) => request.method === 'POST' && (request.path.split('?')[0] ?? '').endsWith('/diary'),
+    );
+    expect(creates).toHaveLength(1);
+  });
+});
+
+describe('已發布之後不能再改內容', () => {
+  it('PUBLISHED 的 job 拒絕所有內容操作', async () => {
+    const adapter = new FakeAdapter('codex', 'Codex', { result: REVIEW_OUTPUT });
+    const f = await setup({ adapters: [adapter] });
+    const uuid = newDiaryJob(f.core);
+    const asset = await f.core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a' });
+    approveJob(f.core, uuid);
+    await f.core.publish(uuid, { status: 'draft' });
+    expect(f.core.getJob(uuid).state).toBe('PUBLISHED');
+
+    const revisionsBefore = f.core.listRevisions(uuid).length;
+
+    expect(() => f.core.createRevision(uuid, { reason: '再改' })).toThrow(/不能再改內容/);
+    expect(() => f.core.placeMedia(uuid, asset.id, 0)).toThrow(/不能再改內容/);
+    expect(() => f.core.setFeaturedMedia(uuid, asset.id)).toThrow(/不能再改內容/);
+    expect(() => f.core.removeMedia(uuid, asset.id)).toThrow(/不能再改內容/);
+    await expect(
+      f.core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'b' }),
+    ).rejects.toThrow(/不能再改內容/);
+    await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(/不能再改內容/);
+
+    // 一個新版本都沒有產生，Agent 也沒被叫起來。
+    expect(f.core.listRevisions(uuid)).toHaveLength(revisionsBefore);
+    expect(adapter.calls).toHaveLength(0);
+  });
+});
+
+describe('插入圖片的位置', () => {
+  it('重新指定位置是搬家，不是再放一張', async () => {
+    const { core } = await setup();
+    const uuid = newDiaryJob(core);
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a' });
+    const marker = `wp-image-${asset.wordpressMediaId}`;
+
+    core.placeMedia(uuid, asset.id, 0);
+    expect(occurrences(core.getJob(uuid).currentRevision!.publishHtml, marker)).toBe(1);
+
+    // 移到最後一段後面。舊的那一張要消失，不是變成兩張。
+    const moved = core.placeMedia(uuid, asset.id, 2);
+    expect(occurrences(moved.publishHtml, marker)).toBe(1);
+    expect(splitTopLevelBlocks(moved.publishHtml).map((block) => block.tag)).toEqual(['p', 'p', 'figure']);
+    expect(core.getJob(uuid).media[0]?.placedAfterBlockIndex).toBe(1);
+  });
+
+  it('多搬幾次都只會有一張', async () => {
+    const { core } = await setup();
+    const uuid = newDiaryJob(core);
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a' });
+    const marker = `wp-image-${asset.wordpressMediaId}`;
+
+    for (const index of [0, 1, -1, 2, 0]) {
+      core.placeMedia(uuid, asset.id, index);
+      expect(occurrences(core.getJob(uuid).currentRevision!.publishHtml, marker)).toBe(1);
+    }
+  });
+
+  it('剛好超出一格的位置會被拒絕，不會被默默夾回最後', async () => {
+    const { core } = await setup();
+    const uuid = newDiaryJob(core);
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a' });
+    const blockCount = splitTopLevelBlocks(core.getJob(uuid).currentRevision!.publishHtml).length;
+
+    expect(() => core.placeMedia(uuid, asset.id, blockCount)).toThrow(/超出範圍/);
+    expect(() => core.placeMedia(uuid, asset.id, blockCount - 1)).not.toThrow();
+  });
+});
+
+describe('Agent 執行期間的變動', () => {
+  it('等 Agent 的時候使用者改了內容，Agent 的結果不套用', async () => {
+    let hook: (() => void) | null = null;
+    const adapter = new FakeAdapter('codex', 'Codex', { result: REVIEW_OUTPUT, onRun: () => hook?.() });
+    const f = await setup({ adapters: [adapter] });
+    const uuid = newDiaryJob(f.core);
+
+    hook = () => {
+      hook = null;
+      f.core.createRevision(uuid, {
+        templateData: { title: '20260828', body: '<p class="wp-block-paragraph">使用者自己改的內容。</p>' },
+        reason: '使用者在等待期間手動編輯',
+      });
+    };
+
+    await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(ContentChangedError);
+
+    // 使用者的編輯還在，沒有被 Agent 的舊稿蓋掉。
+    const detail = f.core.getJob(uuid);
+    expect(detail.currentRevision!.publishHtml).toContain('使用者自己改的內容');
+    expect(detail.currentRevision!.publishHtml).not.toContain('Agent 改過的內容');
+    expect(f.core.listRevisions(uuid)).toHaveLength(2);
+    expect(detail.agentRun?.status).toBe('failed');
+  });
+
+  it('已經被取消的執行，結果不會套用', async () => {
+    let hook: (() => void) | null = null;
+    const adapter = new FakeAdapter('codex', 'Codex', { result: REVIEW_OUTPUT, onRun: () => hook?.() });
+    const f = await setup({ adapters: [adapter] });
+    const uuid = newDiaryJob(f.core);
+
+    // AgentRegistry.cancel() 只碰得到已經開跑的那一個；排隊中才被取消的照樣會跑完
+    // 回來。所以套用前一定要再看一次自己是不是已經被取消了。
+    hook = () => {
+      hook = null;
+      f.core.cancelAgentRun(uuid);
+    };
+
+    await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(/cancelled/);
+    expect(f.core.listRevisions(uuid)).toHaveLength(1);
+    expect(f.core.getJob(uuid).agentRun?.status).toBe('cancelled');
+  });
+});
+
+describe('正文頂層不會留下裸文字', () => {
+  it('裸文字被包成段落，前端量的 children 數就等於後端數的區塊數', async () => {
+    const { core } = await setup();
+    const uuid = core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      templateData: {
+        title: '20260828',
+        body: '沒有段落標籤的一段字<p class="wp-block-paragraph">正常段落</p>後面又<strong>一段</strong>裸字',
+      },
+    }).uuid;
+
+    const html = core.getJob(uuid).currentRevision!.publishHtml;
+    const blocks = splitTopLevelBlocks(html);
+
+    // 三塊都是元素，沒有 #text——前端的 body.children 數出來會是同一個 3。
+    expect(blocks.map((block) => block.tag)).toEqual(['p', 'p', 'p']);
+    expect(blocks[0]!.text).toBe('沒有段落標籤的一段字');
+    expect(blocks[2]!.text).toBe('後面又一段裸字');
   });
 });

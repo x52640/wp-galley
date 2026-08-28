@@ -5,7 +5,12 @@ import { Icon } from '../icons.js';
 import { formatRelative } from '../lib/format.js';
 import { STATE_LABEL, isFinished } from '../lib/steps.js';
 
-/** job 列表：進工作區的入口，也是「現在有幾件事在手上」的總覽。 */
+/**
+ * 稿件列表：進工作區的入口，也是「現在有幾件事在手上」的總覽。
+ *
+ * 介面上一律叫「稿件」。程式裡叫 job（型別、API、網址都是），但那是系統怎麼蓋的，
+ * 不是使用者認得的東西。
+ */
 
 const FILTERS: { key: string; label: string; states: JobState[] | null }[] = [
   { key: 'active', label: '進行中', states: ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED', 'APPROVED', 'PUBLISHING'] },
@@ -61,7 +66,7 @@ export function JobList({
         </div>
         <button type="button" className="btn btn-primary" onClick={onNew}>
           <Icon name="plus" size={15} />
-          新增 job
+          新增稿件
         </button>
       </header>
 
@@ -97,10 +102,10 @@ export function JobList({
       {jobs !== null && shown.length === 0 && (
         <div className="list-empty">
           <Icon name="file-text" size={26} />
-          <p>這裡還沒有東西。貼一篇稿子進來，發布台會幫你走完校稿、配圖、核准到發布。</p>
+          <p>這裡還沒有稿件。貼一篇稿子進來，發布台會幫你走完校稿、配圖、核准到發布。</p>
           <button type="button" className="btn btn-primary" onClick={onNew}>
             <Icon name="plus" size={15} />
-            新增 job
+            新增稿件
           </button>
         </div>
       )}

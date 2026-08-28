@@ -201,6 +201,15 @@ function MediaRow({
   const confirm = useConfirm();
   const featured = job.featuredMediaId === asset.id;
   const thumb = asset.url ?? sessionThumbs.get(asset.id) ?? null;
+  /**
+   * 校樣量完了才有段落可以指定。
+   *
+   * ProofView 換版本時會把 blocks 清空，因為上一版的第 3 段在新版本可能是別的
+   * 東西——這段期間不能讓人送出索引，寧可先鎖住。
+   */
+  const measured = blocks.length > 0;
+  const placedInBody =
+    asset.placedAfterBlockIndex !== null && asset.placedAfterBlockIndex >= 0;
 
   return (
     <li className="media-row">
@@ -222,30 +231,44 @@ function MediaRow({
         </p>
 
         {!featured && (
-          <label className="media-place">
-            <span className="sr-only">插入位置</span>
-            <select
-              className="input select"
-              value={asset.placedAfterBlockIndex ?? ''}
-              disabled={action.busy || blocks.length === 0}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === '') return;
-                void action.run(async () => {
-                  await api.placeMedia(job.uuid, asset.id, Number(value));
-                  await refresh();
-                });
-              }}
-            >
-              <option value="">尚未放進正文</option>
-              <option value="-1">放在最前面</option>
-              {blocks.map((block) => (
-                <option key={block.index} value={block.index}>
-                  第 {block.index + 1} 段之後：{block.text || '（空段）'}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="media-place">
+              <span className="sr-only">插入位置</span>
+              <select
+                className="input select"
+                value={asset.placedAfterBlockIndex ?? ''}
+                disabled={action.busy || !measured}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '') return;
+                  void action.run(async () => {
+                    await api.placeMedia(job.uuid, asset.id, Number(value));
+                    await refresh();
+                  });
+                }}
+              >
+                <option value="">尚未放進正文</option>
+                <option value="-1">放在最前面</option>
+                {/*
+                  校樣還沒量完時 blocks 是空的，但目前的位置還是要顯示出來，
+                  否則下拉會變成一片空白，看起來像位置被清掉了。
+                */}
+                {!measured && placedInBody && (
+                  <option value={asset.placedAfterBlockIndex ?? ''}>
+                    第 {(asset.placedAfterBlockIndex ?? 0) + 1} 段之後
+                  </option>
+                )}
+                {blocks.map((block) => (
+                  <option key={block.index} value={block.index}>
+                    第 {block.index + 1} 段之後：{block.text || '（空段）'}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!measured && (
+              <p className="field-hint">要等校樣量出段落，才能指定插入位置。</p>
+            )}
+          </>
         )}
 
         <ErrorNote message={action.error} />
@@ -321,7 +344,7 @@ function MediaRow({
                 danger: true,
                 body: (
                   <>
-                    <p>{assetLabel(asset)} 會從這個 job 移除，正文裡的位置也會一起清掉。</p>
+                    <p>{assetLabel(asset)} 會從這篇稿件移除，正文裡的位置也會一起清掉。</p>
                     {job.approval?.valid === true && (
                       <p>目前的核准會因為內容改變而失效，要重新核准。</p>
                     )}

@@ -189,6 +189,32 @@ const httpApi: PublisherApi = {
     return response.text();
   },
 
+  /**
+   * 只要 header 不要 body，所以用 HEAD。
+   *
+   * 校樣本體是 iframe 自己去載的，瀏覽器不會把那個回應的 header 交給 JS，
+   * 所以想知道「iframe 裡那一份的 hash 是多少」只能另外問一次。舊版後端沒有
+   * 自動產生 HEAD 路由時退回 GET，再拿不到就回 null（無法確認）。
+   */
+  async fetchPreviewHash(uuid: string) {
+    const path = `/api/jobs/${uuid}/preview`;
+    let response: Response;
+    try {
+      response = await send(path, { method: 'HEAD' });
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 404 || cause.status === 405)) {
+        response = await send(path);
+      } else {
+        throw cause;
+      }
+    }
+    const etag = response.headers.get('etag');
+    if (etag === null) return null;
+    // ETag 的格式是 "<hash>"，弱驗證還會多一個 W/ 前綴。
+    const hash = etag.replace(/^W\//, '').replace(/^"/, '').replace(/"$/, '');
+    return hash.length === 0 ? null : hash;
+  },
+
   runAgent: (uuid: string, input: AgentReviewInput) =>
     sendJson<AgentRunResult>(`/api/jobs/${uuid}/agent`, 'POST', input),
 

@@ -137,7 +137,10 @@ export function PublishPanel({
               ),
               confirmLabel: '發布',
               onConfirm: async () => {
-                setResult(await api.publish(job.uuid, { status }));
+                // confirm: true 就是「使用者剛剛在這個對話框按了發布」。
+                // 設了 requireSecondConfirmation 的發布目標，後端只認這個旗標；
+                // 不送的話那種目標永遠會被擋下來，而且錯誤訊息還看不出原因。
+                setResult(await api.publish(job.uuid, { status, confirm: true }));
                 await refresh();
               },
             })

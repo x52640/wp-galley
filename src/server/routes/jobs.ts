@@ -121,6 +121,8 @@ export function mapCoreError(error: unknown): unknown {
     return new AppError(errorCodes.REMOTE_CHANGED, error.message, 409, {
       expectedModifiedGmt: error.expected.modifiedGmt,
       actualModifiedGmt: error.actual.modifiedGmt,
+      // 具體是哪些欄位對不上。只講「被改過了」使用者沒辦法判斷要不要放棄自己的版本。
+      changedFields: [...error.changedFields],
     });
   }
   if (error instanceof MediaUploadError) {

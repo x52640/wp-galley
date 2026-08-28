@@ -4,7 +4,7 @@ import type { JobTarget } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 
-/** 新增 job：選發布目標、貼原稿。其他都等進了工作區再說。 */
+/** 新增稿件：選發布目標、貼原稿。其他都等進了工作區再說。 */
 
 function today(): string {
   const now = new Date();
@@ -52,9 +52,9 @@ export function NewJob({
         <div>
           <button type="button" className="btn btn-quiet btn-tiny" onClick={onCancel}>
             <Icon name="arrow-left" size={14} />
-            全部 job
+            全部稿件
           </button>
-          <h1 className="list-title">新增 job</h1>
+          <h1 className="list-title">新增稿件</h1>
         </div>
       </header>
 
@@ -136,7 +136,7 @@ export function NewJob({
             }
           >
             {create.busy ? <Spinner /> : <Icon name="plus" size={14} />}
-            建立 job
+            建立稿件
           </button>
         </div>
       </div>

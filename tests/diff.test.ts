@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { computeProofMarks } from '../src/core/diff.js';
-import { insertBlockAfter, removeBlocksWhere, splitTopLevelBlocks } from '../src/core/html-blocks.js';
+import {
+  insertBlockAfter,
+  removeBlocksWhere,
+  splitTopLevelBlocks,
+  wrapBareTopLevelText,
+} from '../src/core/html-blocks.js';
+import { toBlockMarkup } from '../src/wordpress/blocks.js';
 
 const p = (text: string): string => `<p class="wp-block-paragraph">${text}</p>`;
 
@@ -103,5 +109,86 @@ describe('校對符號', () => {
       expect(mark.kind).toBe('deleted');
       expect(mark.blockIndex).toBe(0);
     }
+  });
+});
+
+describe('頂層裸文字包成段落', () => {
+  it('裸文字變成一個段落區塊', () => {
+    const wrapped = wrapBareTopLevelText(`裸文字${p('一')}`);
+    expect(splitTopLevelBlocks(wrapped).map((block) => block.tag)).toEqual(['p', 'p']);
+    expect(splitTopLevelBlocks(wrapped)[0]!.text).toBe('裸文字');
+  });
+
+  it('連續的裸文字與行內標籤併成同一段，跟區塊轉換器的分法一致', () => {
+    const wrapped = wrapBareTopLevelText('前面<strong>粗體</strong>後面');
+    const blocks = splitTopLevelBlocks(wrapped);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.tag).toBe('p');
+    expect(blocks[0]!.text).toBe('前面粗體後面');
+  });
+
+  it('沒有東西要包時原樣回傳，既有內容的 hash 不會平白改變', () => {
+    const html = `${p('一')}\n${p('二')}`;
+    expect(wrapBareTopLevelText(html)).toBe(html);
+  });
+
+  it('角括號會被逃脫，不會變成新標籤', () => {
+    const wrapped = wrapBareTopLevelText('a < b & c');
+    expect(wrapped).toContain('&lt;');
+    expect(splitTopLevelBlocks(wrapped)).toHaveLength(1);
+  });
+
+  it('包過之後 splitTopLevelBlocks 數出來的區塊數等於元素數', () => {
+    // 前端量的是 body.children（文字節點不算）。包過之後兩邊必然相等。
+    const wrapped = wrapBareTopLevelText(`裸一${p('二')}裸三<hr />`);
+    const blocks = splitTopLevelBlocks(wrapped);
+    expect(blocks.every((block) => block.tag !== '#text')).toBe(true);
+    expect(blocks).toHaveLength(4);
+  });
+
+  it('包不包，轉出來的 Gutenberg 區塊標記完全一樣', () => {
+    // toBlockMarkup 本來就會把頂層裸文字併成段落。包起來只是把那件事提前到預覽，
+    // 發布格式一個位元都不能因此改變。
+    const samples = [
+      '裸文字',
+      `裸文字${p('一')}`,
+      '前面<strong>粗體</strong>後面',
+      `${p('一')}裸二${p('三')}`,
+      'a &amp; b < c',
+      `${p('一')}<hr />${p('二')}`,
+    ];
+    for (const html of samples) {
+      expect(toBlockMarkup(wrapBareTopLevelText(html)).markup).toBe(toBlockMarkup(html).markup);
+    }
+  });
+});
+
+describe('只改標記也算改動', () => {
+  it('標題層級改了會產生符號，不會被當成沒變', () => {
+    const marks = computeProofMarks('<h2>小節</h2>', '<h3>小節</h3>');
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.kind).toBe('replaced');
+    expect(marks[0]!.summary).toContain('h2 → h3');
+  });
+
+  it('連結換了目的地會產生符號', () => {
+    const before = '<p><a href="https://a.example/">連結</a></p>';
+    const after = '<p><a href="https://b.example/">連結</a></p>';
+    const marks = computeProofMarks(before, after);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.summary).toContain('文字沒變');
+  });
+
+  it('圖片換了網址或 alt 會產生符號', () => {
+    const before = '<figure class="wp-block-image"><img src="https://a.example/1.png" alt="一" /></figure>';
+    const after = '<figure class="wp-block-image"><img src="https://a.example/2.png" alt="二" /></figure>';
+    const marks = computeProofMarks(before, after);
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.summary).toContain('圖片');
+  });
+
+  it('文字與標記都沒變才算相同', () => {
+    const html = '<h2>小節</h2><p><a href="https://a.example/">連結</a></p>';
+    expect(computeProofMarks(html, html)).toEqual([]);
   });
 });

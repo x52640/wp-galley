@@ -4,7 +4,7 @@ import type { LoadedJob, Term } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { readString, readStringArray } from '../../lib/format.js';
 import { useConfirm } from '../ConfirmDialog.js';
-import { ErrorNote, Field, Spinner, useAction } from './shared.js';
+import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 
 /**
  * 分類項目。
@@ -51,10 +51,14 @@ export function TaxonomyPanel({
   useEffect(() => {
     if (taxonomy === null) return;
     let cancelled = false;
+    setTerms(null);
+    setLoadError(null);
     api
       .listTerms(taxonomy)
       .then((list) => {
-        if (!cancelled) setTerms(list);
+        if (cancelled) return;
+        setTerms(list);
+        setLoadError(null);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(describeError(cause));
@@ -84,15 +88,31 @@ export function TaxonomyPanel({
 
   return (
     <div className="stack">
-      <Field label={`分類法 ${taxonomy}`} hint={multiple ? '可以複選。' : '只能選一個。'}>
+      <Field
+        label={`分類法 ${taxonomy}`}
+        hint={
+          terms !== null && terms.length === 0
+            ? undefined
+            : multiple
+              ? '可以複選。'
+              : '只能選一個。'
+        }
+      >
         <div className="chips">
           {terms === null && !loadError && (
             <span className="field-hint">
               <Spinner /> 讀取分類項目…
             </span>
           )}
+          {/*
+            一個項目都沒有是**正常的**，不是錯誤：站上的 diary-category 現在就是空的。
+            所以這裡講的是「可以直接發布」，不是紅字警告。
+          */}
           {terms?.length === 0 && (
-            <span className="field-hint">{taxonomy} 目前一個項目都沒有。</span>
+            <span className="field-hint">
+              {taxonomy} 目前一個項目都沒有，不選分類也能發布。
+              {job.target.allowCreateTerms === true ? '要分類的話，在下面建立第一個項目。' : ''}
+            </span>
           )}
           {terms?.map((term) => (
             <button
@@ -105,9 +125,33 @@ export function TaxonomyPanel({
             >
               {selected.includes(term.name) && <Icon name="check" size={12} />}
               {term.name}
-              {term.count !== undefined && <span className="chip-count mono">{term.count}</span>}
+              {term.count !== undefined && (
+                <span className="chip-count mono" title={`${term.count} 篇`}>
+                  {term.count}
+                </span>
+              )}
             </button>
           ))}
+          {/*
+            選到的名稱站上找不到（舊資料或 Agent 生的）也要看得見、按得掉，
+            否則使用者只能看著警告卻沒有地方改。
+          */}
+          {!termsUnavailable &&
+            unknown.map((name) => (
+              <button
+                key={`unknown-${name}`}
+                type="button"
+                className="chip"
+                data-active="yes"
+                data-unknown="yes"
+                aria-pressed={true}
+                onClick={() => toggle(name)}
+              >
+                <Icon name="alert" size={12} />
+                {name}
+                <span className="sr-only">（站上沒有這個項目，按一下取消選取）</span>
+              </button>
+            ))}
         </div>
       </Field>
 
@@ -219,12 +263,18 @@ export function TaxonomyPanel({
           onClick={() =>
             void save.run(async () => {
               const value = multiple ? selected : (selected[0] ?? '');
+              const baseHash = job.currentRevision?.contentHash ?? null;
               // templateData 是整份取代，現有欄位一定要帶上，否則會把正文清掉。
-              await api.createRevision(job.uuid, {
-                origin: 'manual',
-                templateData: { ...(job.currentRevision?.templateData ?? {}), [dataKey]: value },
-                reason: '修改分類',
-              });
+              // 帶上 expectedContentHash：這份欄位是從哪一版抄來的，就報哪一版；
+              // 中間被別人改過的話寧可被擋下來，也不要把對方的修改蓋掉。
+              await guardEdit(() =>
+                api.createRevision(job.uuid, {
+                  origin: 'manual',
+                  templateData: { ...(job.currentRevision?.templateData ?? {}), [dataKey]: value },
+                  reason: '修改分類',
+                  ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+                }),
+              );
               await refresh();
             })
           }

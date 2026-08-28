@@ -3,6 +3,7 @@ import {
   assertTransition,
   canTransition,
   InvalidTransitionError,
+  isContentMutable,
   isTerminal,
   JOB_STATES,
   TRANSITIONS,
@@ -98,6 +99,33 @@ describe('非法轉移一律丟 InvalidTransitionError', () => {
       expect(typed.to).toBe('APPROVED');
       expect(typed.message).toContain('REVIEWED');
       expect(typed.code).toBe('INVALID_TRANSITION');
+    }
+  });
+});
+
+describe('內容還能不能改', () => {
+  it('已發布、發布中與終止狀態都不能再改內容', () => {
+    // PUBLISHED 只能轉到 SUPERSEDED，沒有回 RENDERED 的路——改了內容，
+    // 核准就退不回去，等於留下一個仍然有效卻對不上內容的核准。
+    for (const state of ['PUBLISHED', 'PUBLISHING', 'FAILED', 'CANCELLED', 'SUPERSEDED'] as JobState[]) {
+      expect(isContentMutable(state)).toBe(false);
+    }
+  });
+
+  it('還在編輯途中的狀態都可以改', () => {
+    for (const state of ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED', 'APPROVED'] as JobState[]) {
+      expect(isContentMutable(state)).toBe(true);
+    }
+  });
+
+  it('不可改的狀態都沒有回到 RENDERED 的路，可改的都還在流程裡', () => {
+    // 這條測試綁的是「規則從轉移表推出來」，而不是某一份寫死的清單。
+    for (const state of JOB_STATES) {
+      if (isContentMutable(state)) {
+        expect(TRANSITIONS[state].length).toBeGreaterThan(0);
+      } else {
+        expect(canTransition(state, 'RENDERED')).toBe(false);
+      }
     }
   });
 });

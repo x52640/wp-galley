@@ -3,7 +3,7 @@ import { api } from '../../service/client.js';
 import type { LoadedJob } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { readString } from '../../lib/format.js';
-import { ErrorNote, Field, Spinner, useAction } from './shared.js';
+import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 
 /**
  * 原稿。
@@ -12,6 +12,10 @@ import { ErrorNote, Field, Spinner, useAction } from './shared.js';
  * 渲染發布。所以這張卡片必須自成一條完整的路，不能只是「等 Agent 的地方」。
  *
  * 日記的標題慣例是 YYYYMMDD（見 docs/SITE-FINDINGS.md），所以給一個一鍵填入。
+ *
+ * **送出的是整份 templateData**，所以一定要帶上 `expectedContentHash`：那是這份
+ * 表單的內容算出來的那一版。分類面板送的也是整份，兩邊撞在一起時要有人被擋下來，
+ * 而不是誰晚到誰贏。
  */
 
 function today(): string {
@@ -48,6 +52,23 @@ export function SourcePanel({
     title !== readString(data, 'title', job.title ?? '') ||
     slug !== readString(data, 'slug') ||
     body !== readString(data, 'body', job.sourceText ?? '');
+
+  // 表單的值是從這一版灌進來的，送出時就報這一版的 hash。
+  const baseHash = job.currentRevision?.contentHash ?? null;
+
+  const saveRevision = async (): Promise<void> => {
+    await guardEdit(() =>
+      api.createRevision(job.uuid, {
+        origin: 'manual',
+        // templateData 是整份取代，所以一定要把現有欄位（分類、tags…）帶上，
+        // 否則儲存原稿會把分類清掉。
+        templateData: { ...(data ?? {}), title, body, ...(slug === '' ? {} : { slug }) },
+        sourceText: body,
+        reason: '手動編輯原稿',
+        ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+      }),
+    );
+  };
 
   return (
     <div className="stack">
@@ -102,14 +123,7 @@ export function SourcePanel({
           disabled={save.busy || !dirty}
           onClick={() =>
             void save.run(async () => {
-              await api.createRevision(job.uuid, {
-                origin: 'manual',
-                // templateData 是整份取代，所以一定要把現有欄位（分類、tags…）帶上，
-                // 否則儲存原稿會把分類清掉。
-                templateData: { ...(data ?? {}), title, body, ...(slug === '' ? {} : { slug }) },
-                sourceText: body,
-                reason: '手動編輯原稿',
-              });
+              await saveRevision();
               await refresh();
             })
           }
@@ -124,14 +138,7 @@ export function SourcePanel({
           disabled={render.busy || body.trim().length === 0}
           onClick={() =>
             void render.run(async () => {
-              if (dirty) {
-                await api.createRevision(job.uuid, {
-                  origin: 'manual',
-                  templateData: { ...(data ?? {}), title, body, ...(slug === '' ? {} : { slug }) },
-                  sourceText: body,
-                  reason: '手動編輯原稿',
-                });
-              }
+              if (dirty) await saveRevision();
               await api.render(job.uuid);
               await refresh();
             })

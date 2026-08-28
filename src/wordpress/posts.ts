@@ -17,13 +17,39 @@ import type { PublishTarget } from './targets.js';
  * 3. **只動 target 允許的內容類型與欄位。** 送出去的欄位是白名單。
  */
 
-/** 遠端變動偵測用的快照。 */
+/**
+ * 遠端變動偵測用的快照。
+ *
+ * 收錄的欄位跟 `buildPayload()` 會覆寫的欄位**一一對應**。只比內容 hash 是不夠的：
+ * 別人在後台改了標題、換了網址代稱、換了精選圖片、調了分類，或把草稿發成公開，
+ * 內容 hash 可以一個位元都沒變，而我們照樣會把那些改動蓋掉。
+ * 之後 `buildPayload()` 多送一個欄位，這裡就要跟著多比一個。
+ */
 export interface RemoteSnapshot {
   readonly id: number;
   readonly status: string;
   readonly modifiedGmt: string | null;
   /** content.raw 的 SHA-256。modified_gmt 只到秒，而且有些外掛不會更新它。 */
   readonly contentHash: string;
+  readonly title: string;
+  readonly slug: string;
+  /** 0 代表沒有精選圖片，跟 WordPress 自己的表示法一致。 */
+  readonly featuredMediaId: number;
+  /** 這個 target 的分類法上掛了哪些 term id，排序過。null 代表這個 target 不用分類法。 */
+  readonly terms: readonly number[] | null;
+}
+
+/** 兩份快照差在哪。用欄位名稱回報，訊息才講得出「被改的是什麼」。 */
+export function diffSnapshots(expected: RemoteSnapshot, actual: RemoteSnapshot): string[] {
+  const changed: string[] = [];
+  if (actual.modifiedGmt !== expected.modifiedGmt) changed.push('修改時間');
+  if (actual.contentHash !== expected.contentHash) changed.push('內容');
+  if (actual.status !== expected.status) changed.push(`狀態（${expected.status} → ${actual.status}）`);
+  if (actual.title !== expected.title) changed.push('標題');
+  if (actual.slug !== expected.slug) changed.push('網址代稱');
+  if (actual.featuredMediaId !== expected.featuredMediaId) changed.push('精選圖片');
+  if (JSON.stringify(actual.terms) !== JSON.stringify(expected.terms)) changed.push('分類');
+  return changed;
 }
 
 export class RemoteChangedError extends Error {
@@ -32,6 +58,8 @@ export class RemoteChangedError extends Error {
     message: string,
     readonly expected: RemoteSnapshot,
     readonly actual: RemoteSnapshot,
+    /** 具體是哪些欄位對不上。給錯誤訊息與稽核紀錄用。 */
+    readonly changedFields: readonly string[] = [],
   ) {
     super(message);
   }
@@ -53,12 +81,38 @@ function hashContent(post: Post): string {
   return createHash('sha256').update(post.content.raw ?? post.content.rendered ?? '').digest('hex');
 }
 
-export function snapshotOf(post: Post): RemoteSnapshot {
+/**
+ * 分類項目不在 `PostSchema` 的固定欄位裡——分類法的名字是站台設定，不是協定的一部分。
+ * 所以由呼叫端把 target 的分類法傳進來，只讀那一個鍵，其他外掛塞的東西一概不碰
+ * （否則某個外掛回一組會變動的數字陣列，就會變成永遠對不上的假衝突）。
+ */
+function termsOf(post: Post, taxonomy: string | null): readonly number[] | null {
+  if (taxonomy === null) return null;
+  const raw = (post as unknown as Record<string, unknown>)[taxonomy];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((value): value is number => typeof value === 'number').sort((a, b) => a - b);
+}
+
+/** `raw` 是我們寫進去的值，優先用它；`rendered` 會被 WordPress 加工過。 */
+function plainTitle(post: Post): string {
+  return post.title.raw ?? post.title.rendered ?? '';
+}
+
+/**
+ * `taxonomy` 沒有預設值是刻意的：預設成 null 的話，用 `snapshotOf(post)` 做出來的
+ * expected 會帶 `terms: null`，而 `assertUnchanged` 抓回來的 actual 帶的是真正的
+ * term 陣列，兩者永遠對不上——變成每次更新都誤報衝突。呼叫端一律指名。
+ */
+export function snapshotOf(post: Post, taxonomy: string | null): RemoteSnapshot {
   return {
     id: post.id,
     status: post.status,
     modifiedGmt: post.modified_gmt,
     contentHash: hashContent(post),
+    title: plainTitle(post),
+    slug: post.slug,
+    featuredMediaId: post.featured_media,
+    terms: termsOf(post, taxonomy),
   };
 }
 
@@ -108,8 +162,9 @@ export async function fetchSnapshot(
   client: WordPressClient,
   target: PublishTarget,
   id: number,
+  taxonomy: string | null = target.taxonomy,
 ): Promise<RemoteSnapshot> {
-  return snapshotOf(await fetchPost(client, target, id));
+  return snapshotOf(await fetchPost(client, target, id), taxonomy);
 }
 
 /**
@@ -180,24 +235,29 @@ export async function updateDraft(
   return data;
 }
 
-/** 遠端沒被動過就通過，動過就丟 RemoteChangedError。 */
+/**
+ * 遠端沒被動過就通過，動過就丟 RemoteChangedError。
+ *
+ * 比對的欄位就是 `RemoteSnapshot` 的全部——也就是我們會覆寫的全部。
+ * 少比一個欄位，那個欄位上的別人的修改就會被我們無聲蓋掉。
+ */
 export async function assertUnchanged(
   client: WordPressClient,
   target: PublishTarget,
   id: number,
   expected: RemoteSnapshot,
 ): Promise<RemoteSnapshot> {
-  const actual = await fetchSnapshot(client, target, id);
+  const actual = await fetchSnapshot(client, target, id, target.taxonomy);
+  const changed = diffSnapshots(expected, actual);
 
-  const changed =
-    actual.modifiedGmt !== expected.modifiedGmt || actual.contentHash !== expected.contentHash;
-
-  if (changed) {
+  if (changed.length > 0) {
     throw new RemoteChangedError(
-      `這篇內容在 WordPress 上被改過了（遠端最後修改時間 ${actual.modifiedGmt ?? '未知'}）。` +
+      `這篇內容在 WordPress 上被改過了（改動的是：${changed.join('、')}；` +
+        `遠端最後修改時間 ${actual.modifiedGmt ?? '未知'}）。` +
         '為了不覆蓋掉那些修改，這次發布已中止。請重新載入遠端內容再確認一次。',
       expected,
       actual,
+      changed,
     );
   }
 

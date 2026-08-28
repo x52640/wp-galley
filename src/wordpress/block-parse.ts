@@ -11,6 +11,7 @@ import {
   type ListBlock,
   type ListItem,
 } from './block-types.js';
+import { escapeTextNode, INLINE_TAGS } from '../core/html-blocks.js';
 
 /**
  * sanitize 過的 HTML → 區塊 IR。
@@ -81,9 +82,8 @@ function outerHtml(node: Node): string {
   return serializeOuter(node as never);
 }
 
-function escapeText(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+/** 文字節點的逃脫規則跟 core/html-blocks 共用一份，兩邊分歧就會產生不同的區塊標記。 */
+const escapeText = escapeTextNode;
 
 /** 逃生門。 */
 function fallback(node: Node): Block {
@@ -310,11 +310,8 @@ const RECOGNIZED_TAGS = new Set([
   'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'blockquote', 'figure', 'img', 'hr',
 ]);
 
-/** 出現在頂層時要併進段落，而不是各自成為一個區塊。 */
-const INLINE_TAGS = new Set([
-  'a', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'span', 'br',
-  'sub', 'sup', 'small', 'mark', 'abbr', 'cite', 'q', 'time', 'del', 'ins',
-]);
+// 頂層的行內標籤清單在 core/html-blocks.ts（INLINE_TAGS）。渲染端的
+// wrapBareTopLevelText() 用同一份，預覽數出來的區塊數才會等於發布出去的區塊數。
 
 function parseNodes(nodes: readonly Node[], defaults: BlockDefaults, depth: number): Block[] {
   const blocks: Block[] = [];

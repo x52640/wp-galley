@@ -40,6 +40,20 @@ type Op =
   | { readonly kind: 'insert'; readonly curr: number };
 
 /**
+ * 兩個區塊算不算「同一塊、沒動過」。
+ *
+ * **文字一樣還不夠**：標題從 h2 改成 h3、連結換了目的地、圖片換了網址或 alt，
+ * 純文字看起來一模一樣，但發布出去的東西已經不同了。只比文字的話這些改動會
+ * 靜靜地變成「與上一版相同」——使用者核准的是他沒看到的改動，那正是這套
+ * 校對符號存在的理由。所以相等要連標記一起比。
+ *
+ * 摘要（summary）另外處理：那是給人看的，仍然以文字為準，不會把 HTML 吐給使用者。
+ */
+function sameBlock(a: TopLevelBlock, b: TopLevelBlock): boolean {
+  return a.text === b.text && a.html === b.html;
+}
+
+/**
  * 最長共同子序列。區塊數是幾十的量級，O(n·m) 的 DP 完全夠用，
  * 而且不必為此多裝一個 diff 套件。
  */
@@ -51,10 +65,9 @@ function diffBlocks(previous: readonly TopLevelBlock[], current: readonly TopLev
   const table: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i -= 1) {
     for (let j = m - 1; j >= 0; j -= 1) {
-      table[i]![j] =
-        previous[i]!.text === current[j]!.text
-          ? table[i + 1]![j + 1]! + 1
-          : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+      table[i]![j] = sameBlock(previous[i]!, current[j]!)
+        ? table[i + 1]![j + 1]! + 1
+        : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
     }
   }
 
@@ -62,7 +75,7 @@ function diffBlocks(previous: readonly TopLevelBlock[], current: readonly TopLev
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
-    if (previous[i]!.text === current[j]!.text) {
+    if (sameBlock(previous[i]!, current[j]!)) {
       ops.push({ kind: 'equal', prev: i, curr: j });
       i += 1;
       j += 1;
@@ -96,12 +109,22 @@ function stripPunctuation(value: string): string {
   return value.replace(PUNCTUATION, '');
 }
 
+/** 標記變了但文字沒變時的說明。講標籤名稱與哪一類屬性，不把 HTML 倒給使用者看。 */
+function describeMarkupChange(before: TopLevelBlock, after: TopLevelBlock): string {
+  if (before.tag !== after.tag) return `區塊改變：${before.tag} → ${after.tag}`;
+  if (before.tag === 'figure' || before.tag === 'img') return '文字沒變，換的是圖片或圖片說明';
+  return '文字沒變，改的是標記（連結、強調或屬性）';
+}
+
 /** 改寫的說明。滑過符號時使用者看到的就是這一句，所以要講「改了什麼」。 */
-function describeReplacement(before: string, after: string): string {
-  if (stripPunctuation(before) === stripPunctuation(after)) {
-    return before.replace(/\s/g, '') === after.replace(/\s/g, '') ? '調整空白' : '調整標點';
+function describeReplacement(before: TopLevelBlock, after: TopLevelBlock): string {
+  // 文字一字不差卻被判定成改動＝改的是標記。這種改動最容易被忽略，要講清楚。
+  if (before.text === after.text) return describeMarkupChange(before, after);
+
+  if (stripPunctuation(before.text) === stripPunctuation(after.text)) {
+    return before.text.replace(/\s/g, '') === after.text.replace(/\s/g, '') ? '調整空白' : '調整標點';
   }
-  const delta = [...after].length - [...before].length;
+  const delta = [...after.text].length - [...before.text].length;
   if (delta > 0) return `改寫，多了 ${delta} 字`;
   if (delta < 0) return `改寫，少了 ${-delta} 字`;
   return '改寫，字數不變';
@@ -145,15 +168,15 @@ export function computeProofMarks(previousHtml: string | null, currentHtml: stri
 
     const paired = Math.min(deletes.length, inserts.length);
     for (let k = 0; k < paired; k += 1) {
-      const before = previous[deletes[k]!]!.text;
-      const after = current[inserts[k]!]!.text;
+      const before = previous[deletes[k]!]!;
+      const after = current[inserts[k]!]!;
       marks.push({
         blockIndex: inserts[k]!,
         kind: 'replaced',
         glyph: GLYPHS.replaced,
         summary: describeReplacement(before, after),
-        before: excerpt(before),
-        after: excerpt(after),
+        before: excerpt(before.text),
+        after: excerpt(after.text),
       });
     }
     for (let k = paired; k < inserts.length; k += 1) {
