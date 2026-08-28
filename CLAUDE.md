@@ -4,33 +4,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 目前狀態
 
-**階段 1–3／7 已完成。下一步是階段 4（WordPress REST 與媒體流程）。**
+**階段 1–5／7 已完成。下一步是階段 5.5（小）或階段 6（大）。**
 
 | 階段 | 內容 | 狀態 |
 | --- | --- | --- |
 | 1 | 安全本機骨架 | ✅ |
 | 2 | 模板 registry 與決定性渲染器 | ✅ |
 | 3 | 訂閱式 Agent 適配器 | ✅ 三家實測端到端通過 |
-| 4 | WordPress REST 與媒體流程 | ⬜ 需要使用者提供 Application Password |
-| 5 | 發布台端到端 UI | ⬜ |
-| 6 | MCP 與共用核心 | ⬜ |
+| 4 | WordPress REST 與媒體流程 | ✅ 正式站實測建立過兩篇草稿 |
+| 5 | 發布台端到端 UI | ✅ 436 個測試，Codex review 後已修 |
+| 5.5 | observations、左右對照檢視 | ⬜ 小，接著做 |
+| 6 | AI 查證（需連外，動到信任邊界） | ⬜ 大，獨立做 |
 | 7 | 測試、文件與交付 | ⬜ |
 
-`IMPLEMENTATION_PLAN.md`（繁中）是原始計畫，但**有兩處已被實測推翻**，以
-`docs/SITE-FINDINGS.md` 為準：首頁移出 MVP、模板只負責正文。
-`docs/AGENT-CLI-PROBE.md` 記錄三個 CLI 的實際參數與踩過的坑。
-
 已實作：`src/config` `src/db` `src/server` `src/templates` `src/preview`
-`src/core` `src/agents` `src/ui`（診斷頁）。
-還是空目錄：`src/wordpress`（階段 4）、`src/media`（階段 4）、`src/mcp`（階段 6）。
+`src/core` `src/agents` `src/wordpress` `src/media` `src/ui`。
+還是空目錄：`src/mcp`（階段 6 之後）。
 
-## 開始階段 4 前要跟使用者拿的東西
+### 一定要先讀的文件
 
-1. 專用 WordPress 使用者名稱 + Application Password（Author 或 Editor，不可用 Administrator）
-2. 有沒有 staging site——沒有的話先全部用 mock，最後只拿一篇指定草稿做真實驗證
+| 檔案 | 內容 |
+| --- | --- |
+| `docs/SITE-FINDINGS.md` | 站台實況。**與 IMPLEMENTATION_PLAN.md 衝突時以此為準** |
+| `docs/STAGE-5-CONTRACT.md` | 前後端共用契約 + 設計系統。改 UI 前必讀第五節 |
+| `docs/STAGE-6-FACTCHECK.md` | 5.5 與 6 的規格，含為什麼 Agent 不能握有連外能力 |
+| `docs/AGENT-CLI-PROBE.md` | 三個 CLI 的實際參數與踩過的坑 |
 
-目標網站是 www.remusplus.com，兩個 CPT：`read-think`（長文）與 `diary`（日記），
-分類法 `read-think-tag` 與 `diary-category`，兩者 `show_in_rest` 都已開啟。
+`IMPLEMENTATION_PLAN.md`（繁中）是原始計畫，**已有多處被實測推翻**。
+
+### 這個專案的定位
+
+**本機 AI 當編輯，使用者當總編。** Agent 進不了 WordPress 是賣點不是限制——
+市面上每個 AI 外掛都在講「裝上去、給權限、它幫你寫」，這個專案是反過來的。
+寫對外文案時不要為了好聽把這點丟掉。
+
+設計準則：**任何會讓使用者離開發布台的功能都算 bug。**
+
+### 接手時要知道的已知限制
+
+這些是刻意接受的，不要當成 bug 去「修」：
+
+- **`actor: 'ui'` 是宣告不是證明。** 本機單人工具無法真正證明呼叫來源；靠 loopback
+  守門加這道檢查擋住我們自己的 MCP 路徑，僅此而已。
+- **WordPress REST 不支援條件式寫入。** 遠端「檢查」與「寫入」必然是兩個請求，
+  中間的空隙只能縮小、不能消除。
+- **沒有「修改已發布文章」的路徑。** `PUBLISHED` 之後只能到 `SUPERSEDED`，
+  發出去才發現錯字只能去 WordPress 後台改。要不要補由使用者決定。
+- `wordpress_objects` 沒做多站台 scoping；目前只有一個站台。
+- 校樣預覽的 CSP 允許任意 loopback 埠嵌入。
+
+### ⚠️ 發布會觸發無法回收的動作
+
+站台裝了 MailPoet 與 Jetpack。**把草稿改成公開的瞬間可能寄出電子報或自動分享，
+之後刪文章救不回來。** 這是整個流程裡唯一「刪掉就沒事」不成立的地方。
+階段 4 的真實驗證因此全部停在草稿狀態。
+
+### 還沒決定的事
+
+**要接哪一家圖片生成 API。** 接口留著，使用者找到後會把金鑰貼進 `.env`。
+三個 CLI 都不能生圖（用它們自己的 `--help` 確認過，`codex -i/--image` 是把圖片
+當**輸入**附加，不是產出）。
 
 ## 指令
 
@@ -50,7 +83,9 @@ Node ≥22.5 + TypeScript（ESM、`verbatimModuleSyntax`，import 要寫 `.js` �
 
 SQLite 用 **Node 內建的 `node:sqlite`**（`DatabaseSync`），不是 better-sqlite3——免原生編譯。API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳 `Record<string, SQLOutputValue>[]`，要轉型得先過 `as unknown as`。
 
-尚未安裝、後續階段才需要：模板引擎（Nunjucks/Handlebars，strict mode）、`sanitize-html`、`parse5`、diff 套件、官方 TypeScript MCP SDK、Playwright。
+已安裝：Nunjucks、`sanitize-html`、`parse5`。diff 是自己寫的（`src/core/diff.ts`，LCS，未加依賴）。
+
+尚未安裝：官方 TypeScript MCP SDK、Playwright。UI 沒有用任何元件庫，圖示是手抄的 Lucide SVG。
 
 ## 既有程式碼的關鍵約定
 
