@@ -84,7 +84,9 @@ describe('輸出大小上限', () => {
       stdin: '',
     });
     expect(r.outcome).toBe('output-too-large');
-    expect(Buffer.byteLength(r.stdout)).toBeLessThanOrEqual(2000);
+    // 緩衝區絕不超過設定的上限。放寬到 2000 曾經掩蓋了「上限其實是 limit + 一個
+    // chunk」的缺陷，負載高時 chunk 變大就會失敗。
+    expect(Buffer.byteLength(r.stdout)).toBeLessThanOrEqual(1000);
   });
 
   it('stderr 也有上限，不會被灌爆', async () => {

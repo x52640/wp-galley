@@ -188,3 +188,23 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 
 **核心的區塊屬性順序不固定**（`#1379` 是 `{"id",…,"align"}`，`#870` 是
 `{"align","id",…}`），因為驗證比對的是 HTML 不是屬性 JSON。我們固定順序是安全的。
+
+## 階段 4-2 實測補充
+
+`/wp/v2/types` 的 `supports` 欄位**不是 `Record<string, boolean>`**。WordPress 會把
+註冊時給的功能參數原樣帶出來，正式站的實際值：
+
+| post type | supports.editor |
+| --- | --- |
+| `post`、`page` | `[{"notes":true}]` |
+| `mailpoet_email` | `[{"default-mode":"template-locked"}]` |
+| `read-think`、`diary` | `true` |
+
+我們的兩個 CPT 都是 `true`，但 `/wp/v2/types` 一次回傳**全部**類型，所以 schema
+一定要容得下陣列，否則整個探查會失敗。判斷有沒有支援某功能只能看「鍵在不在」，
+不能假設值的型別。
+
+這個缺陷是拿真實站台實跑才發現的——單元測試的假資料全部寫成 `true`，測不出來。
+
+站台探查（`GET /api/wordpress`）對正式站的實跑結果：連線正常、帳號
+`ai_publisher`（editor）、兩個 CPT 都在且支援精選圖片、`problems` 為空。

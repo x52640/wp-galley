@@ -82,15 +82,31 @@ function buildEnv(extra: Record<string, string> | undefined): NodeJS.ProcessEnv 
 class BoundedBuffer {
   private readonly chunks: Buffer[] = [];
   private size = 0;
+  private truncated = false;
 
   constructor(private readonly limit: number) {}
 
-  /** @returns 是否已超過上限 */
+  /**
+   * @returns 輸出是否已超過上限
+   *
+   * 超出的部分會被切掉，緩衝區永遠不會超過 limit。之前是整塊 chunk 收下才回報
+   * 超標，實際上限變成「limit + 一個 chunk」——Node 在負載高時會把多次 write
+   * 合併成大 chunk，緩衝區就可能是設定值的好幾倍。
+   */
   push(chunk: Buffer): boolean {
-    if (this.size >= this.limit) return true;
+    if (this.truncated) return true;
+
+    const room = this.limit - this.size;
+    if (chunk.length > room) {
+      this.chunks.push(chunk.subarray(0, room));
+      this.size = this.limit;
+      this.truncated = true;
+      return true;
+    }
+
     this.chunks.push(chunk);
     this.size += chunk.length;
-    return this.size > this.limit;
+    return false;
   }
 
   toString(): string {
