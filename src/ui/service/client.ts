@@ -1,0 +1,288 @@
+import type {
+  AddMediaInput,
+  AgentReviewInput,
+  AgentRunResult,
+  Approval,
+  CreateJobInput,
+  CreateRevisionInput,
+  JobDetail,
+  JobState,
+  JobSummary,
+  JobTarget,
+  MediaAsset,
+  PublishInput,
+  PublisherApi,
+  PublishResult,
+  RenderOutcome,
+  Revision,
+  Term,
+} from './types.js';
+import { fixtureApi } from './fixtures.js';
+
+/**
+ * 所有 HTTP 呼叫的唯一出口。
+ *
+ * 兩件事只在這裡做：
+ * 1. 把後端的 `{ error: { code, message, details?, requestId } }` 轉成 ApiError，
+ *    畫面才有辦法說「發生什麼事」而不是印出一串 JSON。
+ * 2. 示範資料的切換。後端還沒接上時整個 UI 仍然能操作，見 fixtures.ts。
+ */
+
+export class ApiError extends Error {
+  override readonly name = 'ApiError';
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly details?: unknown,
+    readonly requestId?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** 連不上後端與後端回錯是兩件事，訊息不能混在一起。 */
+export class NetworkError extends Error {
+  override readonly name = 'NetworkError';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+const FIXTURE_KEY = 'publisher.fixtures';
+
+export function isFixtureMode(): boolean {
+  const flag = new URLSearchParams(window.location.search).get('fixtures');
+  if (flag === '1') return true;
+  if (flag === '0') return false;
+  try {
+    return window.localStorage.getItem(FIXTURE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setFixtureMode(on: boolean): void {
+  try {
+    if (on) window.localStorage.setItem(FIXTURE_KEY, '1');
+    else window.localStorage.removeItem(FIXTURE_KEY);
+  } catch {
+    /* 無痕視窗會擋 localStorage；此時只能靠網址參數。 */
+  }
+}
+
+interface ErrorPayload {
+  error?: { code?: string; message?: string; details?: unknown; requestId?: string };
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  let payload: ErrorPayload | null = null;
+  try {
+    payload = (await response.json()) as ErrorPayload;
+  } catch {
+    /* 不是 JSON（例如 proxy 掛了）就只能用狀態碼。 */
+  }
+  const error = payload?.error;
+  return new ApiError(
+    error?.code ?? `HTTP_${response.status}`,
+    error?.message ?? `後端回應 HTTP ${response.status}`,
+    response.status,
+    error?.details,
+    error?.requestId,
+  );
+}
+
+async function send(path: string, init?: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(path, init);
+  } catch (cause) {
+    throw new NetworkError(
+      '連不上後端。請確認 `npm run dev` 的 server 那一欄還在跑，然後重試。',
+    );
+  }
+  if (!response.ok) throw await toApiError(response);
+  return response;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await send(path);
+  return (await response.json()) as T;
+}
+
+async function sendJson<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const response = await send(path, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  if (response.status === 204) return undefined as T;
+  const text = await response.text();
+  return (text.length === 0 ? undefined : JSON.parse(text)) as T;
+}
+
+/**
+ * 圖片走 base64 JSON。
+ *
+ * 後端（src/server/routes/jobs.ts）刻意不裝 multipart 外掛：本機工具沒有大量
+ * 上傳的場景，多一個外掛就多一套解析路徑。Fastify 的 bodyLimit 是 8 MB，
+ * base64 會膨脹約 1/3，所以實際能傳約 6 MB 的圖。
+ *
+ * SVG 不會走到這裡：WordPress 不收 SVG，前端在 lib/svg-to-png.ts 先轉成 PNG。
+ */
+async function mediaBody(input: AddMediaInput): Promise<Record<string, unknown>> {
+  const buffer = await input.file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  // 一次 8 KB，避免大圖把 String.fromCharCode 的參數塞爆。
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  }
+  return {
+    filename: input.filename,
+    mimeType: input.mimeType,
+    dataBase64: btoa(binary),
+    ...(input.altText === undefined ? {} : { altText: input.altText }),
+    ...(input.caption === undefined ? {} : { caption: input.caption }),
+    ...(input.briefKey === undefined ? {} : { briefKey: input.briefKey }),
+  };
+}
+
+const httpApi: PublisherApi = {
+  async listJobs(filter) {
+    const query =
+      filter?.state && filter.state.length > 0 ? `?state=${filter.state.join(',')}` : '';
+    const body = await getJson<{ jobs: JobSummary[] }>(`/api/jobs${query}`);
+    return body.jobs;
+  },
+
+  async createJob(input: CreateJobInput) {
+    const body = await sendJson<{ job: { uuid: string } }>('/api/jobs', 'POST', input);
+    return { uuid: body.job.uuid };
+  },
+
+  getJob: (uuid: string) => getJson<JobDetail>(`/api/jobs/${uuid}`),
+
+  async cancelJob(uuid: string) {
+    await sendJson<unknown>(`/api/jobs/${uuid}`, 'DELETE');
+  },
+
+  async createRevision(uuid: string, input: CreateRevisionInput) {
+    const body = await sendJson<{ revision: Revision }>(
+      `/api/jobs/${uuid}/revisions`,
+      'POST',
+      input,
+    );
+    return body.revision;
+  },
+
+  async listRevisions(uuid: string) {
+    const body = await getJson<{ revisions: Revision[] }>(`/api/jobs/${uuid}/revisions`);
+    return body.revisions;
+  },
+
+  render: (uuid: string) => sendJson<RenderOutcome>(`/api/jobs/${uuid}/render`, 'POST'),
+
+  async fetchPreview(uuid: string) {
+    const response = await send(`/api/jobs/${uuid}/preview`);
+    return response.text();
+  },
+
+  runAgent: (uuid: string, input: AgentReviewInput) =>
+    sendJson<AgentRunResult>(`/api/jobs/${uuid}/agent`, 'POST', input),
+
+  async cancelAgent(uuid: string) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/agent`, 'DELETE');
+  },
+
+  async addMedia(uuid: string, input: AddMediaInput) {
+    const body = await sendJson<{ media: MediaAsset }>(
+      `/api/jobs/${uuid}/media`,
+      'POST',
+      await mediaBody(input),
+    );
+    return body.media;
+  },
+
+  async replaceMedia(uuid: string, assetId: number, input: AddMediaInput) {
+    const body = await sendJson<{ media: MediaAsset }>(
+      `/api/jobs/${uuid}/media/${assetId}`,
+      'PUT',
+      await mediaBody(input),
+    );
+    return body.media;
+  },
+
+  async removeMedia(uuid: string, assetId: number) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/media/${assetId}`, 'DELETE');
+  },
+
+  async placeMedia(uuid: string, assetId: number, afterBlockIndex: number) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/media/${assetId}/place`, 'POST', {
+      afterBlockIndex,
+    });
+  },
+
+  // 設定精選圖片與取消精選走的是兩條路徑：取消要送 null，綁在某張圖底下的
+  // 路徑表達不了「沒有精選圖片」，所以後端另外開了 DELETE /featured。
+  async setFeaturedMedia(uuid: string, assetId: number | null) {
+    if (assetId === null) {
+      await sendJson<unknown>(`/api/jobs/${uuid}/featured`, 'DELETE');
+      return;
+    }
+    await sendJson<unknown>(`/api/jobs/${uuid}/media/${assetId}/featured`, 'POST');
+  },
+
+  async approve(uuid: string, contentHash: string) {
+    const body = await sendJson<{ approval: Approval }>(`/api/jobs/${uuid}/approve`, 'POST', {
+      contentHash,
+    });
+    return body.approval;
+  },
+
+  async revokeApproval(uuid: string, reason: string) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/approve`, 'DELETE', { reason });
+  },
+
+  async publish(uuid: string, input: PublishInput) {
+    const body = await sendJson<{ result: PublishResult }>(
+      `/api/jobs/${uuid}/publish`,
+      'POST',
+      input,
+    );
+    return body.result;
+  },
+
+  async listTerms(taxonomy: string) {
+    const body = await getJson<{ terms: Term[] }>(
+      `/api/wordpress/terms?taxonomy=${encodeURIComponent(taxonomy)}`,
+    );
+    return body.terms;
+  },
+
+  createTerm: (taxonomy: string, name: string) =>
+    sendJson<Term>('/api/wordpress/terms', 'POST', { taxonomy, name }),
+
+  async listTargets() {
+    const body = await getJson<{ publishTargets?: JobTarget[] }>('/api/wordpress');
+    return body.publishTargets ?? [];
+  },
+};
+
+/** 畫面只認這個。示範資料模式在這裡分流，元件完全不用知道。 */
+export const api: PublisherApi = new Proxy({} as PublisherApi, {
+  get(_target, prop: string) {
+    const source = isFixtureMode() ? fixtureApi : httpApi;
+    return source[prop as keyof PublisherApi];
+  },
+});
+
+export function describeError(error: unknown): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof NetworkError) return error.message;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+export type { JobState };
