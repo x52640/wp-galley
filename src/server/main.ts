@@ -7,6 +7,7 @@ import { openDatabase } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadTemplateRegistry } from '../templates/registry.js';
 import { AgentRegistry } from '../agents/registry.js';
+import { loadPublishTargets, PublishTargetError } from '../wordpress/targets.js';
 import { TemplateLoadError } from '../templates/registry.js';
 
 // 測試時不讀 .env，避免把本機秘密帶進測試環境。
@@ -42,7 +43,19 @@ async function main(): Promise<void> {
     throw error;
   }
 
-  const app = await buildApp({ config, db, templates, agents: new AgentRegistry() });
+  let targets;
+  try {
+    targets = await loadPublishTargets(join(paths.config, 'publish-targets.json'));
+  } catch (error) {
+    if (error instanceof PublishTargetError) {
+      console.error(`\n啟動失敗：發布目標設定錯誤\n${error.message}\n`);
+      db.close();
+      process.exit(1);
+    }
+    throw error;
+  }
+
+  const app = await buildApp({ config, db, templates, agents: new AgentRegistry(), targets });
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, '收到關閉訊號，正在停止服務');

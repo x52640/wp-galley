@@ -208,3 +208,34 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 
 站台探查（`GET /api/wordpress`）對正式站的實跑結果：連線正常、帳號
 `ai_publisher`（editor）、兩個 CPT 都在且支援精選圖片、`problems` 為空。
+
+## 階段 4-3：分類項目的實際狀況
+
+三個名詞在 WordPress 裡是不同的東西，這個專案的文件一律照下面用：
+
+| 名詞 | 站上是什麼 |
+| --- | --- |
+| post type（內容類型） | `read-think`、`diary` |
+| taxonomy（分類法） | `read-think-tag`、`diary-category` |
+| term（分類項目） | 隨筆、藝術、讀書心得、經濟學 |
+
+⚠️ **`read-think-tag` 名字叫 tag，但 `hierarchical` 是 `true`**，行為其實是分類
+（可以有父子層）。判斷行為一律看 `hierarchical`，不要看名字。
+
+`read-think-tag` 的實際項目：
+
+| 名稱 | slug | 用了幾次 |
+| --- | --- | --- |
+| 隨筆 | `essay` | 6 |
+| 藝術 | `art` | 3 |
+| 讀書心得 | `reading-note` | 3 |
+| 經濟學 | `%e7%b6%93%e6%bf%9f%e5%ad%b8` | 2 |
+
+「經濟學」的 slug 是**中文被 URL 編碼**的結果，其餘三個是英文。所以名稱比對必須
+同時試 `name`、`slug` 與 `decodeURIComponent(slug)`，只比其中一個會漏。
+
+`diary-category` **一個項目都沒有**，跟 100 篇日記全部沒有分類一致。
+
+**預設不自動建立分類項目**（使用者於 2026-08-28 確認）。理由是 Agent 容易生出
+「經濟」「經濟學」「經濟學思考」這種近義詞，自動建立幾個月後分類會變垃圾場。
+對不上的名稱會原樣回報，由使用者在 UI 上決定。

@@ -1,9 +1,11 @@
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
 import { loadConfig } from '../src/config/env.js';
 import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { paths } from '../src/config/paths.js';
+import { loadPublishTargets } from '../src/wordpress/targets.js';
 import { createTestDatabase } from './helpers/test-db.js';
 import { AgentRegistry } from '../src/agents/registry.js';
 import { WordPressClient } from '../src/wordpress/client.js';
@@ -32,6 +34,7 @@ async function buildWith(wordpress: WordPressClient | null): Promise<FastifyInst
     db: db.handle,
     templates: await loadTemplateRegistry(paths.templates),
     agents: new AgentRegistry({ adapters: [] }),
+    targets: await loadPublishTargets(join(paths.config, 'publish-targets.json')),
     wordpress,
   });
   await app.ready();

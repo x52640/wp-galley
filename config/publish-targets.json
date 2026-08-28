@@ -1,0 +1,34 @@
+{
+  "targets": [
+    {
+      "key": "read-think",
+      "displayName": "思想•讀•鑰（長文）",
+      "contentType": "longform",
+      "postType": "read-think",
+      "restBase": "read-think",
+      "templateId": "longform-v1",
+      "taxonomy": "read-think-tag",
+      "fixedObjectId": null,
+      "allowCreate": true,
+      "allowUpdate": true,
+      "allowCreateTerms": false,
+      "requireFeaturedImage": true,
+      "requireSecondConfirmation": false
+    },
+    {
+      "key": "diary",
+      "displayName": "日•記",
+      "contentType": "diary",
+      "postType": "diary",
+      "restBase": "diary",
+      "templateId": "diary-v1",
+      "taxonomy": "diary-category",
+      "fixedObjectId": null,
+      "allowCreate": true,
+      "allowUpdate": true,
+      "allowCreateTerms": false,
+      "requireFeaturedImage": false,
+      "requireSecondConfirmation": false
+    }
+  ]
+}

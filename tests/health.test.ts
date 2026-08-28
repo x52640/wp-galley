@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it, afterAll, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
@@ -7,6 +8,7 @@ import { AgentRegistry } from '../src/agents/registry.js';
 import { FakeAdapter } from './helpers/fake-adapter.js';
 import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { paths } from '../src/config/paths.js';
+import { loadPublishTargets } from '../src/wordpress/targets.js';
 
 const SECRET = 'aaaa bbbb cccc dddd';
 const db = createTestDatabase();
@@ -26,6 +28,7 @@ beforeAll(async () => {
     templates: await loadTemplateRegistry(paths.templates),
     // 測試一律用假 adapter，不碰真實 CLI、不消耗訂閱額度。
     agents: new AgentRegistry({ adapters: [new FakeAdapter('codex', 'Codex')] }),
+    targets: await loadPublishTargets(join(paths.config, 'publish-targets.json')),
   });
   // 必須在 ready() 之前註冊。
   app.get('/api/__boom', async () => {

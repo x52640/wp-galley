@@ -14,6 +14,7 @@ import { templateRoutes } from './routes/templates.js';
 import { agentRoutes } from './routes/agents.js';
 import { wordpressRoutes } from './routes/wordpress.js';
 import { WordPressClient } from '../wordpress/client.js';
+import type { PublishTargetRegistry } from '../wordpress/targets.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TemplateRegistry } from '../templates/registry.js';
 
@@ -24,6 +25,7 @@ export interface AppContext {
   readonly agents: AgentRegistry;
   /** .env 沒設定 WordPress 時是 null；路由要自己處理這個情況。 */
   readonly wordpress: WordPressClient | null;
+  readonly targets: PublishTargetRegistry;
   readonly version: string;
   readonly startedAt: string;
 }
@@ -35,6 +37,7 @@ export interface BuildAppOptions {
   readonly agents: AgentRegistry;
   /** 測試可以注入假的 client；正式啟動時由 config 建立。 */
   readonly wordpress?: WordPressClient | null;
+  readonly targets: PublishTargetRegistry;
   readonly version?: string;
 }
 
@@ -55,6 +58,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     templates: options.templates,
     agents: options.agents,
     wordpress: options.wordpress ?? createWordPressClient(config, app),
+    targets: options.targets,
     version: options.version ?? '0.1.0',
     startedAt: new Date().toISOString(),
   };

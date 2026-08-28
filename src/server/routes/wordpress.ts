@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { probeSite, unconfiguredProbe } from '../../wordpress/site.js';
+import { fetchPostTypes } from '../../wordpress/site.js';
+import { validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
 
 /**
  * WordPress 連線狀態 API。
@@ -16,7 +18,37 @@ const EXPECTED_POST_TYPES = ['read-think', 'diary'] as const;
 export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/wordpress', async () => {
     const client = app.ctx.wordpress;
-    if (!client) return unconfiguredProbe();
-    return probeSite(client, EXPECTED_POST_TYPES);
+    const targets = app.ctx.targets.list();
+
+    if (!client) {
+      return { ...unconfiguredProbe(), targetIssues: [], publishTargets: summarize(targets) };
+    }
+
+    const probe = await probeSite(client, EXPECTED_POST_TYPES);
+
+    // 認證都過不了就沒必要再驗設定，錯誤訊息會變成兩層噪音。
+    if (!probe.authenticated) {
+      return { ...probe, targetIssues: [], publishTargets: summarize(targets) };
+    }
+
+    // 設定檔說要發到哪，跟站台實際有什麼，要對得起來才算真的可用。
+    const postTypes = await fetchPostTypes(client);
+    const targetIssues = validateTargetsAgainstSite(targets, postTypes);
+
+    return { ...probe, targetIssues, publishTargets: summarize(targets) };
   });
+}
+
+/** 只回報 UI 需要的欄位。設定檔沒有秘密，但也沒必要整包吐出去。 */
+function summarize(targets: readonly PublishTarget[]) {
+  return targets.map((target) => ({
+    key: target.key,
+    displayName: target.displayName,
+    contentType: target.contentType,
+    postType: target.postType,
+    templateId: target.templateId,
+    taxonomy: target.taxonomy,
+    requireFeaturedImage: target.requireFeaturedImage,
+    allowCreateTerms: target.allowCreateTerms,
+  }));
 }
