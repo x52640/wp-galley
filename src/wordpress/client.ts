@@ -58,6 +58,11 @@ export interface RequestOptions<T> {
   readonly method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   readonly query?: Record<string, string | number | boolean | undefined>;
   readonly body?: unknown;
+  /**
+   * 直接送出的位元組（媒體上傳用）。跟 body 互斥——WordPress 的媒體端點吃的是
+   * 檔案本體，不是 JSON。Content-Disposition 由呼叫端放進 headers。
+   */
+  readonly rawBody?: { readonly bytes: Uint8Array; readonly contentType: string };
   /** 驗證回應。WordPress 或外掛改版時要炸在這裡，不要讓壞資料流進系統。 */
   readonly schema?: z.ZodType<T>;
   /** 覆寫這次請求的重試次數，例如發布請求想設成 0。 */
@@ -186,9 +191,13 @@ export class WordPressClient {
           Authorization: this.authHeader,
           Accept: 'application/json',
           ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(options.rawBody === undefined ? {} : { 'Content-Type': options.rawBody.contentType }),
           ...options.headers,
         },
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        ...(options.rawBody === undefined
+          ? {}
+          : { body: options.rawBody.bytes as unknown as BodyInit }),
         signal: controller.signal,
         // 跳轉會讓 Authorization 標頭在部分伺服器上被丟掉，導致「密碼明明對卻說沒權限」。
         // 寧可明確報錯，讓使用者去修 WORDPRESS_URL。
