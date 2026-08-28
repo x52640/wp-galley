@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toBlockMarkup } from '../src/wordpress/blocks.js';
-import { BlockDefaultsSchema, DEFAULT_BLOCK_DEFAULTS } from '../src/wordpress/block-types.js';
+import { BlockConversionError, BlockDefaultsSchema, DEFAULT_BLOCK_DEFAULTS } from '../src/wordpress/block-types.js';
 
 /**
  * 這裡的期望值全部是從 www.remusplus.com 既有文章直接複製下來的真實標記，
@@ -213,6 +213,129 @@ describe('不靜默丟內容', () => {
   it('正常內容不會用到逃生門', () => {
     const { fallbackCount } = toBlockMarkup('<p>段落</p><h3>標題</h3><ul><li>項目</li></ul><hr>');
     expect(fallbackCount).toBe(0);
+  });
+});
+
+/**
+ * 以下全部來自 Codex 的 code review（2026-08-28）。每一條都是「輸出看起來成功、
+ * 實際上內容被丟掉或被改動」的情況——比整份轉換失敗更危險，因為不會有人發現。
+ */
+describe('review 迴歸：不得靜默丟失或竄改內容', () => {
+  it('巢狀清單後面還有文字時整份退到逃生門，順序不被偷改', () => {
+    // 核心的 list-item 永遠先存文字再存子區塊，硬轉會把 after 搬到子清單前面。
+    const { markup, fallbackCount } = toBlockMarkup(
+      '<ul><li>before<ol><li>nested</li></ol>after</li></ul>',
+      noFontSize,
+    );
+    expect(fallbackCount).toBe(1);
+    expect(markup).toContain('before');
+    expect(markup).toContain('nested');
+    expect(markup).toContain('after');
+    // 原本的順序必須原封不動
+    expect(markup.indexOf('before')).toBeLessThan(markup.indexOf('nested'));
+    expect(markup.indexOf('nested')).toBeLessThan(markup.indexOf('after'));
+  });
+
+  it('清單裡不是 li 的內容不會被吃掉', () => {
+    // sanitize 會把 <ul><div>字</div> 的 div 拆掉但留下文字。
+    const { markup, fallbackCount } = toBlockMarkup('<ul>重要<li>A</li></ul>', noFontSize);
+    expect(fallbackCount).toBe(1);
+    expect(markup).toContain('重要');
+    expect(markup).toContain('A');
+  });
+
+  it('figure 有多張圖或額外內容時完整保留', () => {
+    const { markup, fallbackCount } = toBlockMarkup(
+      '<figure><img src="https://e.test/a.jpg" alt="A"><p>來源</p><img src="https://e.test/b.jpg" alt="B"></figure>',
+    );
+    expect(fallbackCount).toBe(1);
+    expect(markup).toContain('a.jpg');
+    expect(markup).toContain('b.jpg');
+    expect(markup).toContain('來源');
+  });
+
+  it('figure 包表格時完整保留（不是裸 table）', () => {
+    const { markup, fallbackCount } = toBlockMarkup(
+      '<figure class="wp-block-table"><table><tbody><tr><td>格</td></tr></tbody></table></figure>',
+    );
+    expect(fallbackCount).toBe(1);
+    expect(markup).toContain('wp-block-table');
+    expect(markup).toContain('<td>格</td>');
+  });
+
+  it('裸 img 也會保留 media id', () => {
+    const { markup } = toBlockMarkup('<img src="https://e.test/a.jpg" alt="A" class="wp-image-42">');
+    expect(markup).toContain('"id":42');
+    expect(markup).toContain('class="wp-image-42"');
+  });
+
+  it('清單各項的字級各自保留，不會被壓成第一項', () => {
+    const { markup } = toBlockMarkup(
+      '<ul><li class="has-small-font-size">A</li><li class="has-large-font-size">B</li></ul>',
+      noFontSize,
+    );
+    expect(markup).toContain('{"fontSize":"small"}');
+    expect(markup).toContain('{"fontSize":"large"}');
+    expect(markup).toContain('<li class="has-small-font-size">A</li>');
+    expect(markup).toContain('<li class="has-large-font-size">B</li>');
+  });
+
+  it('圖片的指定寬度與 is-resized 不被丟掉', () => {
+    // 期望值取自 read-think #1369。
+    const { markup } = toBlockMarkup(
+      '<figure class="wp-block-image aligncenter size-large is-resized">' +
+        '<img src="https://e.test/a.webp" alt="" class="wp-image-1370" style="width:800px"></figure>',
+    );
+    expect(markup).toBe(
+      '<!-- wp:image {"id":1370,"width":"800px","sizeSlug":"large","linkDestination":"none","align":"center"} -->\n' +
+        '<figure class="wp-block-image aligncenter size-large is-resized">' +
+        '<img src="https://e.test/a.webp" alt="" class="wp-image-1370" style="width:800px"/></figure>\n' +
+        '<!-- /wp:image -->',
+    );
+  });
+
+  it('分隔線的樣式不被丟掉', () => {
+    // 期望值取自 diary #1708。
+    const { markup } = toBlockMarkup('<hr class="wp-block-separator is-style-wide">');
+    expect(markup).toBe(
+      '<!-- wp:separator {"className":"is-style-wide"} -->\n' +
+        '<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide"/>\n' +
+        '<!-- /wp:separator -->',
+    );
+  });
+
+  it('空的圖說整個略過——核心會略過，多輸出就判定內容無效', () => {
+    const { markup } = toBlockMarkup(
+      '<figure><img src="https://e.test/a.jpg" alt="A"><figcaption></figcaption></figure>',
+    );
+    expect(markup).not.toContain('figcaption');
+  });
+
+  it('過深但仍算真實內容（40 層）退到逃生門，內容保住', () => {
+    const deep = '<ul><li>'.repeat(40) + 'X' + '</li></ul>'.repeat(40);
+    const result = toBlockMarkup(deep, noFontSize);
+    expect(result.fallbackCount).toBe(1);
+    expect(result.markup).toContain('X');
+  });
+
+  it('荒謬的巢狀深度給出看得懂的錯誤，而不是爆堆疊', () => {
+    const absurd = '<ul><li>'.repeat(2000) + 'X' + '</li></ul>'.repeat(2000);
+    expect(() => toBlockMarkup(absurd, noFontSize)).toThrow(BlockConversionError);
+    expect(() => toBlockMarkup(absurd, noFontSize)).toThrow(/巢狀深度/);
+  });
+});
+
+describe('review 迴歸：區塊註解不可被內容破壞', () => {
+  it('內容裡的假字級 class 不會進到區塊註解', () => {
+    // has---->x-font-size 若原樣採用，`-->` 會把區塊註解提早關掉。
+    const { markup } = toBlockMarkup('<p class="has---&gt;x-font-size">A</p>', noFontSize);
+    expect(markup).toBe('<!-- wp:paragraph -->\n<p>A</p>\n<!-- /wp:paragraph -->');
+  });
+
+  it('manifest 填了不合法的字級 slug 會在載入時就被擋下', () => {
+    expect(() => BlockDefaultsSchema.parse({ paragraphFontSize: '--><x' })).toThrow();
+    expect(() => BlockDefaultsSchema.parse({ imageSizeSlug: 'a b' })).toThrow();
+    expect(BlockDefaultsSchema.parse({ paragraphFontSize: 'x-large' }).paragraphFontSize).toBe('x-large');
   });
 });
 

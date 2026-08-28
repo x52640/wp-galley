@@ -7,6 +7,7 @@ import type {
   ListItem,
   ParagraphBlock,
   QuoteBlock,
+  SeparatorBlock,
 } from './block-types.js';
 
 /**
@@ -15,15 +16,34 @@ import type {
  * 每個函式都是逐字對照 WordPress 核心 save() 的輸出寫的。改動這裡任何一個
  * 空白、斜線或屬性順序，都可能讓區塊編輯器判定內容無效，所以：
  *
- *   **修改前先跑 tests/block-serialize.test.ts，那裡放的是從正式站抓下來的真實標記。**
+ *   **修改前先跑 tests/blocks.test.ts，那裡放的是從正式站抓下來的真實標記。**
  *
  * 決定性：純函式，不碰時鐘、亂數或環境。同樣的 IR 永遠產生同樣的位元組。
  */
 
+/**
+ * 區塊註解裡的 JSON 要額外跳脫。
+ *
+ * `-->` 會把 HTML 註解提早關掉，`<` 與 `&` 則可能被 HTML 解析器誤讀。核心的
+ * serializer 也做同樣的事，而且用的是 JSON 的 \u 逃脫——這樣 JSON.parse 回來
+ * 還是原值，往返不會失真。
+ */
+function escapeCommentJson(json: string): string {
+  // 順序與替換內容都照抄核心的 serializeAttributes，一個字元都不要改：
+  // 只有連續兩個 `-` 才會關掉註解，單一個 `-` 不必動——不然 `is-style-wide`
+  // 會被寫成 `is-style-wide`，跟正式站既有內容不一致。
+  return json
+    .replace(/--/g, '\\u002d\\u002d')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\\"/g, '\\u0022');
+}
+
 /** 核心把屬性寫成 `<!-- wp:name {"a":1} -->`，沒有屬性時連空格都不留。 */
 function openComment(name: string, attrs?: Record<string, unknown>): string {
   if (!attrs || Object.keys(attrs).length === 0) return `<!-- wp:${name} -->`;
-  return `<!-- wp:${name} ${JSON.stringify(attrs)} -->`;
+  return `<!-- wp:${name} ${escapeCommentJson(JSON.stringify(attrs))} -->`;
 }
 
 function closeComment(name: string): string {
@@ -37,7 +57,7 @@ function fontSizeClass(fontSize: string | null): string | null {
 
 function classAttr(...parts: (string | null)[]): string {
   const classes = parts.filter((part): part is string => part !== null && part.length > 0);
-  return classes.length === 0 ? '' : ` class="${classes.join(' ')}"`;
+  return classes.length === 0 ? '' : ` class="${escapeAttribute(classes.join(' '))}"`;
 }
 
 /**
@@ -79,14 +99,17 @@ function serializeHeading(block: HeadingBlock): string {
   ].join('\n');
 }
 
-function serializeListItem(item: ListItem, fontSize: string | null): string {
+function serializeListItem(item: ListItem): string {
   // 巢狀清單緊貼在文字後面，關閉的 </li> 又緊貼在子清單的結束註解後面：
   //   <li>文字<!-- wp:list -->\n<ul …>…</ul>\n<!-- /wp:list --></li>
+  //
+  // 核心的 list-item 一定「先文字、後子區塊」，所以子清單後面不可能還有文字。
+  // parseListItem 遇到那種形狀會整份退到 wp:html，這裡因此不必處理。
   const nested = item.nested.map((child) => serializeList(child)).join('\n\n');
-  const attrs = fontSize === null ? undefined : { fontSize };
+  const attrs = item.fontSize === null ? undefined : { fontSize: item.fontSize };
   return [
     openComment('list-item', attrs),
-    `<li${classAttr(fontSizeClass(fontSize))}>${item.html}${nested}</li>`,
+    `<li${classAttr(fontSizeClass(item.fontSize))}>${item.html}${nested}</li>`,
     closeComment('list-item'),
   ].join('\n');
 }
@@ -94,7 +117,7 @@ function serializeListItem(item: ListItem, fontSize: string | null): string {
 function serializeList(block: ListBlock): string {
   const tag = block.ordered ? 'ol' : 'ul';
   const attrs = block.ordered ? { ordered: true } : undefined;
-  const items = block.items.map((item) => serializeListItem(item, block.itemFontSize));
+  const items = block.items.map((item) => serializeListItem(item));
   return [
     openComment('list', attrs),
     wrapChildren(`<${tag} class="wp-block-list">`, items, `</${tag}>`),
@@ -112,23 +135,43 @@ function serializeQuote(block: QuoteBlock): string {
 }
 
 function serializeImage(block: ImageBlock): string {
-  // 屬性順序照核心 block.json：id → sizeSlug → linkDestination → align。
+  // 屬性順序照核心 block.json：id → width → height → sizeSlug → linkDestination → align。
   const attrs: Record<string, unknown> = {};
   if (block.mediaId !== null) attrs.id = block.mediaId;
+  if (block.width !== null) attrs.width = block.width;
+  if (block.height !== null) attrs.height = block.height;
   attrs.sizeSlug = block.sizeSlug;
   attrs.linkDestination = 'none';
   if (block.align !== null) attrs.align = block.align;
 
+  // 指定尺寸時核心會補 is-resized，位置在 size-* 後面。
+  const resized = block.width !== null || block.height !== null;
   const figureClass = classAttr(
     'wp-block-image',
     block.align === null ? null : `align${block.align}`,
     `size-${block.sizeSlug}`,
+    resized ? 'is-resized' : null,
   );
-  const imgClass = block.mediaId === null ? '' : ` class="wp-image-${block.mediaId}"`;
+
+  const style = [
+    block.width === null ? null : `width:${block.width}`,
+    block.height === null ? null : `height:${block.height}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(';');
+
   // 核心的 img 是自閉合寫法，斜線不能省。
-  const img = `<img src="${escapeAttribute(block.src)}" alt="${escapeAttribute(block.alt)}"${imgClass}/>`;
+  const img =
+    `<img src="${escapeAttribute(block.src)}" alt="${escapeAttribute(block.alt)}"` +
+    (block.mediaId === null ? '' : ` class="wp-image-${block.mediaId}"`) +
+    (style.length === 0 ? '' : ` style="${escapeAttribute(style)}"`) +
+    '/>';
+
+  // 空圖說核心會整個略過，多輸出一個空的 figcaption 就會判定內容無效。
   const caption =
-    block.caption === null ? '' : `<figcaption class="wp-element-caption">${block.caption}</figcaption>`;
+    block.caption === null || block.caption.length === 0
+      ? ''
+      : `<figcaption class="wp-element-caption">${block.caption}</figcaption>`;
 
   return [
     openComment('image', attrs),
@@ -141,10 +184,11 @@ function serializeHtml(block: HtmlBlock): string {
   return [openComment('html'), block.html, closeComment('html')].join('\n');
 }
 
-function serializeSeparator(): string {
+function serializeSeparator(block: SeparatorBlock): string {
+  const attrs = block.className === null ? undefined : { className: block.className };
   return [
-    openComment('separator'),
-    '<hr class="wp-block-separator has-alpha-channel-opacity"/>',
+    openComment('separator', attrs),
+    `<hr${classAttr('wp-block-separator', 'has-alpha-channel-opacity', block.className)}/>`,
     closeComment('separator'),
   ].join('\n');
 }
@@ -167,7 +211,7 @@ export function serializeBlock(block: Block): string {
     case 'image':
       return serializeImage(block);
     case 'separator':
-      return serializeSeparator();
+      return serializeSeparator(block);
     case 'html':
       return serializeHtml(block);
   }
