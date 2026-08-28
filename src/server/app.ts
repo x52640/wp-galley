@@ -13,6 +13,8 @@ import { healthRoutes } from './routes/health.js';
 import { templateRoutes } from './routes/templates.js';
 import { agentRoutes } from './routes/agents.js';
 import { wordpressRoutes } from './routes/wordpress.js';
+import { jobRoutes } from './routes/jobs.js';
+import { CoreService } from '../core/service.js';
 import { WordPressClient } from '../wordpress/client.js';
 import type { PublishTargetRegistry } from '../wordpress/targets.js';
 import type { AgentRegistry } from '../agents/registry.js';
@@ -26,6 +28,11 @@ export interface AppContext {
   /** .env 沒設定 WordPress 時是 null；路由要自己處理這個情況。 */
   readonly wordpress: WordPressClient | null;
   readonly targets: PublishTargetRegistry;
+  /**
+   * 發布台的安全核心。**Web UI 與階段 6 的 MCP Server 必須共用這一個實例**——
+   * 所有核准、驗證與稽核只實作一次，路由層不得自己再寫一套。
+   */
+  readonly core: CoreService;
   readonly version: string;
   readonly startedAt: string;
 }
@@ -38,6 +45,11 @@ export interface BuildAppOptions {
   /** 測試可以注入假的 client；正式啟動時由 config 建立。 */
   readonly wordpress?: WordPressClient | null;
   readonly targets: PublishTargetRegistry;
+  /**
+   * 測試（與階段 6 的 MCP 進入點）可以注入現成的 CoreService，
+   * 讓工作區與媒體目錄指到暫存路徑，不會寫進專案的 drafts/。
+   */
+  readonly core?: CoreService;
   readonly version?: string;
 }
 
@@ -52,13 +64,33 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     bodyLimit: 8 * 1024 * 1024,
   });
 
+  const wordpress = options.wordpress ?? createWordPressClient(config, app);
+
   const ctx: AppContext = {
     config,
     db,
     templates: options.templates,
     agents: options.agents,
-    wordpress: options.wordpress ?? createWordPressClient(config, app),
+    wordpress,
     targets: options.targets,
+    core:
+      options.core ??
+      new CoreService({
+        db,
+        templates: options.templates,
+        targets: options.targets,
+        agents: options.agents,
+        wordpress,
+        site: config.wordpress
+          ? {
+              key: config.wordpress.url,
+              displayName: config.wordpress.url,
+              baseUrl: config.wordpress.url,
+              username: config.wordpress.username,
+            }
+          : null,
+        scrub,
+      }),
     version: options.version ?? '0.1.0',
     startedAt: new Date().toISOString(),
   };
@@ -90,6 +122,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(templateRoutes);
   await app.register(agentRoutes);
   await app.register(wordpressRoutes);
+  await app.register(jobRoutes);
 
   // 正式啟動時提供已建置的 UI；開發時用 Vite dev server，這裡不存在也不報錯。
   if (existsSync(paths.uiDist)) {

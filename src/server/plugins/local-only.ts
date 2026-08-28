@@ -46,6 +46,13 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   }
 }
 
+/** 唯一允許被 iframe 嵌入的路徑：`/api/jobs/<uuid>/preview`。 */
+const PREVIEW_PATH = /^\/api\/jobs\/[^/?#]+\/preview(?:[?#]|$)/;
+
+export function isPreviewPath(url: string): boolean {
+  return PREVIEW_PATH.test(url);
+}
+
 function checkRequest(request: FastifyRequest): void {
   // 1. 連線來源必須是 loopback。app.inject() 沒有真實 socket，此時跳過。
   const remote = request.socket?.remoteAddress;
@@ -78,9 +85,21 @@ export function applyLocalOnlyGuard(app: FastifyInstance): void {
     checkRequest(request);
   });
 
-  app.addHook('onSend', async (_request, reply, payload) => {
+  app.addHook('onSend', async (request, reply, payload) => {
     // 本機工具不應該被任何外部頁面嵌入或索引。
-    reply.header('X-Frame-Options', 'DENY');
+    //
+    // 例外只有校樣預覽：UI 必須用 iframe 載入它（校樣要套模板自己的 preview.css，
+    // 跟介面的 CSS 完全隔離）。`X-Frame-Options: DENY` 連同源都擋，所以這一條路徑
+    // 改用 CSP 的 frame-ancestors，把可以嵌入的頁面限制在 loopback ——
+    // 保護沒有變鬆，只是換成表達得出「同源可以、外站不行」的那個標頭。
+    if (isPreviewPath(request.url)) {
+      reply.header(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' http://127.0.0.1:* http://localhost:* http://[::1]:*",
+      );
+    } else {
+      reply.header('X-Frame-Options', 'DENY');
+    }
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Cache-Control', 'no-store');
