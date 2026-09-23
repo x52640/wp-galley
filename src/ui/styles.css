@@ -120,6 +120,10 @@ body {
   min-height: 100vh;
 }
 
+/* 工作區釘在視窗高度：文章與建議欄各自捲動，點建議才捲得到那一段。
+   只用 min-height 的話整頁會跟著文章長高，捲的是整頁，兩欄裡的捲動區永遠沒東西可捲（P5-T009）。 */
+#root:has(.workspace) { height: 100vh; height: 100dvh; }
+
 .app {
   flex: 1;
   min-height: 0;
@@ -1263,6 +1267,7 @@ h1, h2, h3 { font-weight: 600; }
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 25rem;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .margin {
