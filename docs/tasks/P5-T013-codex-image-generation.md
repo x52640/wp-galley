@@ -1,7 +1,7 @@
 ---
 id: P5-T013
 phase: 5
-status: in_progress
+status: done
 depends_on: []
 specs: [agent-cli.md, agent-tasks.md, security.md, state-machine.md, http-api.md, core-service.md, design-system.md, testing.md]
 write_paths: ["src/agents/", "src/core/", "src/contract/api.ts", "src/server/routes/", "src/media/", "src/db/migrations/", "src/config/", "src/ui/", "tests/", "docs/specs/", "docs/tasks/", "docs/CURRENT_TASK.md"]
@@ -51,15 +51,38 @@ Q-6 實測證明 Codex CLI 用訂閱就能生圖（見 `docs/specs/agent-cli.md`
 真實 Codex 生圖與真實上傳**留給使用者**（耗額度、會寫進 WordPress 媒體庫）。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 無頭 Chrome 走過示範資料流程
-- [ ] 相關 spec 已更新
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠（39 檔 / 603 測試）
+- [x] 無頭 Chrome 走過示範資料流程
+- [x] 相關 spec 已更新
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task
-- 已通過驗證：—
-- 下一步：交給 subagent 實作
+- 最後完成：實作、測試、spec、示範資料走查；再依獨立審查修掉 9 項（2026-09-23，subagent）
+- 已通過驗證：`npm run verify` 39 檔 / 603 測試；`?fixtures=1` 無頭走完生圖→候選圖→用這張→封面自動設精選，另走過停止（顯示「已停止」）、再生一張、已有封面時不覆蓋
+- 下一步：使用者實測真實 Codex 生圖與真實上傳（耗額度、會寫進媒體庫）
 - Blocker：無
 
 ## 完成結果
+
+- 後端：`CodexAdapter.generateImage`（`src/agents/adapters/codex.ts`）照實測參數加 `-s read-only`，prompt 走 stdin，
+  從 `$CODEX_HOME/generated_images/<thread_id>/` 拿圖；`AgentRegistry` 依 adapter 有沒有 `generateImage` 決定誰能生圖，
+  跟校稿排同一條佇列。`CoreService.generateBriefImage`／`useImageCandidate`／`imageCandidateFile`／`imageGenerationStatus`。
+- 資料：migration 005（`image_candidates` 表、`agent_runs.image_brief_id`）。候選圖存 `generated-images/<job>/candidates/`。
+- 封面判斷：`src/core/image-generation.ts` 的 `isFeaturedBrief`（templateData 的 `featuredImageBriefKey`、key 以
+  `featured`／`cover` 開頭、placement 寫「精選」「封面」）；`addMedia` 對上就自動設精選，手動上傳也一樣。
+- 圖片驗證抽成 `src/media/validate.ts`（上傳行為不變；候選圖另外依檔頭認類型）。
+- 契約（additive）：`ImageBrief.isFeatured`／`candidate`、`ImageCandidate`、`ImageGenerationStatus`、`AgentRunTask`、
+  `AgentRun.briefId`、`ImageCandidateResponse`。
+- 順手修：`agent_runs.started_at` 是沒寫時區的 UTC，前端當本地時間解析，台灣時區下計時器一直停在 00:00
+  （既有的校稿長條也中）→ `parseServerTime`。
+- 與 Task 文字的差異：Task 寫 prompt 當位置參數，實作走 stdin（security.md 優先）。
+- 審查後修正：
+  - 生圖加上 `--ephemeral`／`--ignore-user-config`（跟校稿一樣隔離使用者設定，D-009）。**這兩個參數沒有在
+    真實生圖上驗證過**；找不到圖時訊息會寫明「在 generated_images/<thread> 找不到圖」。使用者第一次真實生圖就是驗證。
+  - 封面判斷：templateData 有 `featuredImageBriefKey` 時只認它；placement 只看開頭（「精選圖片」「封面」）。
+  - 自動設精選不覆蓋使用者選的封面（除非目前封面就是同一條需求的圖），結果回傳 `autoFeature`，畫面講出
+    「已經有封面了」或失敗原因；手動上傳封面也提醒核准會失效。
+  - 「用這張」先同步搶下候選圖，兩個同時送來只上傳一次，上傳失敗放回去。
+  - 排隊中就被取消的生圖不叫 Codex；生圖期間需求被標成不要了就不收；需求重新提過之後舊候選圖不顯示也不能用；
+    讀圖時資料夾也不跟符號連結、以開啟的檔案判斷大小；按停止顯示「已停止」不是錯誤。
+

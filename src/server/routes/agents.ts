@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AppError, errorCodes } from '../errors.js';
+import type { ImageGenerationStatus } from '../../contract/api.js';
 
 /**
  * Agent 狀態 API。
@@ -22,6 +23,9 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       busy: app.ctx.agents.busy !== null,
     };
   });
+
+  /** 能不能生圖（只有 Codex 能，D-017）。配圖卡片靠它決定「用 Codex 生圖」給不給按。 */
+  app.get('/api/image-generation', async (): Promise<ImageGenerationStatus> => app.ctx.core.imageGenerationStatus());
 
   app.get<{ Params: { id: string } }>('/api/agents/:id/models', async (request) => {
     const parsed = AgentIdSchema.safeParse(request.params.id);

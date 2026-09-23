@@ -8,7 +8,10 @@ import type {
   CreateRevisionInput,
   JobDetail,
   JobSummary,
+  ImageCandidate,
+  ImageGenerationStatus,
   MediaAsset,
+  MediaUploadResult,
   ProofMark,
   PublishTargetSummary,
   PublisherApi,
@@ -310,6 +313,8 @@ function diaryBriefs(): ImageBrief[] {
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T09:41:00Z',
+      isFeatured: false,
+      candidate: null,
     },
     {
       id: 602,
@@ -325,6 +330,49 @@ function diaryBriefs(): ImageBrief[] {
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T09:41:00Z',
+      isFeatured: false,
+      candidate: null,
+    },
+  ];
+}
+
+/**
+ * 長文的配圖需求：一張封面、一張內文圖。長文一定要有精選圖片，所以「生圖 → 用這張 →
+ * 自動設精選」這條路在 f-media 這篇上走得完。
+ */
+function longformBriefs(): ImageBrief[] {
+  return [
+    {
+      id: 611,
+      key: 'featured',
+      purpose: '精選圖片，呼應「錯了以後多快會知道」的主題',
+      prompt:
+        '一盞在霧裡亮著的紅色警示燈，遠處有模糊的人影朝它走過去；清晨、薄霧、冷色調，'
+        + '只有警示燈是暖紅色；寫實攝影風格，留白多，適合當橫幅封面。',
+      aspectRatio: '16:9',
+      altText: '霧中亮著的紅色警示燈，遠處有人影走近',
+      caption: null,
+      placement: '精選圖片',
+      fulfilled: false,
+      dismissed: false,
+      createdAt: '2026-08-28T10:05:00Z',
+      isFeatured: true,
+      candidate: null,
+    },
+    {
+      id: 612,
+      key: 'report_loop',
+      purpose: '第一個小節的三點清單：回報、不追究、看得到結果',
+      prompt: '三個圓圈首尾相連成一個循環的簡潔示意圖，扁平插畫風格，米白底、墨綠線條，不要任何文字。',
+      aspectRatio: '4:3',
+      altText: '三個步驟首尾相連形成循環的示意圖',
+      caption: '回報的循環',
+      placement: '第 4 段之後',
+      fulfilled: false,
+      dismissed: false,
+      createdAt: '2026-08-28T10:05:00Z',
+      isFeatured: false,
+      candidate: null,
     },
   ];
 }
@@ -481,6 +529,7 @@ function buildStore(): Map<string, FixtureJob> {
         status: 'succeeded',
         provider: 'claude',
         task: 'review',
+        briefId: null,
         startedAt: '2026-08-28T09:38:00Z',
         finishedAt: '2026-08-28T09:39:10Z',
         errorMessage: null,
@@ -493,6 +542,7 @@ function buildStore(): Map<string, FixtureJob> {
       state: 'MEDIA_READY',
       media: [media(41, '雨天的路口'), media(42, '回報流程圖', false)],
       featuredMediaId: null,
+      imageBriefs: longformBriefs(),
       blockers: ['這個發布目標必須設定精選圖片', '還沒渲染，先按「渲染」產生校樣'],
     }),
     baseLongform('f-rendered', { state: 'RENDERED', blockers: ['還沒核准'] }),
@@ -504,6 +554,7 @@ function buildStore(): Map<string, FixtureJob> {
         status: 'succeeded',
         provider: 'codex',
         task: 'review',
+        briefId: null,
         startedAt: '2026-08-28T09:38:00Z',
         finishedAt: '2026-08-28T09:39:02Z',
         errorMessage: null,
@@ -731,13 +782,22 @@ export const fixtureApi: PublisherApi = {
     const job = mustGet(uuid);
     const task = input.task ?? 'review';
     const startedAt = new Date().toISOString();
-    job.agentRun = { status: 'running', provider: input.provider, task, startedAt, finishedAt: null, errorMessage: null };
+    job.agentRun = {
+      status: 'running',
+      provider: input.provider,
+      task,
+      briefId: null,
+      startedAt,
+      finishedAt: null,
+      errorMessage: null,
+    };
     // 真的 Agent 要跑幾十秒到幾分鐘。示範資料等久一點，才練得到「執行中」的畫面。
     await delay(task === 'images' ? 2600 : 3400);
     job.agentRun = {
       status: 'succeeded',
       provider: input.provider,
       task,
+      briefId: null,
       startedAt,
       finishedAt: new Date().toISOString(),
       errorMessage: null,
@@ -792,6 +852,65 @@ export const fixtureApi: PublisherApi = {
     await delay(100);
     const job = mustGet(uuid);
     if (job.agentRun) job.agentRun = { ...job.agentRun, status: 'cancelled' };
+  },
+
+  async getImageGenerationStatus(): Promise<ImageGenerationStatus> {
+    await delay(120);
+    return { available: true, provider: 'codex', reason: null };
+  },
+
+  /**
+   * 假的生圖：等幾秒（練「執行中」的計時器），然後給一張灰色的候選圖。
+   * 跟後端一樣：**不上傳、不動內容、不撕核准**；等待中按停止就不收。
+   */
+  async generateBriefImage(uuid: string, briefId: number): Promise<ImageCandidate> {
+    const job = mustGet(uuid);
+    if (job.agentRun?.status === 'running') throw new Error('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    const brief = job.imageBriefs.find((row) => row.id === briefId);
+    if (!brief) throw new Error(`找不到這個工作項目的配圖需求 ${briefId}`);
+
+    const startedAt = new Date().toISOString();
+    job.agentRun = {
+      status: 'running',
+      provider: 'codex',
+      task: 'generate-image',
+      briefId,
+      startedAt,
+      finishedAt: null,
+      errorMessage: null,
+    };
+    await delay(3200);
+    if (job.agentRun.status === 'cancelled') throw new Error('執行已取消');
+
+    const candidate: ImageCandidate = {
+      id: Math.floor(Math.random() * 90_000) + 10_000,
+      briefId,
+      url: GREY_PNG,
+      mimeType: 'image/png',
+      byteSize: 1_742_336,
+      width: 1672,
+      height: 941,
+      createdAt: new Date().toISOString(),
+    };
+    job.agentRun = { ...job.agentRun, status: 'succeeded', finishedAt: new Date().toISOString() };
+    job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? { ...row, candidate } : row));
+    return clone(candidate);
+  },
+
+  async useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadResult> {
+    const job = mustGet(uuid);
+    const brief = job.imageBriefs.find((row) => row.candidate?.id === candidateId);
+    if (!brief || !brief.candidate) throw new Error(`找不到這個工作項目的候選圖 ${candidateId}`);
+    const result = await fixtureApi.addMedia(uuid, {
+      file: new Blob([new Uint8Array(brief.candidate.byteSize)], { type: brief.candidate.mimeType }),
+      filename: brief.key,
+      mimeType: brief.candidate.mimeType,
+      altText: brief.altText,
+      briefKey: brief.key,
+      ...(brief.caption === null ? {} : { caption: brief.caption }),
+    });
+    job.imageBriefs = job.imageBriefs.map((row) => (row.id === brief.id ? { ...row, candidate: null } : row));
+    return result;
   },
 
   /**
@@ -883,7 +1002,7 @@ export const fixtureApi: PublisherApi = {
     return { ...diaryComparison(), rightLabel: `${job.review.provider} 的提案` };
   },
 
-  async addMedia(uuid: string, input: AddMediaInput) {
+  async addMedia(uuid: string, input: AddMediaInput): Promise<MediaUploadResult> {
     await delay(500);
     const job = mustGet(uuid);
     invalidateApproval(job, '加了新的圖片');
@@ -892,10 +1011,33 @@ export const fixtureApi: PublisherApi = {
       ...media(Math.floor(Math.random() * 900) + 100, input.altText ?? '', false),
       byteSize: input.file.size,
       mimeType: input.mimeType,
+      briefKey: input.briefKey ?? null,
       ...(input.caption === undefined ? {} : { caption: input.caption }),
     };
     job.media = [...job.media, asset];
-    return clone(asset);
+
+    // 對上配圖需求就算完成；封面那條在沒有別的封面時自動設成精選（跟後端的 autoFeature 一樣，
+    // 不覆蓋使用者選的封面）。
+    const brief = input.briefKey === undefined ? undefined : job.imageBriefs.find((row) => row.key === input.briefKey);
+    if (!brief) return { media: clone(asset), autoFeature: null };
+    job.imageBriefs = job.imageBriefs.map((row) => (row.id === brief.id ? { ...row, fulfilled: true } : row));
+    if (!brief.isFeatured) return { media: clone(asset), autoFeature: null };
+
+    const current = job.media.find((row) => row.id === job.featuredMediaId);
+    if (current && current.briefKey !== brief.key) {
+      return {
+        media: clone(asset),
+        autoFeature: {
+          outcome: 'kept-existing',
+          message: '已經有封面了，沒有換掉。要換成這張，按圖片上的「設為精選」。',
+        },
+      };
+    }
+    await fixtureApi.setFeaturedMedia(uuid, asset.id);
+    return {
+      media: clone({ ...asset, featured: true }),
+      autoFeature: { outcome: 'set', message: '已設成精選圖片。' },
+    };
   },
 
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput) {

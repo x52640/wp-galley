@@ -39,7 +39,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `src/preview` | 校樣 HTML 文件 | [templates.md](templates.md) |
 | `src/agents` | CLI 適配器、輸出契約與解析 | [agent-cli.md](agent-cli.md)、[agent-tasks.md](agent-tasks.md) |
 | `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
-| `src/media` | 圖片驗證與上傳 | [agent-tasks.md](agent-tasks.md) |
+| `src/media` | 圖片驗證（`validate.ts`，上傳與生圖候選圖共用）與上傳 | [agent-tasks.md](agent-tasks.md) |
 | `src/server` | Fastify、路由、守門 | [http-api.md](http-api.md)、[security.md](security.md) |
 | `src/ui` | React 發布台 | [design-system.md](design-system.md) |
 | `src/mcp` | 空（MCP 尚未實作） | [mcp.md](mcp.md) |
@@ -67,7 +67,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | --- | --- | --- |
 | `data/` | SQLite | 否 |
 | `drafts/` | 原稿與測試素材 | 否 |
-| `generated-images/` | 本機圖片 | 否 |
+| `generated-images/` | 本機圖片：上傳過的副本（`<job>/<sha256>.<ext>`）、Codex 生圖候選圖（`<job>/candidates/`） | 否 |
 | `backups/` | 發布前快照 | 否 |
 | `config/publish-targets.json` | 發布目標 | 是 |
 | `templates/` | 模板 | 是 |

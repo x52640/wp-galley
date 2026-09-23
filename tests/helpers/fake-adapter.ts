@@ -4,8 +4,25 @@ import type {
   AgentRequest,
   AgentResult,
   AgentStatus,
+  GeneratedImage,
+  ImageRequest,
   ModelOption,
 } from '../../src/agents/types.js';
+
+/** 1×1 的 PNG。假的生圖結果。 */
+export const FAKE_GENERATED_PNG = new Uint8Array(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  ),
+);
+
+export interface FakeImageBehaviour {
+  result?: AgentResult<GeneratedImage>;
+  delayMs?: number;
+  /** 在「已經開始畫、圖還沒回來」的那一刻執行（模擬取消、改稿）。 */
+  onRun?: (runId: string) => void | Promise<void>;
+}
 
 /**
  * 測試用的假 adapter。
@@ -16,7 +33,12 @@ import type {
 export class FakeAdapter implements AgentAdapter {
   readonly calls: { runId: string; request: AgentRequest }[] = [];
   readonly cancelled: string[] = [];
+  readonly imageCalls: { runId: string; request: ImageRequest }[] = [];
   detectCount = 0;
+  /**
+   * 只有給了 `image` 的假 adapter 才會生圖——跟真實世界一樣，不是每一家都有這個方法。
+   */
+  readonly generateImage?: NonNullable<AgentAdapter['generateImage']>;
 
   constructor(
     readonly id: AgentId,
@@ -35,8 +57,26 @@ export class FakeAdapter implements AgentAdapter {
        * 所以那個時間窗只能這樣測。
        */
       onRun?: (runId: string) => void | Promise<void>;
+      /** 給了才會有 `generateImage`。 */
+      image?: FakeImageBehaviour;
     } = {},
-  ) {}
+  ) {
+    const image = behaviour.image;
+    if (image) {
+      this.generateImage = async (request, runId) => {
+        this.imageCalls.push({ runId, request });
+        if (image.delayMs) await new Promise((resolve) => setTimeout(resolve, image.delayMs));
+        if (image.onRun) await image.onRun(runId);
+        return (
+          image.result ?? {
+            ok: true,
+            data: { bytes: FAKE_GENERATED_PNG, sourceName: 'exec-fake.png' },
+            meta: { runId, agentId: this.id, model: null, durationMs: 1, stderrTail: '' },
+          }
+        );
+      };
+    }
+  }
 
   async detect(): Promise<AgentStatus> {
     this.detectCount += 1;

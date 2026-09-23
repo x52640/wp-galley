@@ -34,7 +34,10 @@
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
 | `GET` | `/api/jobs/:uuid/compare` | 左右對照，`?against=proposal\|previous` | → `Comparison` |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
-| `POST` | `/api/jobs/:uuid/media` | 上傳圖片（base64 JSON） | `MediaUploadRequest` → `MediaResponse`（201） |
+| `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
+| `GET` | `/api/jobs/:uuid/candidates/:id` | 候選圖本體（`image/*`，`no-store`），只在本機 | → 圖檔 |
+| `POST` | `/api/jobs/:uuid/candidates/:id/use` | 「用這張」：上傳到 WordPress 媒體庫 | → `MediaResponse`（201，含 `autoFeature`） |
+| `POST` | `/api/jobs/:uuid/media` | 上傳圖片（base64 JSON） | `MediaUploadRequest` → `MediaResponse`（201，含 `autoFeature`） |
 | `PUT` | `/api/jobs/:uuid/media/:id` | 換圖 | `MediaUploadRequest` → `MediaResponse` |
 | `DELETE` | `/api/jobs/:uuid/media/:id` | 移除 | → `RemovedResponse` |
 | `POST` | `/api/jobs/:uuid/media/:id/place` | 插進正文 | `PlaceMediaRequest` → `RevisionResponse` |
@@ -46,6 +49,7 @@
 | `GET` | `/api/wordpress` | 站台探查與發布目標 | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
 | `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` | → `TermsResponse` |
 | `POST` | `/api/wordpress/terms` | 建立分類項目（target 須 `allowCreateTerms`） | `CreateTermRequest` → `Term` |
+| `GET` | `/api/image-generation` | 能不能生圖（只有 Codex 能） | → `ImageGenerationStatus` |
 
 `/api/health`、`/api/agents`、`/api/templates` 只給診斷頁用，形狀尚未納入契約。
 
@@ -65,5 +69,10 @@
   `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。項目不屬於目前提案就整個拒絕。
 - 校對符號（`ProofMark`）是版面的簽名元素：改動不用紅綠色塊，用頁邊的符號標示；
   說明文字由 diff 產生，不是 Agent 寫的。
+- 生圖（D-017）：`generate` 跑的期間 `JobDetail.agentRun` 是 running（`task: 'generate-image'`、
+  `briefId`），取消走 `DELETE /agent`；沒有能用的 Codex 回 503。候選圖不是內容改動，不撤銷核准。
+  候選圖的檔案路徑只由資料庫決定，路由只收編號。`use` 與 `POST /media` 對上封面那條時回
+  `autoFeature`（`set`／`kept-existing`／`failed`，沒對上是 null）：已經有使用者選的封面就不覆蓋。
+  細節見 [agent-tasks.md](agent-tasks.md)「用 Codex 生圖」。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
   [review-proposals.md](review-proposals.md)。`blockIndex` 的語意見 review-proposals.md。

@@ -1,5 +1,7 @@
 import type {
   ApprovalResponse,
+  ImageCandidateResponse,
+  ImageGenerationStatus,
   JobResponse,
   ListJobsResponse,
   MediaResponse,
@@ -247,13 +249,25 @@ const httpApi: PublisherApi = {
     await sendJson<unknown>(`/api/jobs/${uuid}/briefs/${briefId}`, 'DELETE');
   },
 
+  getImageGenerationStatus: () => getJson<ImageGenerationStatus>('/api/image-generation'),
+
+  async generateBriefImage(uuid: string, briefId: number) {
+    const body = await sendJson<ImageCandidateResponse>(`/api/jobs/${uuid}/briefs/${briefId}/generate`, 'POST');
+    return body.candidate;
+  },
+
+  async useImageCandidate(uuid: string, candidateId: number) {
+    const body = await sendJson<MediaResponse>(`/api/jobs/${uuid}/candidates/${candidateId}/use`, 'POST');
+    return { media: body.media, autoFeature: body.autoFeature ?? null };
+  },
+
   async addMedia(uuid: string, input: AddMediaInput) {
     const body = await sendJson<MediaResponse>(
       `/api/jobs/${uuid}/media`,
       'POST',
       await mediaBody(input),
     );
-    return body.media;
+    return { media: body.media, autoFeature: body.autoFeature ?? null };
   },
 
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput) {

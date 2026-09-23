@@ -59,7 +59,9 @@ export type AgentFailureReason =
   | 'non-zero-exit'
   | 'invalid-json'
   | 'schema-mismatch'
-  | 'spawn-failed';
+  | 'spawn-failed'
+  /** 生圖那一趟跑完了，但找不到它生出來的圖。 */
+  | 'no-image';
 
 export interface AgentRunMeta {
   readonly runId: string;
@@ -82,6 +84,25 @@ export type AgentResult<T> =
     };
 
 /**
+ * 一次生圖的請求（D-017）。prompt 由後端的固定程式組出來，不是使用者直接打的字。
+ */
+export interface ImageRequest {
+  readonly prompt: string;
+  /** 隔離工作區。Agent 的 cwd 在這裡，而且維持唯讀——圖不是由它寫進來的。 */
+  readonly workspaceDir: string;
+  readonly timeoutMs: number;
+  /** stdout（事件流）的上限。 */
+  readonly maxOutputBytes: number;
+}
+
+/** 生出來的圖。位元組還沒驗過，呼叫端要自己過 `src/media/validate.ts`。 */
+export interface GeneratedImage {
+  readonly bytes: Uint8Array;
+  /** 檔名主體（不含路徑），只供稽核與除錯。 */
+  readonly sourceName: string;
+}
+
+/**
  * 所有 adapter 都實作這個介面。新增一家 Agent＝新增一個 adapters/*.ts，
  * 其他模組完全不用改。
  */
@@ -97,6 +118,11 @@ export interface AgentAdapter {
     schema: Record<string, unknown>,
     runId: string,
   ): Promise<AgentResult<T>>;
-  /** 取消進行中的執行。 */
+  /** 取消進行中的執行（校稿與生圖都用這個）。 */
   cancel(runId: string): Promise<void>;
+  /**
+   * 生圖。**只有做得到的 adapter 才有這個方法**（目前只有 Codex，見
+   * docs/specs/agent-cli.md「Codex 生圖」）；沒有就代表這一家不能生圖。
+   */
+  readonly generateImage?: (request: ImageRequest, runId: string) => Promise<AgentResult<GeneratedImage>>;
 }

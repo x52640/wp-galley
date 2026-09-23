@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { WordPressClient } from '../wordpress/client.js';
 import { WordPressError, wordpressErrorCodes } from '../wordpress/errors.js';
 import { MediaSchema, type Media } from '../wordpress/schemas.js';
+import { assertUploadable } from './validate.js';
 
 /**
  * 媒體上傳。
@@ -15,20 +16,8 @@ import { MediaSchema, type Media } from '../wordpress/schemas.js';
  * 做，不需要任何額外套件（見 docs/specs/wordpress-site.md）。
  */
 
-/** 允許上傳的類型。刻意很窄——這是會被公開在網路上的檔案。 */
-const ALLOWED_MIME_TYPES = new Map<string, string>([
-  ['image/png', 'png'],
-  ['image/jpeg', 'jpg'],
-  ['image/webp', 'webp'],
-  ['image/gif', 'gif'],
-]);
-
-/** 我們自己的上限。WordPress 那邊還有它自己的限制，會回 rest_upload_file_too_big。 */
-const MAX_BYTES = 10 * 1024 * 1024;
-
-export class MediaUploadError extends Error {
-  override readonly name = 'MediaUploadError';
-}
+// 類型與大小的規則跟生圖候選圖共用，放在 validate.ts。
+export { MediaUploadError } from './validate.js';
 
 export interface UploadInput {
   readonly bytes: Uint8Array;
@@ -69,22 +58,7 @@ export async function uploadMedia(
   client: WordPressClient,
   input: UploadInput,
 ): Promise<UploadedMedia> {
-  const extension = ALLOWED_MIME_TYPES.get(input.mimeType);
-  if (!extension) {
-    throw new MediaUploadError(
-      input.mimeType === 'image/svg+xml'
-        ? 'WordPress 預設不接受 SVG。請先在本機轉成 PNG 再上傳'
-        : `不允許的檔案類型 ${input.mimeType}。可用的是 ${[...ALLOWED_MIME_TYPES.keys()].join('、')}`,
-    );
-  }
-  if (input.bytes.byteLength === 0) {
-    throw new MediaUploadError('檔案是空的');
-  }
-  if (input.bytes.byteLength > MAX_BYTES) {
-    throw new MediaUploadError(
-      `檔案 ${(input.bytes.byteLength / 1024 / 1024).toFixed(1)} MB 超過上限 ${MAX_BYTES / 1024 / 1024} MB`,
-    );
-  }
+  const extension = assertUploadable(input.bytes, input.mimeType);
 
   const filename = safeFilename(input.filename, extension);
 

@@ -103,6 +103,25 @@ export interface AgentRunRow {
   readonly output_hash: string | null;
   readonly usage_json: string | null;
   readonly error_message: string | null;
+  /** migration 005：生圖那一趟在畫哪一條配圖需求。 */
+  readonly image_brief_id: number | null;
+}
+
+/** migration 005：Codex 生出來、還只在本機的候選圖。 */
+export interface ImageCandidateRow {
+  readonly id: number;
+  readonly job_id: number;
+  readonly image_brief_id: number;
+  readonly agent_run_id: number | null;
+  readonly local_path: string;
+  readonly mime_type: string;
+  readonly byte_size: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly sha256: string;
+  readonly created_at: string;
+  readonly media_asset_id: number | null;
+  readonly used_at: string | null;
 }
 
 export type ReviewProposalStatus = 'open' | 'closed';
@@ -614,13 +633,23 @@ export class Repository {
     purpose: string;
     status: AgentRunStatus;
     inputHash: string | null;
+    imageBriefId?: number | null;
   }): AgentRunRow {
     const result = this.db
       .prepare(`
-        INSERT INTO agent_runs (job_id, revision_id, provider, model, purpose, status, input_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO agent_runs (job_id, revision_id, provider, model, purpose, status, input_hash, image_brief_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(input.jobId, input.revisionId, input.provider, input.model, input.purpose, input.status, input.inputHash);
+      .run(
+        input.jobId,
+        input.revisionId,
+        input.provider,
+        input.model,
+        input.purpose,
+        input.status,
+        input.inputHash,
+        input.imageBriefId ?? null,
+      );
     return this.agentRunById(rowId(result))!;
   }
 
@@ -804,6 +833,81 @@ export class Repository {
 
   dismissImageBrief(id: number): void {
     this.db.prepare("UPDATE image_briefs SET dismissed_at = datetime('now') WHERE id = ?").run(id);
+  }
+
+  // --- 生圖候選圖（migration 005） -------------------------------------------
+
+  insertImageCandidate(input: {
+    jobId: number;
+    imageBriefId: number;
+    agentRunId: number | null;
+    localPath: string;
+    mimeType: string;
+    byteSize: number;
+    width: number | null;
+    height: number | null;
+    sha256: string;
+  }): ImageCandidateRow {
+    const result = this.db
+      .prepare(`
+        INSERT INTO image_candidates
+          (job_id, image_brief_id, agent_run_id, local_path, mime_type, byte_size, width, height, sha256)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        input.jobId,
+        input.imageBriefId,
+        input.agentRunId,
+        input.localPath,
+        input.mimeType,
+        input.byteSize,
+        input.width,
+        input.height,
+        input.sha256,
+      );
+    return this.imageCandidateById(rowId(result))!;
+  }
+
+  imageCandidateById(id: number): ImageCandidateRow | null {
+    return (
+      (this.db.prepare('SELECT * FROM image_candidates WHERE id = ?').get(id) as unknown as ImageCandidateRow) ??
+      null
+    );
+  }
+
+  /**
+   * 每條配圖需求**最新的那一張**候選圖，而且還沒用掉。最新那張用掉了，就不會退回去
+   * 顯示更早那張沒被選的——那會像是按了「用這張」之後又冒出一張舊圖。
+   * 看 `used_at` 而不是 `media_asset_id`：媒體被移除時後者會變回 NULL。
+   */
+  latestOpenCandidates(jobId: number): ImageCandidateRow[] {
+    return this.db
+      .prepare(`
+        SELECT * FROM image_candidates
+        WHERE id IN (SELECT MAX(id) FROM image_candidates WHERE job_id = ? GROUP BY image_brief_id)
+          AND used_at IS NULL
+      `)
+      .all(jobId) as unknown as ImageCandidateRow[];
+  }
+
+  /**
+   * 搶下這張候選圖（「用這張」）。同步、單一 UPDATE，搶到回 true；已經被別的請求搶走回 false。
+   * 兩個同時送來的請求因此只有一個會上傳。
+   */
+  claimImageCandidate(id: number): boolean {
+    const result = this.db
+      .prepare("UPDATE image_candidates SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL")
+      .run(id);
+    return Number(result.changes) === 1;
+  }
+
+  /** 上傳失敗時把搶下的放回去，候選圖回到卡片上。 */
+  releaseImageCandidate(id: number): void {
+    this.db.prepare('UPDATE image_candidates SET used_at = NULL WHERE id = ? AND media_asset_id IS NULL').run(id);
+  }
+
+  markImageCandidateUsed(id: number, mediaAssetId: number): void {
+    this.db.prepare('UPDATE image_candidates SET media_asset_id = ? WHERE id = ?').run(mediaAssetId, id);
   }
 
   // --- 稽核 -----------------------------------------------------------------

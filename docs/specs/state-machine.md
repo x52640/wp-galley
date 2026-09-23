@@ -58,6 +58,9 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
 
 **不要靠呼叫端記得做這件事。**
 
+不在這份清單上的：`addMedia`（上傳本身不改正文）與 Codex 生圖的候選圖（只存本機，D-017）。
+對上封面那條配圖需求、而且沒有使用者選的別張封面時，上傳會接著呼叫 `setFeaturedMedia`，核准因此照上面的規則失效。
+
 ## publish 的前置檢查
 
 `publish` 必須依序檢查，任一項失敗就丟出對應錯誤且**不送任何請求**：

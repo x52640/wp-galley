@@ -23,8 +23,14 @@ interface AgentAdapter {
   listModels(): Promise<ModelOption[]>;
   runStructured<T>(request: AgentRequest, schema: JsonSchema): Promise<AgentResult<T>>;
   cancel(runId: string): Promise<void>;
+  /** 只有做得到的 adapter 才有（目前只有 Codex，D-017）。沒有就代表這一家不能生圖。 */
+  generateImage?(request: ImageRequest, runId: string): Promise<AgentResult<GeneratedImage>>;
 }
 ```
+
+`AgentRegistry.imageGeneratorId()` 找有 `generateImage` 的那一家，不寫死名字；`generateImage` 跟
+`runStructured` 排同一條佇列（concurrency 1）。生圖排在佇列裡就被取消的話，輪到它時直接回 `cancelled`，
+不叫 adapter（每一張都花額度）。生圖流程與規則見 [agent-tasks.md](agent-tasks.md)。
 
 `AgentStatus` 至少包含：已安裝、版本、登入狀態是否可確認、支援的輸出格式與目前是否可用。不要在 UI 顯示登入 token。
 
@@ -102,6 +108,26 @@ adapter，介面不變。
 | 事件流 | 生圖本身不出現在 item 事件裡；看得到的是它讀 imagegen skill、以及 cp 指令 |
 | 額度 | 這一次 input 114k tokens（多半是快取）、output 427 |
 | 雜訊 | 使用者本機設定的 Figma MCP 沒登入，stderr 會有一行 `AuthRequired` 錯誤，不影響結果 |
+
+**實作（`CodexAdapter.generateImage`，P5-T013）**：
+
+- 參數：`exec --json --skip-git-repo-check -C <job workspace> -s read-only --ephemeral --ignore-user-config
+  --color never`。prompt 走 **stdin**，不放在命令列（[security.md](security.md) 的硬性禁令；Task 寫的是
+  位置參數，以 security.md 為準）。
+- `--ephemeral`、`--ignore-user-config` 跟校稿（runStructured）一樣帶：stdin 裡有 Agent 寫的 brief 文字
+  （不受信任），不能讓使用者 `config.toml` 裡的 MCP、網路搜尋、自訂指令套用到這一趟（D-009）。
+  ⚠️ **這兩個參數沒有在真實生圖上驗證過**（2026-09-23 實測那一次沒帶）。可能的風險是不讀設定檔就不生圖、
+  或圖不寫進 `generated_images/`。那種情況會回 `no-image`，訊息寫明「在 generated_images/<thread> 找不到圖」。
+  **使用者第一次真實生圖就是驗證**；失敗的話再回來決定要不要拿掉其中一個。
+- `CODEX_HOME`：沒設就是 `~/.codex`。process-runner 的環境變數 allowlist 不含它，所以用 `extraEnv`
+  明確傳給子行程，確保子行程寫圖的位置跟我們讀圖的位置是同一個。
+- 讀圖：`thread_id` 只接受 `^[A-Za-z0-9][A-Za-z0-9-]{0,127}$`（拿去組路徑）；`generated_images/<thread>`
+  本身用 lstat 確認是真的資料夾（不是符號連結）；檔案只看 png／jpg／webp，用 `O_NOFOLLOW` 開、以開起來那個檔的
+  fstat 判斷大小（上限 20 MB），只讀那麼多；有好幾張拿最新的。圖檔不刪（那是 Codex 的資料夾）。
+- 取消或逾時就不拿圖，即使圖已經生出來。exit code 非 0 但圖在，照樣收（實測 stderr 有雜訊）。
+- 失敗時把事件流裡最後一個 `error`／`turn.failed` 的訊息帶給使用者。`AgentFailureReason` 多一個 `no-image`。
+- 圖本身不信任：後端再用 `src/media/validate.ts` 依檔頭驗一次。
+- 測試用假的執行檔＋暫存 `CODEX_HOME`（`tests/codex-image.test.ts`），不跑真的 codex。
 
 #### Codex
 

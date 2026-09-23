@@ -4,14 +4,19 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **34 檔 / 547 測試**全綠（2026-09-23，P5-T012 後）
-- migration head：`004-image-briefs`
+- `npm run verify`：typecheck 通過；Vitest **39 檔 / 603 測試**全綠（2026-09-23，P5-T013 後）
+- migration head：`005-image-candidates`
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
 P5-T001 實測進行中（走到第 2 步）。使用者要求把實測發現的問題當場修，已完成：P5-T008 定位忽略空白、
 P5-T009 兩欄各自捲動、P5-T010 直接在文章上改、P5-T011 標出要改的地方、P5-T012 改完卡片自動結案。下一步：回到實測第 3 步（只接受一個錯字）。
+
+[P5-T013](tasks/P5-T013-codex-image-generation.md) 用 Codex 生圖（D-017）已完成，只走過示範資料；
+**真實 Codex 生圖與「用這張」的真實上傳還沒跑過**（耗額度、會寫進媒體庫），留給使用者在實測時做。
+生圖帶了 `--ephemeral`／`--ignore-user-config`，這兩個在生圖上沒驗證過：第一次真實生圖若回「在 generated_images/… 找不到圖」，
+先懷疑它們（見 `docs/specs/agent-cli.md`「Codex 生圖」）。
 
 ## 上次停在哪（2026-09-23）
 
@@ -51,6 +56,10 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。
 - 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。
+- Codex 生圖的圖檔留在 `~/.codex/generated_images/`（那是 Codex 的資料夾，發布台不刪）。
+- `CODEX_HOME` 只明確傳給生圖那一趟；偵測（`codex login status`）與校稿沒傳，使用者自訂 `CODEX_HOME` 時會用預設位置（P5-T013 審查，未處理）。
+- `-s read-only` 的 Codex 仍然**讀得到**磁碟上的檔案（例如專案的 `.env`），校稿與生圖都一樣，原本就存在；
+  目前靠 cwd 是隔離工作區與 prompt 約束，沒有真的擋（P5-T013 審查，未處理）。
 - 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
   `docs/specs/review-proposals.md` 的逐項套用定位規則。
 

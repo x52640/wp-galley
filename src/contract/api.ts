@@ -46,6 +46,12 @@ export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 
  */
 export type AgentTask = 'review' | 'images';
 
+/**
+ * `agent_runs` 裡記的一趟是在做什麼：`AgentTask` 之外多一種 `generate-image`
+ * （用 Codex 訂閱生圖，D-017）。生圖不走 `POST /agent`，所以不放進 `AgentTask`。
+ */
+export type AgentRunTask = AgentTask | 'generate-image';
+
 /** 存成草稿與直接公開是兩個不同的決定。 */
 export type PublishStatus = 'draft' | 'publish';
 
@@ -213,6 +219,38 @@ export interface ImageBrief {
   readonly fulfilled: boolean;
   readonly dismissed: boolean;
   readonly createdAt: string;
+  /**
+   * 這條是精選圖片（封面）的需求。判斷規則在後端（templateData 的
+   * `featuredImageBriefKey`、key 以 `featured`／`cover` 開頭、placement 寫「精選」「封面」）。
+   * 對上這條的圖上傳之後會自動設成精選。
+   */
+  readonly isFeatured: boolean;
+  /** 最新一張還沒用掉的生成候選圖；沒有就是 null。**還沒上傳到 WordPress。** */
+  readonly candidate: ImageCandidate | null;
+}
+
+/**
+ * Codex 生出來、只存在本機的候選圖（D-017）。按「用這張」才會上傳到 WordPress
+ * 媒體庫；不用它就一直留在本機。**不是內容改動，不會讓核准失效。**
+ */
+export interface ImageCandidate {
+  readonly id: number;
+  readonly briefId: number;
+  /** 本機 API 的網址（`/api/jobs/:uuid/candidates/:id`），不是 WordPress 的網址。 */
+  readonly url: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly createdAt: string;
+}
+
+/** 現在能不能生圖。只有 Codex 能生圖；沒裝、沒登入就是 false，`reason` 講為什麼。 */
+export interface ImageGenerationStatus {
+  readonly available: boolean;
+  /** 負責生圖的 Agent；一家都不支援時是 null。 */
+  readonly provider: AgentProvider | null;
+  readonly reason: string | null;
 }
 
 // --- Job -------------------------------------------------------------------
@@ -303,8 +341,10 @@ export interface Approval {
 export interface AgentRun {
   readonly status: AgentRunStatus;
   readonly provider: string;
-  /** 這一趟做的是什麼。畫面靠它決定要說「校稿」還是「想配圖」。 */
-  readonly task: AgentTask;
+  /** 這一趟做的是什麼。畫面靠它決定要說「校稿」、「想配圖」還是「生圖」。 */
+  readonly task: AgentRunTask;
+  /** `generate-image` 那一趟在畫哪一條配圖需求；其他趟是 null。 */
+  readonly briefId: number | null;
   readonly startedAt: string;
   readonly finishedAt: string | null;
   readonly errorMessage: string | null;
@@ -514,6 +554,26 @@ export interface ReviewResponse {
 }
 export interface MediaResponse {
   readonly media: MediaAsset;
+  /**
+   * 上傳對上封面那條配圖需求時，自動設精選的結果（D-017）。沒對上封面就是 null；
+   * 換圖（PUT）不給。
+   */
+  readonly autoFeature?: AutoFeatureResult | null;
+}
+
+/**
+ * 封面那條配圖需求的圖上傳之後，有沒有自動設成精選。
+ *
+ * - `set`：設好了（核准照規則失效）。
+ * - `kept-existing`：已經有使用者選的別張封面，**不覆蓋**。
+ * - `failed`：想設但失敗了，`message` 講原因；圖已經在媒體庫。
+ */
+export interface AutoFeatureResult {
+  readonly outcome: 'set' | 'kept-existing' | 'failed';
+  readonly message: string;
+}
+export interface ImageCandidateResponse {
+  readonly candidate: ImageCandidate;
 }
 export interface ApprovalResponse {
   readonly approval: Approval;

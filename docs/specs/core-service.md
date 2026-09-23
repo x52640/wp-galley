@@ -29,10 +29,22 @@ interface CoreService {
 
   // --- Agent ---
   runAgentReview(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
+  /** 取消這篇稿件正在跑的 Agent 動作（校稿或生圖）。 */
   cancelAgentRun(uuid: string): void;
 
+  // --- 生圖（D-017，見 agent-tasks.md） ---
+  imageGenerationStatus(): Promise<ImageGenerationStatus>;
+  /** 生一張候選圖，只存本機。跟校稿共用「一次一個」；不是內容改動。 */
+  generateBriefImage(uuid: string, briefId: number, input?: { timeoutMs?: number }): Promise<ImageCandidate>;
+  imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string };
+  /** 「用這張」：先同步搶下候選圖，再走 addMediaWithOutcome 上傳。 */
+  useImageCandidate(uuid: string, candidateId: number): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }>;
+
   // --- 媒體 ---
+  /** 帶的 briefKey 對上封面那條、且沒有別的封面時，上傳後自動 setFeaturedMedia（D-017）。 */
   addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset>;
+  /** 同上，另外回報自動設精選的結果（見 agent-tasks.md「封面那一條」）。 */
+  addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }>;
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
   removeMedia(uuid: string, assetId: number): void;
   setFeaturedMedia(uuid: string, assetId: number | null): Revision;

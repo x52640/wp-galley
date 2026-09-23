@@ -1,4 +1,13 @@
-import type { AgentAdapter, AgentId, AgentRequest, AgentResult, AgentStatus, ModelOption } from './types.js';
+import type {
+  AgentAdapter,
+  AgentId,
+  AgentRequest,
+  AgentResult,
+  AgentStatus,
+  GeneratedImage,
+  ImageRequest,
+  ModelOption,
+} from './types.js';
 import { CodexAdapter } from './adapters/codex.js';
 import { ClaudeAdapter } from './adapters/claude.js';
 import { GoogleAdapter } from './adapters/google.js';
@@ -37,6 +46,11 @@ export class AgentRegistry {
   /** concurrency 1：後來的請求排在這條 promise 鏈上。 */
   private queue: Promise<unknown> = Promise.resolve();
   private busyWith: string | null = null;
+  /**
+   * 排在佇列裡就被取消的 runId。`adapter.cancel()` 只碰得到已經開跑的那一個，
+   * 排隊中的會照樣跑——生圖每一張都花額度，所以輪到它時先看這裡，被取消就不跑。
+   */
+  private readonly cancelledRuns = new Set<string>();
 
   constructor(options: AgentRegistryOptions = {}) {
     const list = options.adapters ?? [new CodexAdapter(), new ClaudeAdapter(), new GoogleAdapter()];
@@ -137,7 +151,72 @@ export class AgentRegistry {
     return task;
   }
 
+  /**
+   * 能生圖的那一家。**目前只有 Codex**（D-017）：靠 adapter 有沒有 `generateImage`
+   * 決定，不在這裡寫死名字。一家都沒有就是 null。
+   */
+  imageGeneratorId(): AgentId | null {
+    return this.list().find((adapter) => typeof adapter.generateImage === 'function')?.id ?? null;
+  }
+
+  /** 現在能不能生圖，不能的話為什麼。給畫面決定按鈕要不要給按。 */
+  async imageGenerationStatus(): Promise<{ available: boolean; provider: AgentId | null; reason: string | null }> {
+    const id = this.imageGeneratorId();
+    if (id === null) {
+      return { available: false, provider: null, reason: '沒有能生圖的 Agent。只有 Codex 能生圖' };
+    }
+    const status = await this.detect(id);
+    if (status.available) return { available: true, provider: id, reason: null };
+    return {
+      available: false,
+      provider: id,
+      reason: `只有 ${status.displayName} 能生圖，但它現在不能用：${status.unavailableReason ?? '原因不明'}`,
+    };
+  }
+
+  /**
+   * 生圖。跟 `runStructured` 排**同一條**佇列：生圖也是一個 Agent 動作，
+   * 同一時間只跑一個。
+   */
+  async generateImage(id: AgentId, request: ImageRequest, runId: string): Promise<AgentResult<GeneratedImage>> {
+    const adapter = this.get(id);
+    const generate = adapter.generateImage?.bind(adapter);
+    if (!generate) {
+      throw new AgentUnavailableError(`${adapter.displayName} 不能生圖。只有 Codex 能生圖`);
+    }
+    const status = await this.detect(id);
+    if (!status.available) {
+      throw new AgentUnavailableError(status.unavailableReason ?? `${adapter.displayName} 目前無法使用`);
+    }
+
+    const task = this.queue.then(async (): Promise<AgentResult<GeneratedImage>> => {
+      if (this.cancelledRuns.delete(runId)) {
+        return {
+          ok: false,
+          reason: 'cancelled',
+          message: '還沒開始畫就取消了',
+          issues: [],
+          meta: { runId, agentId: id, model: null, durationMs: 0, stderrTail: '' },
+        };
+      }
+      this.busyWith = runId;
+      try {
+        return await generate(request, runId);
+      } finally {
+        this.busyWith = null;
+        this.cancelledRuns.delete(runId);
+      }
+    });
+    this.queue = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+
   async cancel(id: AgentId, runId: string): Promise<void> {
+    // 正在跑的那一個不記：它由 adapter 自己中止，記了反而會留在集合裡。
+    if (this.busyWith !== runId) this.cancelledRuns.add(runId);
     await this.get(id).cancel(runId);
   }
 }

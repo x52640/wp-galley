@@ -20,7 +20,21 @@ import { Icon } from '../icons.js';
 const TASK_VERB: Record<AgentRun['task'], string> = {
   review: '正在讀你的文章',
   images: '正在想該配什麼圖',
+  'generate-image': '正在生圖',
 };
+
+/**
+ * 大概要多久。生圖實測約一分鐘（docs/specs/agent-cli.md），跟校稿的期待值不一樣；
+ * 超過「平常」之後換一句安撫，但不假裝知道還剩多少。
+ */
+export function waitingNote(task: AgentRun['task'], seconds: number): string {
+  if (task === 'generate-image') {
+    return seconds < 120
+      ? '通常一分鐘左右。生好會先放在卡片上給你看，不會自動上傳'
+      : '比平常久一點；真的等太久就按停止再試一次';
+  }
+  return seconds < 90 ? '通常 30 秒到 3 分鐘，可以先看文章' : '比平常久一點；真的等太久就按停止再試一次';
+}
 
 /** 每秒跳一次的經過秒數。跑完就停下來，不留著空轉的計時器。 */
 export function useElapsedSeconds(startedAt: string | undefined, active: boolean): number {
@@ -34,9 +48,19 @@ export function useElapsedSeconds(startedAt: string | undefined, active: boolean
   }, [active, startedAt]);
 
   if (startedAt === undefined) return 0;
-  const started = new Date(startedAt).getTime();
+  const started = parseServerTime(startedAt);
   if (Number.isNaN(started)) return 0;
   return Math.max(0, Math.round((now - started) / 1000));
+}
+
+/**
+ * 後端的時間有兩種寫法：ISO（帶 Z）與 SQLite 的 `datetime('now')`（`2026-09-23 13:51:00`，
+ * **UTC 但沒寫時區**）。後者直接丟給 `new Date` 會被當成本地時間，在台灣就是差 8 小時，
+ * 計時器因此一直停在 00:00。這裡補上 Z。
+ */
+export function parseServerTime(value: string): number {
+  const sqlite = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
+  return new Date(sqlite ? `${value.replace(' ', 'T')}Z` : value).getTime();
 }
 
 export function formatElapsed(seconds: number): string {
@@ -78,7 +102,7 @@ export function AgentBanner({
       <span className="agent-banner-time mono">{formatElapsed(seconds)}</span>
       <IndeterminateBar />
       <span className="agent-banner-note">
-        {seconds < 90 ? '通常 30 秒到 3 分鐘，可以先看文章' : '比平常久一點；真的等太久就按停止再試一次'}
+        {waitingNote(run.task, seconds)}
       </span>
       <button type="button" className="btn btn-quiet btn-tiny" disabled={cancelling} onClick={onCancel}>
         <Icon name="x" size={13} />

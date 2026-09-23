@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
 import type {
   AgentRun as AgentRunView,
   AgentRunResult,
+  AgentRunTask,
   AgentTask,
   Approval as ApprovalView,
+  AutoFeatureResult,
   Comparison as ComparisonView,
   ImageBrief as ImageBriefView,
+  ImageCandidate,
+  ImageGenerationStatus,
   Job,
   JobDetail,
   JobSummary,
@@ -58,14 +62,16 @@ import {
   type ReviewItemType,
   type ReviewProposalRow,
   type ImageBriefRow,
+  type ImageCandidateRow,
   type WordPressObjectRow,
 } from './repository.js';
+import { buildImagePrompt, isFeaturedBrief } from './image-generation.js';
 import { buildTemplateDataFromSource } from './source-text.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
 import { createSecretScrubber, type Scrubber } from '../config/secrets.js';
 import { paths } from '../config/paths.js';
-import { AgentRegistry } from '../agents/registry.js';
+import { AgentRegistry, AgentUnavailableError } from '../agents/registry.js';
 import { createJobWorkspace } from '../agents/workspace.js';
 import {
   buildReviewSchema,
@@ -80,7 +86,8 @@ import { buildPreviewDocument } from '../preview/document.js';
 import { renderRevision, RenderError, type RenderResult } from '../templates/render.js';
 import type { TemplateRegistry } from '../templates/registry.js';
 import type { LoadedTemplate } from '../templates/types.js';
-import { uploadMedia } from '../media/upload.js';
+import { sha256Of, uploadMedia } from '../media/upload.js';
+import { inspectImage, MediaUploadError } from '../media/validate.js';
 import type { WordPressClient } from '../wordpress/client.js';
 import { toBlockMarkup } from '../wordpress/blocks.js';
 import {
@@ -247,6 +254,10 @@ const MIME_EXTENSIONS: Record<string, string> = {
 
 const DEFAULT_AGENT_TIMEOUT_MS = 180_000;
 const MAX_AGENT_OUTPUT_BYTES = 4 * 1024 * 1024;
+/** 生圖實測約 54 秒（docs/specs/agent-cli.md）；給到 5 分鐘，比校稿寬。 */
+const DEFAULT_IMAGE_TIMEOUT_MS = 300_000;
+/** `agent_runs.purpose` 記的生圖那一趟。 */
+const GENERATE_IMAGE_PURPOSE: AgentRunTask = 'generate-image';
 
 export interface CoreServiceOptions {
   readonly db: DatabaseSync;
@@ -418,15 +429,16 @@ export class CoreService {
         ? {
             status: agentRow.status,
             provider: agentRow.provider,
-            // purpose 存的就是這一趟的 task，畫面靠它決定要說「校稿」還是「想配圖」。
-            task: agentRow.purpose === 'images' ? 'images' : 'review',
+            // purpose 存的就是這一趟的 task，畫面靠它決定要說「校稿」、「想配圖」還是「生圖」。
+            task: taskOfPurpose(agentRow.purpose),
+            briefId: agentRow.image_brief_id ?? null,
             startedAt: agentRow.started_at,
             finishedAt: agentRow.finished_at,
             errorMessage: agentRow.error_message,
           }
         : null,
       review,
-      imageBriefs: this.imageBriefViews(job.id, media),
+      imageBriefs: this.imageBriefViews(job, media, revision),
       sourceText: revisionRow?.source_text ?? this.repo.listRevisions(job.id)[0]?.source_text ?? null,
     };
   }
@@ -1126,15 +1138,26 @@ export class CoreService {
     }
   }
 
-  private imageBriefViews(jobId: number, media: readonly MediaAsset[]): ImageBriefView[] {
+  private imageBriefViews(job: JobRow, media: readonly MediaAsset[], revision: Revision | null): ImageBriefView[] {
     const filled = new Set(media.map((asset) => asset.briefKey).filter((key): key is string => key !== null));
+    const featuredKey = revision?.templateData['featuredImageBriefKey'];
+    const candidates = new Map(this.repo.latestOpenCandidates(job.id).map((row) => [row.image_brief_id, row]));
     return this.repo
-      .listImageBriefs(jobId)
+      .listImageBriefs(job.id)
       .filter((row) => row.dismissed_at === null)
-      .map((row) => this.toImageBrief(row, filled));
+      .map((row) => {
+        const candidate = candidates.get(row.id);
+        const current = candidate !== undefined && isCandidateCurrent(candidate, row);
+        return this.toImageBrief(row, filled, featuredKey, current ? this.toCandidate(job, candidate) : null);
+      });
   }
 
-  private toImageBrief(row: ImageBriefRow, filled: ReadonlySet<string>): ImageBriefView {
+  private toImageBrief(
+    row: ImageBriefRow,
+    filled: ReadonlySet<string>,
+    featuredKey: unknown,
+    candidate: ImageCandidate | null,
+  ): ImageBriefView {
     return {
       id: row.id,
       key: row.brief_key,
@@ -1147,7 +1170,270 @@ export class CoreService {
       fulfilled: filled.has(row.brief_key),
       dismissed: row.dismissed_at !== null,
       createdAt: row.created_at,
+      isFeatured: isFeaturedBrief({ key: row.brief_key, placement: row.placement }, featuredKey),
+      candidate,
     };
+  }
+
+  private toCandidate(job: JobRow, row: ImageCandidateRow): ImageCandidate {
+    return {
+      id: row.id,
+      briefId: row.image_brief_id,
+      url: `/api/jobs/${job.uuid}/candidates/${row.id}`,
+      mimeType: row.mime_type,
+      byteSize: row.byte_size,
+      width: row.width,
+      height: row.height,
+      createdAt: row.created_at,
+    };
+  }
+
+  // --- 生圖（D-017，P5-T013） -------------------------------------------------
+
+  /** 現在能不能生圖。只有 Codex 能生圖；畫面靠這個決定按鈕給不給按。 */
+  async imageGenerationStatus(): Promise<ImageGenerationStatus> {
+    return this.agents.imageGenerationStatus();
+  }
+
+  /**
+   * 照一條配圖需求生一張候選圖。
+   *
+   * - 跟校稿共用「同一篇稿件一次只跑一個 Agent 動作」（`activeRuns`），取消也走
+   *   同一個 `cancelAgentRun`。
+   * - 生出來的圖**只存在本機**（generated-images/），不上傳、不建 revision：
+   *   它不是內容改動，核准不會失效。要用它得再按「用這張」（`useImageCandidate`）。
+   * - 圖檔不信任：類型由檔頭決定，再過跟上傳一樣的類型與大小檢查。
+   */
+  async generateBriefImage(uuid: string, briefId: number, input: { timeoutMs?: number } = {}): Promise<ImageCandidate> {
+    const job = this.requireJob(uuid);
+    this.assertMutable(job);
+    const brief = this.requireOpenBrief(job, briefId);
+    const revisionRow = this.repo.latestRevision(job.id);
+
+    if (this.activeRuns.has(job.uuid)) {
+      throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    }
+    const provider = this.agents.imageGeneratorId();
+    if (provider === null) {
+      // 不建 agent_runs：根本沒有東西可以跑。訊息跟 imageGenerationStatus 同一句。
+      const status = await this.agents.imageGenerationStatus();
+      throw new AgentUnavailableError(status.reason ?? '沒有能生圖的 Agent');
+    }
+
+    const workspace = job.workspace_path ?? createJobWorkspace(this.draftsDir, job.uuid);
+    const runRow = this.repo.insertAgentRun({
+      jobId: job.id,
+      revisionId: revisionRow?.id ?? null,
+      provider,
+      model: null,
+      purpose: GENERATE_IMAGE_PURPOSE,
+      status: 'running',
+      inputHash: revisionRow?.content_hash ?? null,
+      imageBriefId: brief.id,
+    });
+    const runId = `${job.uuid}-${runRow.id}`;
+    this.activeRuns.set(job.uuid, { runId, provider, rowId: runRow.id });
+
+    try {
+      const result = await this.agents.generateImage(
+        provider,
+        {
+          prompt: buildImagePrompt({ prompt: brief.prompt, aspectRatio: brief.aspect_ratio }),
+          workspaceDir: workspace,
+          timeoutMs: input.timeoutMs ?? DEFAULT_IMAGE_TIMEOUT_MS,
+          maxOutputBytes: MAX_AGENT_OUTPUT_BYTES,
+        },
+        runId,
+      );
+
+      if (!result.ok) {
+        const status: AgentRunStatus =
+          result.reason === 'timeout' ? 'timeout' : result.reason === 'cancelled' ? 'cancelled' : 'failed';
+        const message = this.scrub(result.message);
+        this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        throw new AgentError(message, this.scrub(result.issues));
+      }
+
+      // 等待期間被取消（排在佇列裡才被取消的那一個照樣會跑完）或稿件不能再改了，就不收。
+      // 內容被改過**不算**：候選圖不是對著某一版文字做的，配圖需求還在就還用得上。
+      const after = this.repo.agentRunById(runRow.id);
+      if (after !== null && after.status !== 'running') {
+        throw new AgentError(`這次生圖已經是 ${after.status}，圖不採用`);
+      }
+      const fresh = this.repo.jobById(job.id);
+      if (!fresh) throw new AgentError('工作項目在生圖期間被刪除了，圖不採用');
+      this.assertMutable(fresh);
+      if (this.repo.imageBriefById(brief.id)?.dismissed_at !== null) {
+        throw new AgentError('這條配圖需求在生圖期間被標成不要了，圖不採用');
+      }
+
+      let inspected;
+      try {
+        inspected = inspectImage(result.data.bytes);
+      } catch (error) {
+        if (error instanceof MediaUploadError) throw new MediaError(`Codex 生出來的檔案不能用：${error.message}`);
+        throw error;
+      }
+
+      const sha256 = sha256Of(result.data.bytes);
+      const dir = join(this.mediaDir, job.uuid, 'candidates');
+      mkdirSync(dir, { recursive: true });
+      const localPath = join(dir, `${sha256}.${inspected.extension}`);
+      writeFileSync(localPath, result.data.bytes);
+
+      const row = this.repo.insertImageCandidate({
+        jobId: job.id,
+        imageBriefId: brief.id,
+        agentRunId: runRow.id,
+        localPath,
+        mimeType: inspected.mimeType,
+        byteSize: result.data.bytes.byteLength,
+        width: inspected.width,
+        height: inspected.height,
+        sha256,
+      });
+      this.repo.finishAgentRun(runRow.id, { status: 'succeeded', outputHash: sha256, errorMessage: null });
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'ui',
+        eventType: 'image_generated',
+        status: 'succeeded',
+        detail: { briefId: brief.id, briefKey: brief.brief_key, candidateId: row.id, bytes: row.byte_size },
+      });
+      return this.toCandidate(job, row);
+    } catch (error) {
+      const row = this.repo.agentRunById(runRow.id);
+      if (row?.status === 'running') {
+        this.repo.finishAgentRun(runRow.id, {
+          status: 'failed',
+          outputHash: null,
+          errorMessage: this.scrub(error instanceof Error ? error.message : String(error)),
+        });
+      }
+      throw error;
+    } finally {
+      if (this.activeRuns.get(job.uuid)?.runId === runId) this.activeRuns.delete(job.uuid);
+    }
+  }
+
+  /** 候選圖的本機檔案，給路由送出去。路徑只由資料庫決定，呼叫端只給得了編號。 */
+  imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string } {
+    const job = this.requireJob(uuid);
+    const row = this.requireCandidate(job, candidateId);
+    return { path: row.local_path, mimeType: row.mime_type };
+  }
+
+  /**
+   * 「用這張」：把候選圖上傳到 WordPress 媒體庫。走 `addMediaWithOutcome`，所以 briefKey、
+   * alt、圖說、封面自動設精選、核准會不會失效，全部照上傳的既有規則。
+   *
+   * 第一個 await 之前就先**同步**搶下這張（`claimImageCandidate`）：兩個同時送來的請求
+   * 只有一個會上傳。上傳失敗就放回去，候選圖回到卡片上。
+   */
+  async useImageCandidate(
+    uuid: string,
+    candidateId: number,
+  ): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }> {
+    const job = this.requireJob(uuid);
+    this.assertMutable(job);
+    const row = this.requireCandidate(job, candidateId);
+    const brief = this.repo.imageBriefById(row.image_brief_id);
+    if (!brief || brief.job_id !== job.id || brief.dismissed_at !== null) {
+      throw new InvalidInputError('這張圖對應的配圖需求已經不在了（或被標成不要了）');
+    }
+    if (!isCandidateCurrent(row, brief)) {
+      throw new InvalidInputError('這條配圖需求之後又重新提過，這張是照舊的描述生的；請再生一張');
+    }
+    if (!this.repo.claimImageCandidate(row.id)) {
+      throw new InvalidInputError('這張圖已經用過了（或正在上傳），已經在媒體庫裡');
+    }
+
+    try {
+      const result = await this.addMediaWithOutcome(uuid, {
+        bytes: new Uint8Array(readFileSync(row.local_path)),
+        mimeType: row.mime_type,
+        filename: brief.brief_key,
+        altText: brief.alt_text,
+        ...(brief.caption === null ? {} : { caption: brief.caption }),
+        briefKey: brief.brief_key,
+      });
+      this.repo.markImageCandidateUsed(row.id, result.media.id);
+      return result;
+    } catch (error) {
+      this.repo.releaseImageCandidate(row.id);
+      throw error;
+    }
+  }
+
+  private requireOpenBrief(job: JobRow, briefId: number): ImageBriefRow {
+    const brief = this.repo.imageBriefById(briefId);
+    if (!brief || brief.job_id !== job.id) {
+      throw new InvalidInputError(`找不到這個工作項目的配圖需求 ${briefId}`);
+    }
+    if (brief.dismissed_at !== null) {
+      throw new InvalidInputError('這條配圖需求已經標成不要了');
+    }
+    return brief;
+  }
+
+  private requireCandidate(job: JobRow, candidateId: number): ImageCandidateRow {
+    const row = this.repo.imageCandidateById(candidateId);
+    if (!row || row.job_id !== job.id) {
+      throw new InvalidInputError(`找不到這個工作項目的候選圖 ${candidateId}`);
+    }
+    return row;
+  }
+
+  /**
+   * 對上封面那條配圖需求的圖，上傳後自動設成精選（D-017）。手動上傳與「用這張」都走這裡。
+   *
+   * **不覆蓋使用者選的封面**：只有目前沒有精選圖片、或目前的精選就是這條需求的圖（「換一張」）
+   * 才設。設精選是內容改動，照既有規則撤銷核准。設不成時上傳照樣成功（圖已經在媒體庫），
+   * 結果回給呼叫端讓畫面講出來，另記一筆事件。沒對上封面就回 null。
+   */
+  private autoFeature(job: JobRow, assetId: number, briefKey: string | undefined): AutoFeatureResult | null {
+    if (briefKey === undefined) return null;
+    const brief = this.repo
+      .listImageBriefs(job.id)
+      .find((row) => row.brief_key === briefKey && row.dismissed_at === null);
+    if (!brief) return null;
+    const latest = this.repo.latestRevision(job.id);
+    const payload = latest ? this.payloadOf(latest) : null;
+    const featuredKey = payload?.templateData['featuredImageBriefKey'];
+    if (!isFeaturedBrief({ key: brief.brief_key, placement: brief.placement }, featuredKey)) return null;
+
+    const currentId = payload?.featuredMediaAssetId ?? null;
+    if (currentId !== null && currentId !== assetId) {
+      const current = this.repo.mediaById(currentId);
+      if (current !== null && current.brief_key !== brief.brief_key) {
+        return {
+          outcome: 'kept-existing',
+          message: '已經有封面了，沒有換掉。要換成這張，按圖片上的「設為精選」。',
+        };
+      }
+    }
+
+    try {
+      this.setFeaturedMedia(job.uuid, assetId);
+      return { outcome: 'set', message: '已設成精選圖片。' };
+    } catch (error) {
+      const reason = this.scrub(error instanceof Error ? error.message : String(error));
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'ui',
+        eventType: 'auto_featured',
+        status: 'failed',
+        detail: { assetId, message: reason },
+      });
+      return {
+        outcome: 'failed',
+        message: `圖已經上傳，但沒能設成精選：${reason}。請按圖片上的「設為精選」再試一次。`,
+      };
+    }
   }
 
   /** 把 Agent 的輸出存成提案。舊的未結案提案會先結掉——清單上只能有一份。 */
@@ -1310,8 +1596,19 @@ export class CoreService {
   /**
    * 上傳圖片。**上傳本身不改變正文**，所以不會讓核准失效——要等
    * `placeMedia` 或 `setFeaturedMedia` 才算內容改動。
+   *
+   * 例外：帶的 briefKey 對上封面那條配圖需求，而且目前沒有別的封面時，會接著自動
+   * `setFeaturedMedia`（D-017），那一步照規則撤銷核准。結果要看的話用 `addMediaWithOutcome`。
    */
   async addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset> {
+    return (await this.addMediaWithOutcome(uuid, input)).media;
+  }
+
+  /** 同 `addMedia`，另外回報封面有沒有自動設成精選（沒對上封面是 null）。 */
+  async addMediaWithOutcome(
+    uuid: string,
+    input: AddMediaInput,
+  ): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }> {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const client = this.requireWordPress();
@@ -1360,8 +1657,10 @@ export class CoreService {
       detail: this.scrub({ mediaId: uploaded.media.id, bytes: input.bytes.byteLength }),
     });
 
+    const autoFeature = this.autoFeature(job, row.id, input.briefKey);
+
     const latest = this.repo.latestRevision(job.id);
-    return this.toMedia(row, latest ? this.toRevision(latest) : null);
+    return { media: this.toMedia(row, latest ? this.toRevision(latest) : null), autoFeature };
   }
 
   /**
@@ -2269,6 +2568,21 @@ export function buildFigureHtml(
   );
 }
 
+/**
+ * 候選圖是不是照這條需求**目前的**描述生的。同一個 key 重新提過（upsert 保留 id、
+ * 換掉 agent_run_id）之後，更早生的圖就不算數——描述、比例可能都變了。
+ */
+function isCandidateCurrent(candidate: ImageCandidateRow, brief: ImageBriefRow): boolean {
+  if (brief.agent_run_id === null) return true;
+  return candidate.agent_run_id !== null && candidate.agent_run_id > brief.agent_run_id;
+}
+
+/** `agent_runs.purpose` → 畫面上的 task。舊資料沒有 generate-image，一律照舊當成 review。 */
+function taskOfPurpose(purpose: string): AgentRunTask {
+  if (purpose === 'images' || purpose === GENERATE_IMAGE_PURPOSE) return purpose;
+  return 'review';
+}
+
 /** 受信任的系統指令：發布台的固定規則 + 該模板的 rules.md。 */
 function buildSystemPrompt(template: LoadedTemplate, task: AgentTask = 'review'): string {
   return [
@@ -2304,6 +2618,7 @@ const TASK_BRIEF: Record<AgentTask, string> = {
   images:
     '這一趟的重點：**只做配圖需求**。讀完文章之後，把「哪一段該放什麼圖」寫進 imageBriefs：' +
     'prompt 要具體到可以直接貼進生圖工具，placement 講清楚放在第幾段之後，altText 要能替代圖片本身。' +
+    '精選圖片（封面）那一則的 key 用 featured 開頭、placement 寫「精選圖片」——發布台靠這個認出封面。' +
     'changes 與 observations 一律給空陣列，templateData 原樣帶回不要改。',
 };
 

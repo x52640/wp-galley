@@ -1155,6 +1155,66 @@ h1, h2, h3 { font-weight: 600; }
 .brief-actions { display: flex; align-items: center; gap: .35rem; margin-top: .45rem; flex-wrap: wrap; }
 .brief-drop { margin-left: auto; }
 
+/* 封面那條：上傳後會自動設精選，先講清楚。 */
+.brief-cover {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .35rem;
+  border: 1px solid color-mix(in srgb, var(--seal-on-shell) 45%, transparent);
+  border-radius: 999px;
+  color: var(--seal-on-shell);
+  font-size: .7rem;
+}
+
+/*
+ * Codex 生圖中（D-017）。不畫進度條：子行程只在結束時回話，我們不知道進度。
+ * 動的是計時器的數字，減少動態時轉圈會停，數字照跳。
+ */
+.brief-generating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .45rem;
+  padding: .45rem .55rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 6px;
+  background: var(--shell-panel);
+}
+.brief-generating-text { color: var(--shell-text); }
+.brief-generating-time { color: var(--mark-on-shell); font-variant-numeric: tabular-nums; }
+.brief-generating .btn { margin-left: auto; }
+.brief-generating-note { flex-basis: 100%; margin: 0; font-size: .74rem; color: var(--shell-text-dim); }
+
+/* 候選圖：還在本機、還沒上傳。用虛線框跟「已上傳的圖」分開。 */
+.brief-candidate {
+  margin: .45rem 0 0;
+  padding: .45rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 6px;
+  background: var(--shell-panel);
+}
+.brief-candidate-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: var(--shell-sunken);
+}
+.brief-candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin: .35rem 0 .15rem;
+  font-size: .74rem;
+  color: var(--shell-text-dim);
+}
+.brief-candidate .field-hint { margin: 0; }
+.brief-unavailable { display: flex; align-items: flex-start; gap: .3rem; margin: .4rem 0 0; }
+.brief-unavailable svg { flex: none; margin-top: .15rem; }
+
 /* --- B1 工作區 ----------------------------------------------------------- */
 
 .docbar {

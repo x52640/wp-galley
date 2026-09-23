@@ -1,10 +1,18 @@
 import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
-import { api } from '../../service/client.js';
-import type { ImageBrief, LoadedJob, MediaAsset } from '../../service/types.js';
+import { api, describeError } from '../../service/client.js';
+import type {
+  AutoFeatureResult,
+  ImageBrief,
+  ImageGenerationStatus,
+  LoadedJob,
+  MediaAsset,
+} from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { formatBytes } from '../../lib/format.js';
 import { prepareForUpload } from '../../lib/svg-to-png.js';
 import { useConfirm } from '../ConfirmDialog.js';
+import { formatElapsed, useElapsedSeconds, waitingNote } from '../AgentProgress.js';
+import { agentStatusText } from '../../lib/agent-tasks.js';
 import { ErrorNote, Field, Spinner, useAction } from './shared.js';
 
 /**
@@ -19,10 +27,10 @@ import { ErrorNote, Field, Spinner, useAction } from './shared.js';
  * 讓使用者至少在這一次操作中看得到自己剛放進去的圖。重新整理後會退回占位圖，
  * 這是後端還沒有本機媒體檔案端點的必然結果，不是壞掉。
  *
- * **配圖需求（imageBriefs）在這裡只做前半段。** 三個 Agent CLI 都不能生圖，
- * 生圖 API 也還沒選，所以「一鍵配圖」給的是一份採買清單：該配什麼圖、prompt
- * 長怎樣。使用者按「複製 prompt」拿去生圖，回來在同一張卡片上傳，靠 briefKey
- * 把圖跟需求接起來。不假裝自己會生圖，但也不讓使用者為了這件事離開發布台。
+ * **配圖需求（imageBriefs）**：「一鍵配圖」給的是一份採買清單——該配什麼圖、prompt
+ * 長怎樣。每張卡片可以直接「用 Codex 生圖」（D-017，用訂閱，只有 Codex 做得到），
+ * 生好的圖先放在卡片上給使用者看，按「用這張」才上傳；也可以自己上傳，靠 briefKey
+ * 把圖跟需求接起來。封面那張上傳後自動設成精選。
  */
 const sessionThumbs = new Map<number, string>();
 
@@ -52,6 +60,7 @@ export function MediaPanel({
   const [alt, setAlt] = useState('');
   const pick = useAction();
   const upload = useAction();
+  const generation = useImageGenerationStatus(job.imageBriefs.length > 0);
 
   useEffect(() => {
     return () => {
@@ -98,7 +107,7 @@ export function MediaPanel({
           </h3>
           <ul className="brief-list">
             {job.imageBriefs.map((brief) => (
-              <BriefCard key={brief.id} job={job} brief={brief} refresh={refresh} />
+              <BriefCard key={brief.id} job={job} brief={brief} refresh={refresh} generation={generation} />
             ))}
           </ul>
         </section>
@@ -177,7 +186,7 @@ export function MediaPanel({
                   onClick={() =>
                     void upload.run(async () => {
                       const trimmed = alt.trim();
-                      const asset = await api.addMedia(job.uuid, {
+                      const { media: asset } = await api.addMedia(job.uuid, {
                         file: pending.blob,
                         filename: pending.filename,
                         mimeType: pending.mimeType,
@@ -203,23 +212,83 @@ export function MediaPanel({
 }
 
 /**
+ * 能不能生圖。有配圖需求時才去問（後端要跑一次 `codex login status`）。
+ * 問不到就當作不能生，原因照實講——不要讓按鈕看起來能按、按下去才失敗。
+ */
+function useImageGenerationStatus(wanted: boolean): ImageGenerationStatus | null {
+  const [status, setStatus] = useState<ImageGenerationStatus | null>(null);
+  useEffect(() => {
+    if (!wanted) return;
+    let alive = true;
+    api
+      .getImageGenerationStatus()
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch((cause: unknown) => {
+        if (alive) {
+          setStatus({ available: false, provider: null, reason: `無法確認 Codex 能不能用：${describeError(cause)}` });
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [wanted]);
+  return status;
+}
+
+/**
  * 一條配圖需求。
  *
- * 「複製 prompt」是這張卡片的重點：使用者要拿它去別的地方生圖，那一步我們幫不上，
- * 但至少不要讓他自己反白選字。複製失敗（沒有剪貼簿權限）就說出來，不要靜靜地失敗。
+ * 主要的路是「用 Codex 生圖」→ 看候選圖 →「用這張」。生圖要一分鐘左右，卡片上用計時器
+ * 與說明撐住那段時間（D-010：不畫假的進度條）；頂端的 AgentBanner 也會出現。
+ * 「複製 prompt」與「上傳這張」留著：不想用 Codex、或想自己找圖的時候用。
  */
 function BriefCard({
   job,
   brief,
   refresh,
+  generation,
 }: {
   job: LoadedJob;
   brief: ImageBrief;
   refresh: () => Promise<void>;
+  generation: ImageGenerationStatus | null;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
+  const [localStart, setLocalStart] = useState<string | undefined>(undefined);
   const action = useAction();
+  const generate = useAction();
+  const use = useAction();
   const confirm = useConfirm();
+  /** 封面自動設精選的結果（沒設成的時候要講出來）。 */
+  const [featureNote, setFeatureNote] = useState<AutoFeatureResult | null>(null);
+  /** 使用者按了停止：那一趟的 POST 會以錯誤結束，但那不是錯誤。 */
+  const [stopped, setStopped] = useState(false);
+
+  const run = job.agentRun;
+  const runningHere = run?.status === 'running' && run.task === 'generate-image' && run.briefId === brief.id;
+  const runningElsewhere = run?.status === 'running' && !runningHere;
+  const generating = generate.busy || runningHere;
+  const seconds = useElapsedSeconds(runningHere ? run.startedAt : localStart, generating);
+  const busy = action.busy || generate.busy || use.busy;
+  const candidate = brief.candidate;
+  // 重新整理之後 generate.error 就沒了；上一趟這張卡片生圖失敗的話，照樣講出來。
+  const lastFailure =
+    run !== null &&
+    run.task === 'generate-image' &&
+    run.briefId === brief.id &&
+    (run.status === 'failed' || run.status === 'timeout')
+      ? `上次生圖${agentStatusText(run.status)}${run.errorMessage ? `：${run.errorMessage}` : ''}`
+      : null;
+
+  const unavailableReason =
+    generation === null
+      ? null
+      : !generation.available
+        ? (generation.reason ?? '現在不能生圖')
+        : null;
+  const canGenerate = generation?.available === true && !generating && !runningElsewhere && !busy;
 
   const upload = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
@@ -227,7 +296,8 @@ function BriefCard({
     if (!file) return;
     void action.run(async () => {
       const prepared = await prepareForUpload(file);
-      const asset = await api.addMedia(job.uuid, {
+      setFeatureNote(null);
+      const { media: asset, autoFeature } = await api.addMedia(job.uuid, {
         file: prepared.blob,
         filename: prepared.filename,
         mimeType: prepared.blob.type || 'image/png',
@@ -236,7 +306,35 @@ function BriefCard({
         ...(brief.caption === null ? {} : { caption: brief.caption }),
       });
       sessionThumbs.set(asset.id, URL.createObjectURL(prepared.blob));
+      setFeatureNote(autoFeature);
       await refresh();
+    });
+  };
+
+  const startGenerate = (): void => {
+    setLocalStart(new Date().toISOString());
+    setStopped(false);
+    setFeatureNote(null);
+    void generate.run(async () => {
+      const pending = api.generateBriefImage(job.uuid, brief.id);
+      // 這個請求要等 Codex 畫完才回來。先重讀一次，工作區才會看到「執行中」並開始輪詢，
+      // 頂端長條與其他按鈕的鎖定才跟得上。
+      window.setTimeout(() => void refresh(), 500);
+      try {
+        await pending;
+      } catch (cause) {
+        // 停止可能是按卡片上的、也可能是頂端長條的。問一次後端：這一趟是被取消的，
+        // 就講「已停止」，不當成錯誤。
+        const latest = await api.getJob(job.uuid).catch(() => null);
+        const last = latest?.agentRun;
+        if (last?.task === 'generate-image' && last.briefId === brief.id && last.status === 'cancelled') {
+          setStopped(true);
+          return;
+        }
+        throw cause;
+      } finally {
+        await refresh();
+      }
     });
   };
 
@@ -244,6 +342,12 @@ function BriefCard({
     <li className="brief" data-fulfilled={brief.fulfilled ? 'yes' : 'no'}>
       <div className="brief-head">
         <span className="brief-key mono">{brief.key}</span>
+        {brief.isFeatured && (
+          <span className="brief-cover">
+            <Icon name="star" size={12} />
+            封面
+          </span>
+        )}
         <span className="brief-ratio mono">{brief.aspectRatio}</span>
         {brief.placement !== null && <span className="brief-where">{brief.placement}</span>}
         {brief.fulfilled && (
@@ -261,9 +365,117 @@ function BriefCard({
         {brief.altText}
       </p>
 
-      <ErrorNote message={action.error} />
+      {generating && (
+        <div className="brief-generating" role="status" aria-live="polite">
+          <Icon name="spinner" size={14} className="spin" />
+          <span className="brief-generating-text">Codex 正在畫這張圖…</span>
+          <span className="brief-generating-time mono">{formatElapsed(seconds)}</span>
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            onClick={() =>
+              void action.run(async () => {
+                await api.cancelAgent(job.uuid);
+                await refresh();
+              })
+            }
+          >
+            <Icon name="x" size={13} />
+            停止
+          </button>
+          <p className="brief-generating-note">{waitingNote('generate-image', seconds)}</p>
+        </div>
+      )}
+
+      {candidate !== null && !generating && (
+        <figure className="brief-candidate">
+          <img
+            className="brief-candidate-img"
+            src={candidate.url}
+            alt={`Codex 生成的候選圖：${brief.altText}`}
+            width={candidate.width ?? undefined}
+            height={candidate.height ?? undefined}
+          />
+          <figcaption className="brief-candidate-meta">
+            <span>Codex 生成</span>
+            {candidate.width !== null && candidate.height !== null && (
+              <span className="mono">
+                {candidate.width}×{candidate.height}
+              </span>
+            )}
+            <span className="mono">{formatBytes(candidate.byteSize)}</span>
+            <span className="media-badge media-badge-quiet">尚未上傳</span>
+          </figcaption>
+          <p className="field-hint">
+            {brief.isFeatured
+              ? '按「用這張」會上傳到 WordPress 媒體庫；還沒有別的封面時會自動設成精選圖片。'
+              : '按「用這張」會上傳到 WordPress 媒體庫。不滿意就再生一張，不用它也沒關係。'}
+            {brief.isFeatured && job.approval?.valid === true && ' 換封面會讓目前的核准失效。'}
+          </p>
+          <div className="brief-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-tiny"
+              disabled={busy || runningElsewhere}
+              onClick={() =>
+                void use.run(async () => {
+                  setFeatureNote(null);
+                  const { autoFeature } = await api.useImageCandidate(job.uuid, candidate.id);
+                  setFeatureNote(autoFeature);
+                  await refresh();
+                })
+              }
+            >
+              {use.busy ? <Spinner /> : <Icon name="upload" size={13} />}
+              用這張
+            </button>
+            <button type="button" className="btn btn-quiet btn-tiny" disabled={!canGenerate} onClick={startGenerate}>
+              <Icon name="refresh" size={13} />
+              再生一張
+            </button>
+          </div>
+        </figure>
+      )}
+
+      <ErrorNote message={generate.error ?? use.error ?? action.error ?? (generating || stopped ? null : lastFailure)} />
+      {stopped && !generating && <p className="note note-info">已停止。要的話再按一次「用 Codex 生圖」。</p>}
+      {featureNote !== null && featureNote.outcome !== 'set' && (
+        <p className={featureNote.outcome === 'failed' ? 'note note-warn' : 'note note-info'} role="status">
+          <Icon name="alert" size={14} />
+          <span>{featureNote.message}</span>
+        </p>
+      )}
+
+      {unavailableReason !== null && !brief.fulfilled && (
+        <p className="field-hint brief-unavailable">
+          <Icon name="alert" size={13} />
+          {unavailableReason}
+        </p>
+      )}
+      {brief.isFeatured && candidate === null && !generating && (
+        <p className="field-hint">
+          這是封面：上傳（或生圖後「用這張」）的圖，在還沒有別的封面時會自動設成精選。
+          {job.approval?.valid === true && ' 換封面會讓目前的核准失效。'}
+        </p>
+      )}
+      {runningElsewhere && !generating && (
+        <p className="field-hint">另一個 Agent 動作還在跑，跑完才能生圖（同一篇一次只跑一個）。</p>
+      )}
 
       <div className="brief-actions">
+        {candidate === null && !generating && (
+          <button
+            type="button"
+            className={brief.fulfilled ? 'btn btn-quiet btn-tiny' : 'btn btn-tiny'}
+            disabled={!canGenerate}
+            title={unavailableReason ?? '用 Codex 的訂閱照這段描述生一張圖，生好先給你看'}
+            onClick={startGenerate}
+          >
+            <Icon name="sparkles" size={13} />
+            {brief.fulfilled ? '用 Codex 再生一張' : '用 Codex 生圖'}
+          </button>
+        )}
+
         <button
           type="button"
           className="btn btn-quiet btn-tiny"
@@ -286,13 +498,14 @@ function BriefCard({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
             onChange={upload}
-            disabled={action.busy}
+            disabled={busy}
           />
         </label>
 
         <button
           type="button"
           className="btn btn-quiet btn-tiny btn-danger-text brief-drop"
+          disabled={generating}
           onClick={() =>
             confirm({
               title: '不要這張配圖？',

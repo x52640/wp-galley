@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
@@ -23,6 +24,7 @@ import type {
   DiscardReviewRequest,
   DiscardedResponse,
   DismissedResponse,
+  ImageCandidateResponse,
   JobDetail,
   JobResponse,
   ListJobsResponse,
@@ -430,6 +432,53 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // --- 生圖（D-017，P5-T013） -------------------------------------------------
+
+  /**
+   * 照一條配圖需求用 Codex 生一張候選圖。跟 `POST /agent` 一樣要等它跑完才回（約一分鐘），
+   * 跑的期間 `GET /api/jobs/:uuid` 的 agentRun 是 running，取消走 `DELETE /agent`。
+   */
+  app.post<{ Params: { uuid: string; id: string } }>(
+    '/api/jobs/:uuid/briefs/:id/generate',
+    async (request): Promise<ImageCandidateResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const briefId = parseId(request.params.id, '配圖需求');
+      return guard(async () => ({ candidate: await core().generateBriefImage(uuid, briefId) }));
+    },
+  );
+
+  /**
+   * 候選圖本體。只在本機，**還沒上傳到 WordPress**。檔案路徑由資料庫決定，
+   * 呼叫端只給得了編號，碰不到任意路徑。
+   */
+  app.get<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/candidates/:id', async (request, reply) => {
+    const { uuid } = parse(UuidParams, request.params);
+    const candidateId = parseId(request.params.id, '候選圖');
+    const file = await guard(() => core().imageCandidateFile(uuid, candidateId));
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(file.path);
+    } catch {
+      throw new AppError(errorCodes.NOT_FOUND, '候選圖的檔案不見了（generated-images/ 被清過？），請再生一張', 404);
+    }
+    reply.header('Content-Type', file.mimeType);
+    reply.header('Cache-Control', 'no-store');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    return reply.send(bytes);
+  });
+
+  /** 「用這張」：上傳到 WordPress 媒體庫（走 addMedia 的既有規則）。 */
+  app.post<{ Params: { uuid: string; id: string } }>(
+    '/api/jobs/:uuid/candidates/:id/use',
+    async (request, reply): Promise<MediaResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const candidateId = parseId(request.params.id, '候選圖');
+      const result = await guard(() => core().useImageCandidate(uuid, candidateId));
+      reply.status(201);
+      return result;
+    },
+  );
+
   app.get<{ Params: { uuid: string }; Querystring: { against?: string } }>(
     '/api/jobs/:uuid/compare',
     async (request): Promise<Comparison> => {
@@ -448,8 +497,8 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(MediaBody, request.body);
     const bytes = decodeMedia(body);
-    const asset = await guard(() =>
-      core().addMedia(uuid, {
+    const result = await guard(() =>
+      core().addMediaWithOutcome(uuid, {
         bytes,
         mimeType: body.mimeType,
         filename: body.filename,
@@ -459,7 +508,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       }),
     );
     reply.status(201);
-    return { media: asset };
+    return result;
   });
 
   app.put<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id', async (request): Promise<MediaResponse> => {
@@ -543,10 +592,10 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-function parseId(raw: string): number {
+function parseId(raw: string, what = '圖片'): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
-    throw new AppError(errorCodes.VALIDATION_FAILED, `圖片編號不合法：${raw}`, 400);
+    throw new AppError(errorCodes.VALIDATION_FAILED, `${what}編號不合法：${raw}`, 400);
   }
   return value;
 }

@@ -24,6 +24,9 @@ import type {
   JobSummary,
   JobTarget,
   JobTemplate,
+  AutoFeatureResult,
+  ImageCandidate,
+  ImageGenerationStatus,
   MediaAsset,
   PublishRequest,
   PublishResult,
@@ -39,13 +42,17 @@ export type {
   AgentRun,
   AgentRunResult,
   AgentRunStatus,
+  AgentRunTask,
   AgentTask,
   Approval,
+  AutoFeatureResult,
   CompareRow,
   Comparison,
   DiffSegment,
   ImageBrief,
   ImageBriefDraft,
+  ImageCandidate,
+  ImageGenerationStatus,
   JobDetail,
   JobState,
   JobSummary,
@@ -100,6 +107,12 @@ export interface AddMediaInput {
   altText?: string;
   caption?: string;
   briefKey?: string;
+}
+
+/** 上傳的結果：圖，加上封面有沒有自動設成精選（沒對上封面是 null）。 */
+export interface MediaUploadResult {
+  media: MediaAsset;
+  autoFeature: AutoFeatureResult | null;
 }
 
 // --- 前端才有的衍生型別 --------------------------------------------------------
@@ -158,7 +171,19 @@ export interface PublisherApi {
   /** 丟掉一條配圖需求。 */
   dismissImageBrief(uuid: string, briefId: number): Promise<void>;
 
-  addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset>;
+  /** 能不能生圖（只有 Codex 能，D-017）。不能的話 `reason` 講為什麼。 */
+  getImageGenerationStatus(): Promise<ImageGenerationStatus>;
+  /**
+   * 用 Codex 照這條配圖需求生一張候選圖。要等它畫完才回（約一分鐘）；跑的期間
+   * `agentRun` 是 running（task `generate-image`），取消用 `cancelAgent`。
+   * 候選圖**只在本機**，不上傳、不動內容。
+   */
+  generateBriefImage(uuid: string, briefId: number): Promise<ImageCandidate>;
+  /** 「用這張」：上傳到 WordPress 媒體庫。封面那條會自動設成精選。 */
+  useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadResult>;
+
+  /** 帶封面那條的 briefKey 時，後端會在沒有別的封面時自動設精選，結果在 `autoFeature`。 */
+  addMedia(uuid: string, input: AddMediaInput): Promise<MediaUploadResult>;
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
   removeMedia(uuid: string, assetId: number): Promise<void>;
   /** afterBlockIndex：-1 放在最前面，n 放在第 n 個頂層區塊後面。 */
