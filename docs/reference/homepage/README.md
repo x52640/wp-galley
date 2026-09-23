@@ -4,7 +4,7 @@
 以及 2026-08-27 從 https://www.remusplus.com/ 公開前台抓取的線上版本。
 `home-main.css` 與 `home-main.js` 兩份**位元組完全相同**，確認本機檔案就是線上版的來源。
 
-**首頁不在發布台範圍內**（見 [`../../SITE-FINDINGS.md`](../../SITE-FINDINGS.md) 決定一）。
+**首頁不在發布台範圍內**（見 [ADR-0003](../../adr/0003-homepage-out-of-mvp.md)）。
 首頁的工作流程是：使用者提供素材 → 直接在對話中請 Claude 從頭產生一份完整 HTML
 → 使用者自行上傳到 `astra-child` 主題。整份重生，沒有版本累積，所以不走發布台的
 revision／核准管線。

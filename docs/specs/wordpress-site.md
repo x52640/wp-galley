@@ -1,8 +1,12 @@
-# 目標網站探查結果（www.remusplus.com）
+# 目標網站實況（www.remusplus.com）
+
+> 擁有範圍：站台組成、內容類型對應、正文 HTML 詞彙、區塊格式、分類法、外部副作用。
+> 這是**實測事實**；據此做的範圍決定在 [ADR-0003](../adr/0003-homepage-out-of-mvp.md)
+> （首頁移出 MVP）與 [ADR-0004](../adr/0004-body-slot-only.md)（只送正文）。
+> 程式：`src/wordpress/`、`config/publish-targets.json`。
 
 探查日期：2026-08-27。全部以**匿名 REST API 與前台 HTML** 取得，未使用任何憑證。
-這份文件記錄「計畫假設」與「網站實況」的差異，以及據此做的決定。
-IMPLEMENTATION_PLAN.md 維持原樣不改；有衝突時以本文件為準。
+這份文件記錄「原始計畫的假設」與「網站實況」的差異。
 
 ## 網站組成
 
@@ -24,41 +28,7 @@ IMPLEMENTATION_PLAN.md 維持原樣不改；有衝突時以本文件為準。
 兩個 CPT 都已啟用 `show_in_rest`，可用 REST 建立與更新草稿（寫入權限待階段 4 以
 Application Password 實測）。
 
-## 決定一：首頁移出 MVP
-
-**問題。** page 1665 的 `content.rendered` 是**空字串**。首頁完全由 `astra-child`
-子主題的 PHP 樣板渲染，搭配 `assets/css/home-main.css`、`assets/js/home-main.js`
-與手刻的 `ph-` class 系統（`ph-hero`、`ph-about-item`、`ph-project-card-flip`…）。
-資料庫裡沒有任何首頁內容。
-
-這使計畫的兩條規則無法同時成立：
-
-- §4.2「首頁對應固定 Page ID，用 REST 更新」→ 寫進 `content` 不會有任何效果。
-- §2「不修改 WordPress PHP、Theme 或 Plugin 原始碼」→ 唯一能改首頁的途徑被禁止。
-
-**決定（使用者於 2026-08-27 確認）**：首頁移出 MVP。發布台只做 `diary` 與
-`read-think`。首頁維持現行的手改主題方式。
-
-**影響。** 以下計畫段落在 MVP 中不實作：§4.2 全部、§8.4 首頁特殊保護、
-§9 首頁第二次警告、§13 中與首頁相關的兩項完成條件、階段 2 驗收的
-「首頁模板結構遭更動時驗證失敗」。
-
-`strict` 這個嚴格度仍保留在模板契約中（由 manifest 的 allowlist 決定，不是三段
-程式碼），日後若把首頁內容搬進 WordPress 就能直接啟用，不需重寫 renderer。
-
-## 決定二：模板只負責正文，外框不碰
-
-**問題。** 計畫 §4.3 說長文的「固定外框包括標題、導讀、封面圖、正文、重點摘要、
-作者資訊及延伸閱讀」。實際文章的 `content` 裡**沒有任何這些結構**——標題、日期、
-精選圖片、作者全部由 Elementor 的 `single-post` 模板產生，正文則透過
-`elementor-widget-theme-post-content` widget 輸出。
-
-**決定。** 發布台送出的 `content` **只有正文**。外框不在我們的輸出裡，所以
-「Agent 不能修改外框」自動成立；要守的是正文的標籤／class allowlist。
-
-模板的 `template.html` 只用於**本機預覽**（補上模擬外框讓使用者看得懂），
-manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPress 的內容。
-預覽用的外框永遠不會被發布。
+首頁不在發布台範圍內，見 ADR-0003。
 
 ## 正文的實際 HTML 詞彙
 
@@ -89,20 +59,16 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 - 標題就是日期數字，例如 `20260522`；slug 同樣是 `20260522`。
 - 日記的圖片流程在 MVP 幾乎用不到，但保留能力。
 
-## 待確認事項
+> 上面的篇數與 h2 結論已被下方「階段 4 連線後的實測」修正。原本的三項待確認：
+> h2 已開放（`longform-v1` 的 allowlist 有 h2）；分類項目見下方 4-3 節；日記標題格式
+> 見 `plan.md` Q-8。
 
-- 長文要不要開放 `h2`？現有文章只用到 `h3`。
-- 日記標題是否固定用 `YYYYMMDD`，由發布台自動產生？
-- `read-think-tag` 與 `diary-category` 的現有分類項目，等階段 4 連線後再列出。
-
----
-
-# 階段 4 連線後的實測（2026-08-28）
+## 階段 4 連線後的實測（2026-08-28）
 
 以 Application Password 連線後重新抓了**全部** 115 篇文章（先前是匿名 API，
 只看得到部分內容）。以下數字取代上面「正文的實際 HTML 詞彙」一節的統計。
 
-## 連線與權限
+### 連線與權限
 
 | 項目 | 實況 |
 | --- | --- |
@@ -116,14 +82,14 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 
 ⚠️ **使用者重設登入密碼會讓該帳號所有 Application Password 立即失效**，要重新產生。
 
-## 修正先前的兩個錯誤結論
+### 修正先前的兩個錯誤結論
 
 | 先前寫的 | 實際 |
 | --- | --- |
 | 日記 30 篇 | **108 篇**（掃描取樣 100 篇） |
 | 長文「未出現 h2」 | h2 出現 **8 次**，h3 出現 41 次，h4 出現 3 次 |
 
-## 區塊格式：全站 100% 是 Gutenberg 區塊
+### 區塊格式：全站 100% 是 Gutenberg 區塊
 
 115 篇文章**沒有一篇**是純 HTML 或傳統編輯器格式，全部是
 `<!-- wp:paragraph -->` 這種區塊標記。這是階段 4 的關鍵發現，決定了發布格式。
@@ -138,7 +104,7 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 | quote | 1 | 1 |
 | table | 0 | 2 |
 
-## 字級慣例在 2026 年變過
+### 字級慣例在 2026 年變過
 
 | 內容類型 | 2023 | 2025 | 2026 |
 | --- | --- | --- | --- |
@@ -148,17 +114,16 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 **新文章跟 2026 的慣例**：段落與標題預設 `fontSize: medium`。這是
 `BlockDefaults` 的預設值來源，寫在 manifest 而不是程式碼裡。
 
-## 其他實測數字
+### 其他實測數字
 
 | | read-think（15） | diary（100） |
 | --- | --- | --- |
 | 有精選圖片 | 15／15 | **0／100** |
 | 有分類 | 13／15 | **0／100** |
 
-日記現況幾乎不用圖片（100 篇共 3 張內文圖），但**使用者 2026-08-28 表示日記
-未來會常常需要配圖**，所以日記的圖片能力要做滿，不能因為現況沒有就砍掉。
+日記現況幾乎不用圖片（100 篇共 3 張內文圖）；這**不代表**可以砍掉日記的圖片能力，見 `plan.md` D-006。
 
-## 序列化器的驗證方式
+### 序列化器的驗證方式
 
 `src/wordpress/blocks.ts` 把渲染器的純 HTML 轉成區塊標記。正確性判準不是
 「看起來合理」，而是**跟正式站既有文章逐字相同**——Gutenberg 開啟文章時會拿存檔
@@ -189,7 +154,7 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 **核心的區塊屬性順序不固定**（`#1379` 是 `{"id",…,"align"}`，`#870` 是
 `{"align","id",…}`），因為驗證比對的是 HTML 不是屬性 JSON。我們固定順序是安全的。
 
-## 階段 4-2 實測補充
+### 階段 4-2 實測補充
 
 `/wp/v2/types` 的 `supports` 欄位**不是 `Record<string, boolean>`**。WordPress 會把
 註冊時給的功能參數原樣帶出來，正式站的實際值：
@@ -209,7 +174,7 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 站台探查（`GET /api/wordpress`）對正式站的實跑結果：連線正常、帳號
 `ai_publisher`（editor）、兩個 CPT 都在且支援精選圖片、`problems` 為空。
 
-## 階段 4-3：分類項目的實際狀況
+### 階段 4-3：分類項目的實際狀況
 
 三個名詞在 WordPress 裡是不同的東西，這個專案的文件一律照下面用：
 
@@ -236,11 +201,17 @@ manifest 以 `publishSlot` 指定哪一個 slot 的 HTML 才是要送去 WordPre
 
 `diary-category` **一個項目都沒有**，跟 100 篇日記全部沒有分類一致。
 
-**預設不自動建立分類項目**（使用者於 2026-08-28 確認）。理由是 Agent 容易生出
-「經濟」「經濟學」「經濟學思考」這種近義詞，自動建立幾個月後分類會變垃圾場。
-對不上的名稱會原樣回報，由使用者在 UI 上決定。
+據此決定預設不自動建立分類項目，見 `plan.md` D-004。
 
-## ⚠ 發布可能觸發無法回收的外部動作
+兩個分類法的 `rest_base` 都等於 slug（`read-think-tag`、`diary-category`），
+`src/core/service.ts` 依此組 REST 路徑。
+
+### 媒體類型
+
+WordPress 核心預設不收 SVG（可內嵌 script），要開啟只能裝外掛或改 PHP，兩者都違反
+硬性禁令。所以 SVG 一律在瀏覽器轉成 PNG 再上傳（`src/ui/lib/svg-to-png.ts`）。
+
+### ⚠ 發布可能觸發無法回收的外部動作
 
 站台裝了 **MailPoet**（電子報）與 **Jetpack**。實測時在 `/wp/v2/types` 看到的
 外掛痕跡：`mailpoet_email`、`jetpack_form`、`jp_pay_order`、`jp_pay_product`、

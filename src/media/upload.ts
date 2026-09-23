@@ -11,8 +11,8 @@ import { MediaSchema, type Media } from '../wordpress/schemas.js';
  *
  * **SVG 傳不上去。** WordPress 核心預設不允許 SVG（SVG 可以內嵌 script，
  * 是已知的攻擊面），要開啟只能裝外掛或改 PHP——兩個都是這個專案明文禁止的。
- * 所以 Agent 產生的 SVG 必須先在本機轉成 PNG 再上傳。轉檔在瀏覽器裡用 canvas
- * 做，不需要任何額外套件（見 docs/SITE-FINDINGS.md）。
+ * 所以使用者選的 SVG 必須先在本機轉成 PNG 再上傳。轉檔在瀏覽器裡用 canvas
+ * 做，不需要任何額外套件（見 docs/specs/wordpress-site.md）。
  */
 
 /** 允許上傳的類型。刻意很窄——這是會被公開在網路上的檔案。 */

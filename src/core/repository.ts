@@ -386,7 +386,7 @@ export class Repository {
 
   /**
    * `created_by` 寫死 'ui'。DB 的 CHECK 也只接受 'ui'——即使日後有人在
-   * service 裡寫錯，DB 還會再擋一次（階段 5 契約第一節第 3 條）。
+   * service 裡寫錯，DB 還會再擋一次（docs/specs/state-machine.md 不可妥協的規則第 3 條）。
    */
   insertApproval(input: { jobId: number; revisionId: number; contentHash: string }): ApprovalRow {
     const result = this.db

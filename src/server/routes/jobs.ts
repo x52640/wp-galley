@@ -13,7 +13,7 @@ import { AgentUnavailableError } from '../../agents/registry.js';
 import { BlockConversionError } from '../../wordpress/block-types.js';
 
 /**
- * 發布台的 HTTP 介面（階段 5 契約第四節）。
+ * 發布台的 HTTP 介面（docs/specs/http-api.md）。
  *
  * 這一層只做三件事：**驗證請求形狀、呼叫 CoreService、把錯誤翻成 HTTP 狀態碼**。
  * 任何「可不可以做」的判斷都不在這裡——那些在 CoreService，因為階段 6 的 MCP

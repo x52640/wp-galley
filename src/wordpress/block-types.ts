@@ -12,7 +12,7 @@ import { z } from 'zod';
  *
  * 所以流程是：sanitize 過的 HTML → 解析成 IR → **由我們自己逐字產生** 核心區塊的
  * 標記，而不是把解析結果丟給通用序列化器。輸出格式全部對照 www.remusplus.com
- * 既有 115 篇文章的真實內容決定（見 docs/SITE-FINDINGS.md）。
+ * 既有 115 篇文章的真實內容決定（見 docs/specs/wordpress-site.md）。
  */
 
 /** 行內 HTML（strong/em/a/br 等），已經過 sanitize，直接沿用。 */

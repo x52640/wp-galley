@@ -17,7 +17,7 @@ import { mapCoreError } from './jobs.js';
  * 絕不回傳 Application Password，連「有沒有填」以外的資訊都不給。
  */
 
-/** 發布台會用到的內容類型。首頁已移出 MVP（見 docs/SITE-FINDINGS.md）。 */
+/** 發布台會用到的內容類型。首頁已移出 MVP（見 docs/adr/0003-homepage-out-of-mvp.md）。 */
 const EXPECTED_POST_TYPES = ['read-think', 'diary'] as const;
 
 export async function wordpressRoutes(app: FastifyInstance): Promise<void> {

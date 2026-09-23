@@ -9,7 +9,7 @@ import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 /**
  * 分類項目。
  *
- * **預設只能選既有的項目。** 理由寫在 docs/SITE-FINDINGS.md：Agent 很容易生出
+ * **預設只能選既有的項目。** 理由寫在 plan.md D-004：Agent 很容易生出
  * 「經濟」「經濟學」「經濟學思考」這種近義詞，自動建立幾個月後分類就變垃圾場。
  * 所以要建新項目得使用者自己打字、自己按確認，而且發布目標的
  * `allowCreateTerms` 還要是開的。

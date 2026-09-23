@@ -6,7 +6,7 @@ import { buildMeta, notInstalledStatus, probe, RunRegistry, schemaForCli, whichE
 /**
  * Claude Code 適配器。
  *
- * 探查結果（見 docs/AGENT-CLI-PROBE.md，claude 2.1.247）：
+ * 探查結果（見 docs/specs/agent-cli.md，claude 2.1.247）：
  * - `-p` / `--print` 是非互動進入點
  * - `--json-schema` 吃 schema 字串或檔案路徑
  * - `--output-format json` 把結果包成 `{type:"result", result:"<JSON>"}`

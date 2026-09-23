@@ -387,7 +387,7 @@ export interface AgentRunResult {
   task: AgentTask;
   /**
    * 校稿結果存成提案，**文章一個字都還沒動**。要套用哪幾項由使用者逐項決定。
-   * 這裡沒有 revision 欄位是刻意的（見 docs/STAGE-5-CONTRACT.md 第七節）。
+   * 這裡沒有 revision 欄位是刻意的（見 docs/specs/review-proposals.md）。
    * `task === 'images'` 那一趟不產生提案，所以是 null。
    */
   review: ReviewProposal | null;

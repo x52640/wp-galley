@@ -32,7 +32,7 @@ export interface ReviewChange {
  * 自己知道正確答案，或者乾脆不講。
  *
  * **不需要連外就做得到**，所以它屬於現在這個階段：把要查的東西列出來，
- * 而不是假裝自己查過了。真的去查是階段 6 的事（見 docs/STAGE-6-FACTCHECK.md）。
+ * 而不是假裝自己查過了。真的去查是階段 6 的事（見 docs/specs/factcheck.md）。
  */
 export interface Observation {
   readonly kind: 'contradiction' | 'unsupported-claim' | 'missing-source' | 'gap';

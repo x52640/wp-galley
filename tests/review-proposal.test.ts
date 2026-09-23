@@ -371,7 +371,7 @@ describe('左右對照', () => {
 });
 
 /**
- * Codex review（docs/STAGE-5.5-REVIEW.md）抓到的幾條。每一條都對應清單上的一項，
+ * Codex review（未留檔）抓到的幾條。每一條都對應清單上的一項，
  * 修好之後這些測試就是「不要再退回去」的看門狗。
  */
 describe('review 之後補上的防線', () => {

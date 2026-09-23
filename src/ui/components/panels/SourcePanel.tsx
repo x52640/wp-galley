@@ -11,7 +11,7 @@ import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
  * 契約 §二 刻意保留 `SOURCE → RENDERED`：使用者可以完全不用 Agent，貼完稿直接
  * 渲染發布。所以這張卡片必須自成一條完整的路，不能只是「等 Agent 的地方」。
  *
- * 日記的標題慣例是 YYYYMMDD（見 docs/SITE-FINDINGS.md），所以給一個一鍵填入。
+ * 日記的標題慣例是 YYYYMMDD（見 docs/specs/wordpress-site.md），所以給一個一鍵填入。
  *
  * **送出的是整份 templateData**，所以一定要帶上 `expectedContentHash`：那是這份
  * 表單的內容算出來的那一版。分類面板送的也是整份，兩邊撞在一起時要有人被擋下來，

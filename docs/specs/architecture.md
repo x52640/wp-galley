@@ -1,0 +1,68 @@
+# 架構與程式慣例
+
+> 擁有範圍：技術選型、模組邊界、依賴方向、跨模組的程式慣例、資料存放。
+> 各模組的行為規格在各自的 spec，這裡只管「東西放哪、誰可以 import 誰」。
+
+## 內容管線
+
+系統是一條**單向的內容管線**，兩個入口共用同一個核心：
+
+```
+本機瀏覽器 → Fastify → CoreService ┐
+外部 Agent → MCP Server (stdio) ───┘→ Agent Adapter / Template Engine / WP REST Client / SQLite
+```
+
+MCP 與 UI 共用同一個 `CoreService`（見 [security.md](security.md)）。
+
+## 技術選型
+
+Node ≥22.5 + TypeScript（ESM、`verbatimModuleSyntax`，import 要寫 `.js` 副檔名）、
+Fastify 5、React 19 + Vite 8、Zod 4、Vitest 4。
+
+SQLite 用 **Node 內建的 `node:sqlite`**（`DatabaseSync`），不是 better-sqlite3——免原生編譯。
+API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
+`Record<string, SQLOutputValue>[]`，要轉型得先過 `as unknown as`。
+
+已安裝：Nunjucks、`sanitize-html`、`parse5`。diff 是自己寫的（`src/core/diff.ts`，LCS，
+未加依賴）。尚未安裝：官方 TypeScript MCP SDK、Playwright。UI 沒有用任何元件庫，
+圖示是手抄的 Lucide SVG。
+
+## 模組
+
+| 目錄 | 負責 | 規格 |
+| --- | --- | --- |
+| `src/config` | 環境變數、路徑、秘密遮蔽 | [security.md](security.md) |
+| `src/db` | SQLite 與 migration | 本檔 |
+| `src/core` | CoreService、狀態機、revision、diff、提案套用 | [core-service.md](core-service.md)、[state-machine.md](state-machine.md)、[review-proposals.md](review-proposals.md) |
+| `src/templates` | 模板 registry、渲染、sanitize、結構驗證 | [templates.md](templates.md) |
+| `src/preview` | 校樣 HTML 文件 | [templates.md](templates.md) |
+| `src/agents` | CLI 適配器、輸出契約與解析 | [agent-cli.md](agent-cli.md)、[agent-tasks.md](agent-tasks.md) |
+| `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
+| `src/media` | 圖片驗證與上傳 | [agent-tasks.md](agent-tasks.md) |
+| `src/server` | Fastify、路由、守門 | [http-api.md](http-api.md)、[security.md](security.md) |
+| `src/ui` | React 發布台 | [design-system.md](design-system.md) |
+| `src/mcp` | 空（MCP 尚未實作） | [mcp.md](mcp.md) |
+
+## 依賴方向
+
+`server → preview → templates → core`。`db/templates/core/preview` 全部不得 import
+Fastify 或 HTTP。改動前先跑一次依賴檢查。
+
+## 程式慣例
+
+- 新增 API 錯誤一律 `throw new AppError(code, message, status)`，回應格式固定是
+  `{ error: { code, message, details?, requestId } }`；5xx 對外只給通用訊息。
+- migration 只能往 `src/db/migrations/` 加新檔並註冊到 `index.ts`；改動已套用的
+  migration 會因 checksum 不符而啟動失敗。
+- Agent 各家怪癖的放置規則見 [agent-cli.md](agent-cli.md)。
+
+## 本機資料
+
+| 位置 | 內容 | 進 Git |
+| --- | --- | --- |
+| `data/` | SQLite | 否 |
+| `drafts/` | 原稿與測試素材 | 否 |
+| `generated-images/` | 本機圖片 | 否 |
+| `backups/` | 發布前快照 | 否 |
+| `config/publish-targets.json` | 發布目標 | 是 |
+| `templates/` | 模板 | 是 |

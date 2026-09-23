@@ -9,7 +9,7 @@ import { stripNulls, toOpenAiStrictSchema } from './openai-strict.js';
 /**
  * Codex CLI 適配器。
  *
- * 探查結果（見 docs/AGENT-CLI-PROBE.md，codex 0.147.0）：
+ * 探查結果（見 docs/specs/agent-cli.md，codex 0.147.0）：
  * - `codex exec` 是非互動進入點
  * - `--output-schema FILE` 吃 JSON Schema 檔案，強制最終回應的形狀
  * - `-o FILE` 把最終訊息寫進檔案，比解析 JSONL 事件流可靠

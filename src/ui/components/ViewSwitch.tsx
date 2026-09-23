@@ -6,7 +6,7 @@ import { Icon } from '../icons.js';
  *
  * **只有兩個。** 校樣是讀整篇的地方（預設），左右對照是逐字比對的地方。
  * 單人工具不該有四個分頁——階段 6 的查證發現不會再開第三個檢視，它跟校稿改動
- * 一起掛在右邊的待處理清單上（見 docs/STAGE-6-FACTCHECK.md 第二節）。
+ * 一起掛在右邊的待處理清單上（見 docs/specs/review-proposals.md「主區只要兩個模式」）。
  */
 
 export type StageMode = 'proof' | 'compare';

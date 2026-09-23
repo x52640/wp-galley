@@ -2,7 +2,7 @@ import { splitTopLevelBlocks, type TopLevelBlock } from './html-blocks.js';
 import { diffWords, type DiffSegment } from './word-diff.js';
 
 /**
- * 校對符號（階段 5 契約第四節）。
+ * 校對符號（docs/specs/http-api.md 的 ProofMark）。
  *
  * 版面的簽名元素：改動不用紅綠色塊，用頁邊的校對符號標示。所以這裡產生的不是
  * 「一堆 diff hunk」，而是**每個頂層區塊一個符號**——符號要能定位到某一段的頁邊，

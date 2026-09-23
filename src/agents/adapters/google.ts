@@ -6,7 +6,7 @@ import { buildMeta, notInstalledStatus, probe, RunRegistry, schemaForCli, whichE
 /**
  * Antigravity CLI（`agy`）適配器 —— 計畫 §6.2 指名的 Google Agent。
  *
- * 探查結果（見 docs/AGENT-CLI-PROBE.md，agy 1.1.22）：
+ * 探查結果（見 docs/specs/agent-cli.md，agy 1.1.22）：
  * - `--print` 是非互動進入點
  * - `--json-schema` 吃 schema 字串或檔案路徑
  * - `--sandbox` 開啟終端機限制

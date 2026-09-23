@@ -1,10 +1,10 @@
 # 本機 AI WordPress 發布台
 
-只在本機執行的 WordPress 內容發布台。完整規格見 [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md)。
+只在本機執行的 WordPress 內容發布台：本機 AI 當編輯，你當總編。
 
-> **目前進度：階段 1／7（安全本機骨架）**
-> 已完成：本機限定伺服器、設定驗證與秘密遮蔽、SQLite migration、健康檢查、測試。
-> 尚未實作：模板渲染、Agent 適配器、WordPress 連線、發布 UI、MCP Server。
+- 產品目標、範圍與決策：[`plan.md`](./plan.md)
+- 目前進度：[`docs/CURRENT_TASK.md`](./docs/CURRENT_TASK.md)
+- 技術規格：[`docs/specs/`](./docs/specs/README.md)
 
 ## 需求
 
@@ -15,7 +15,7 @@
 
 ```bash
 npm install
-cp .env.example .env      # 階段 1 可以不改任何值
+cp .env.example .env      # 填入 WordPress 網址、帳號與 Application Password
 npm run migrate           # 建立 data/publisher.sqlite
 npm run dev               # 後端 127.0.0.1:3000 + Vite UI 127.0.0.1:5173
 ```
@@ -42,16 +42,15 @@ npm start                 # http://127.0.0.1:3000
 | `npx vitest run tests/health.test.ts` | 只跑單一測試檔 |
 | `npx vitest run -t "遮蔽"` | 只跑名稱含關鍵字的測試 |
 | `npm run typecheck` | TypeScript 檢查（不產生輸出） |
+| `npm run verify` | typecheck ＋ 全部測試（commit 前的品質閘） |
 
 ## 安全設計
 
-- **只綁 loopback。** `APP_HOST` 只接受 `127.0.0.1` / `localhost` / `::1`，填 `0.0.0.0` 會直接啟動失敗。
-- **擋 DNS rebinding。** 每個請求都檢查 `Host` 與 `Origin` header 是否指向本機，不只看綁定位址。
-- **秘密不外洩。** Application Password 只存在於後端記憶體；health endpoint 只回報「是否已設定」，log 有兩層遮蔽（pino redact + 字面值抹除）。
-- **核准寫死在 DB。** `approvals.created_by` 有 `CHECK (created_by = 'ui')`，未來 MCP Server 即使程式寫錯也無法建立發布核准。
+只綁 loopback、擋 DNS rebinding、秘密只在後端記憶體、核准只能由本機 UI 建立。
+細節見 [`docs/specs/security.md`](./docs/specs/security.md)。
 
 ## 環境變數
 
 見 [`.env.example`](./.env.example)。`.env` 已列入 `.gitignore`，連同 `data/`、`drafts/`、`generated-images/`、`backups/` 一起不進版控。
 
-WordPress 相關三個變數要**一起填或一起留空**，只填一半會在啟動時報錯（避免發布當下才爆炸）。階段 4 之前留空即可。
+WordPress 相關三個變數要**一起填或一起留空**，只填一半會在啟動時報錯（避免發布當下才爆炸）。

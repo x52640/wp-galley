@@ -18,7 +18,8 @@
     "migrate": "tsx src/db/cli-migrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",

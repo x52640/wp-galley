@@ -1,4 +1,39 @@
-# 本機 Agent CLI 探查結果
+# Agent CLI 與適配器
+
+> 擁有範圍：三個 CLI 的實際參數、登入偵測、各家怪癖、adapter 介面與執行規則。
+> 程式：`src/agents/`。
+
+## 適配器規則
+
+- **各家怪癖只准寫在 `src/agents/adapters/<該家>.ts`**，不要滲進 `process-runner`、
+  `output-parser` 或 `output-contract`。要在驗證前修正輸出就用 `parseAndValidate` 的
+  `transform` 參數。
+- 送給 CLI 的 schema 可以為相容性放寬，但**後端一定要用原始 schema 再驗一次**。
+  放寬的只是給模型端的提示，不是驗證標準。
+- 輸出不是合法 JSON、schema 不合格、漏掉必要欄位或嘗試加入不允許 HTML，後端拒絕
+  該結果並允許重試，不得直接發布。輸出契約本身的唯一權威是
+  `src/agents/output-contract.ts`（`REVIEW_OUTPUT_SCHEMA`）。
+
+## Adapter 介面與執行規則
+
+```ts
+interface AgentAdapter {
+  id: "codex" | "claude" | "google";
+  detect(): Promise<AgentStatus>;
+  listModels(): Promise<ModelOption[]>;
+  runStructured<T>(request: AgentRequest, schema: JsonSchema): Promise<AgentResult<T>>;
+  cancel(runId: string): Promise<void>;
+}
+```
+
+`AgentStatus` 至少包含：已安裝、版本、登入狀態是否可確認、支援的輸出格式與目前是否可用。不要在 UI 顯示登入 token。
+
+執行規則：`spawn`＋參數陣列、prompt 走 stdin、timeout／取消／輸出上限／concurrency 1、
+隔離工作區、不授權任何工具——全部是 [security.md](security.md) 的硬性禁令，這裡不重抄。
+adapter 自己要做的：stdout 與 stderr 分開處理，log 前先過秘密遮蔽；Agent 只回傳結構化內容，
+所有發布動作由後端執行。
+
+## 探查結果
 
 探查日期：2026-08-27。全部為唯讀檢查（`--help`、`--version`、登入狀態），
 未執行任何會消耗訂閱額度的推論，未讀取、輸出或記錄任何憑證。
@@ -6,7 +41,7 @@
 計畫 §6.1 與 §14.9 都要求以**本機安裝版本的官方 `--help` 為準**，不要沿用文件裡
 寫死的參數。CLI 改版後請重跑一次探查並更新這份文件。
 
-## 結論：三個目標 CLI 全部可用
+### 結論：三個目標 CLI 全部可用
 
 | | Codex | Claude Code | Antigravity |
 | --- | --- | --- | --- |
@@ -24,7 +59,7 @@
 **三個都支援 JSON Schema 強制結構化輸出**，所以都不必標成 `experimental`。
 這比計畫寫作當下的假設好——計畫原本擔心「無法穩定提供 JSON 的 Agent」。
 
-## 登入狀態偵測
+### 登入狀態偵測
 
 只判斷「有沒有登入」，不取出也不記錄任何憑證。
 
@@ -38,7 +73,7 @@
 `loggedIn`、`authMethod`、`subscriptionType` 三個欄位，其餘一律丟棄，不寫進
 資料庫、log 或 API 回應。
 
-## 沒有採用的 CLI
+### 沒有採用的 CLI
 
 `gemini`（Gemini CLI 0.55.1，`/opt/homebrew/bin/gemini`）也裝在這台機器上，
 但**沒有 `--json-schema` 之類的結構化輸出強制參數**，只有 `-o json` 包裝整個回應。
@@ -48,26 +83,13 @@
 `--json-schema`，所以 MVP 採用 `agy`，不採用 `gemini`。日後要加只需新增一個
 adapter，介面不變。
 
-## 執行時的安全參數（計畫 §6.2）
-
-三個 adapter 共同遵守：
-
-- 一律 `spawn` + 參數陣列，**不使用 `shell: true`**。
-- Prompt 走 stdin，不放進命令列參數（避免 injection 與長度限制）。
-- 工作目錄設為該 job 的隔離工作區，不是使用者家目錄。
-- 校稿工作不授權 shell、檔案寫入、網路或 WordPress 工具。
-- 每次執行設定 timeout、可取消、輸出大小上限，同一時間只跑一個（concurrency 1）。
-- stdout 與 stderr 分開處理，log 前先過秘密遮蔽。
-
 各 CLI 的具體參數寫在對應的 adapter 檔案裡，不散落在共用程式碼中。
 
----
-
-## 實作時踩到的坑（2026-08-27 實測記錄）
+### 實作時踩到的坑（2026-08-27 實測記錄）
 
 `--help` 沒寫、但實際會炸的東西。CLI 改版後請重新驗證這一節。
 
-### Codex
+#### Codex
 
 | 問題 | 處理 |
 | --- | --- |
@@ -77,13 +99,13 @@ adapter，介面不變。
 | 同上，不支援 `minLength` / `maxLength` / `pattern` 等約束 | 送出前濾掉；**後端仍用原始 schema 驗證，約束沒少** |
 | strict mode 會把沒填的選填欄位回成 `null` | 驗證前先 `stripNulls` |
 
-### Claude Code
+#### Claude Code
 
 | 問題 | 處理 |
 | --- | --- |
 | `--json-schema` 內建 draft-07 驗證器，看到 `$schema: draft/2020-12` 會直接報 `no schema with key or ref` | 送出前拿掉 `$schema`（`schemaForCli`） |
 
-### Antigravity
+#### Antigravity
 
 | 問題 | 處理 |
 | --- | --- |
@@ -94,12 +116,12 @@ adapter，介面不變。
 | 會在輸出最外層多塞 `toolAction`、`toolSummary` | adapter 只刪這兩個已知欄位，其餘多餘欄位照樣被擋 |
 | 沒有停用工具的參數；它若自行呼叫 `read_file` 會被 headless 自動拒絕，然後**整份不輸出** | prompt 開頭明確告知沒有可用工具（`NO_TOOLS_NOTICE`） |
 
-### 共通
+#### 共通
 
 `execFile` 不會關閉子行程的 stdin，等 EOF 的 CLI（`agy models` 就是）會一路等到逾時。
 探查一律改走 `runProcess`，它會 `stdin.end()`。
 
-## 驗收實測結果
+### 驗收實測結果
 
 原稿：一段 84 字的日記，刻意留三個錯字（一整**夭**、錄**印**、別**忸**）。
 三家都用 `diary-v1` 模板，走完整流程到渲染出可發布的 HTML。

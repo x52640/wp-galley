@@ -1,7 +1,7 @@
 import { CoreError, coreErrorCodes } from './errors.js';
 
 /**
- * Job 狀態機（階段 5 契約第二節）。
+ * Job 狀態機（docs/specs/state-machine.md）。
  *
  * 用一張表定義，不要把「這時候能不能做那件事」散成一堆 if——散開之後，
  * 「使用者按下發布之前一定經過核准」這件事就沒有任何一個地方可以一眼看完，

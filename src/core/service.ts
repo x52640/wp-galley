@@ -248,7 +248,7 @@ export interface AddMediaInput {
  *
  * 校稿改動與觀察**不是同一種東西**（一個可以自動套用，一個只能請人去判斷），
  * 但兩者都是「掛在文章某一段上的待辦事項」，所以裝在同一個容器裡。
- * 階段 6 的查證發現會是第三種，同樣掛進來（見 docs/STAGE-6-FACTCHECK.md 第一節）。
+ * 階段 6 的查證發現會是第三種，同樣掛進來（見 docs/specs/review-proposals.md「統一模型」）。
  */
 export interface ReviewItemView {
   readonly id: number;
@@ -2092,7 +2092,7 @@ export class CoreService {
     if (typeof category === 'string' && category.length > 0) names.push(category);
     if (names.length === 0) return { ids: [], unknown: [] };
 
-    // 分類法的 rest_base 在這個站台等於 slug（見 docs/SITE-FINDINGS.md）。
+    // 分類法的 rest_base 在這個站台等於 slug（見 docs/specs/wordpress-site.md）。
     const resolution = await resolveTerms(client, target.taxonomy, names, {
       allowCreate: target.allowCreateTerms,
     });

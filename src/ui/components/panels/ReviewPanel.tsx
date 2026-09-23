@@ -12,7 +12,7 @@ import { ErrorNote, Spinner, useAction } from './shared.js';
  * 是一份待辦，不是一份報告——每一項都要有下場（套用／略過／自己去改）。
  *
  * 校稿改動與觀察不是同一種東西，但都掛在文章某一段上，所以裝在同一個容器裡；
- * 階段 6 的查證發現也會掛進來（docs/STAGE-6-FACTCHECK.md 第一節）。差別只在
+ * 階段 6 的查證發現也會掛進來（docs/specs/review-proposals.md「統一模型」）。差別只在
  * 那一項給的按鈕：改動能套用，觀察只能請人去判斷。
  *
  * **meaningChanged 為真的預設不勾選。** 這是規格的硬要求，也是提案制存在的理由：

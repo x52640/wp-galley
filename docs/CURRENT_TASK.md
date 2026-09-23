@@ -1,0 +1,48 @@
+# Current Task
+
+<!-- 上限 100 行。只放指標，細節在被指向的檔案。索引目前手動維護（D-014）。 -->
+
+## 主樹基準
+
+- `npm run verify`：typecheck 通過；Vitest **31 檔 / 519 測試**全綠（2026-09-23）
+- migration head：`004-image-briefs`
+- 跑出來對不上就是環境漂移，先查清楚再動手。
+
+## 進行中
+
+無。下一個建議：P5-T001（需要使用者在場）。
+
+## Ready
+
+| Task | 內容 | 備註 |
+| --- | --- | --- |
+| [P5-T001](tasks/P5-T001-test-stage-5-5.md) | 陪使用者實測階段 5.5 | 需要使用者在場；**建議先做** |
+| [P5-T002](tasks/P5-T002-shared-contract.md) | 前後端共用 API 契約 | P5-T003、P5-T004 等它 |
+
+## Blocked
+
+| Task | 等什麼 |
+| --- | --- |
+| [P5-T003](tasks/P5-T003-ui-redesign-b.md) UI 改版為 B 版 | P5-T002 |
+| [P5-T004](tasks/P5-T004-split-core-service.md) 拆分 CoreService | P5-T002 |
+| [P6-T001](tasks/P6-T001-factcheck.md) AI 查證 | P5-T001 |
+
+## 待專案擁有者
+
+`plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
+
+## 已知殘餘（記錄，不擋進度）
+
+- `src/ui/service/types.ts` 是手抄後端型別，可能已漂移 → P5-T002。
+- 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
+- `docs/specs/http-api.md` 的 `JobDetail`、`core-service.md` 的方法清單是舊節錄 → P5-T002／P5-T004。
+- 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
+  以 spec 為準。
+- `design-system.md` 的「版面」一節已被 D-013 取代，P5-T003 改寫。
+- 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
+  `docs/specs/review-proposals.md` 的逐項套用定位規則。
+
+## 治理
+
+- 人維護：本檔、plan.md、各 Task 的 front matter 與接手紀錄。
+- 腳本（`task:index`、`verify:docs`、`task:close`）等 Task 累積到 5–10 個再做。
