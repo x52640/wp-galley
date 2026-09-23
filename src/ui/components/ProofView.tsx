@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } fr
 import { api, describeError, isFixtureMode } from '../service/client.js';
 import type { LoadedJob, ProofMark } from '../service/types.js';
 import { Icon } from '../icons.js';
+import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
 
@@ -428,7 +429,7 @@ export function ProofView({
 }
 
 /**
- * 在 scope 裡找第一段完全相同的文字，包進 `<mark>`。
+ * 在 scope 裡找第一段相同的文字（忽略空白，規則跟後端算「第 N 段」共用），包進 `<mark>`。
  *
  * 只在單一文字節點裡找：跨過標籤的（`今天<em>讀完`）不包，跟後端逐項套用的規則
  * 一致（docs/specs/review-proposals.md）——找不到就不標，右欄的卡片照樣在。
@@ -439,11 +440,11 @@ function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, act
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const text = node as Text;
     if (text.parentElement?.closest('mark[data-hl]')) continue;
-    const at = text.data.indexOf(highlight.text);
-    if (at < 0) continue;
+    const hit = findIgnoringSpaces(text.data, highlight.text);
+    if (hit === null) continue;
     const range = doc.createRange();
-    range.setStart(text, at);
-    range.setEnd(text, at + highlight.text.length);
+    range.setStart(text, hit.start);
+    range.setEnd(text, hit.end);
     const mark = doc.createElement('mark');
     mark.setAttribute('data-hl', String(highlight.id));
     const color = HIGHLIGHT_COLORS[highlight.kind];

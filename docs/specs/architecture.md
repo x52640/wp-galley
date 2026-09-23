@@ -31,7 +31,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 
 | 目錄 | 負責 | 規格 |
 | --- | --- | --- |
-| `src/contract` | 前後端共用的 HTTP 型別，**不 import 任何東西** | [http-api.md](http-api.md) |
+| `src/contract` | 前後端共用的 HTTP 型別，以及兩邊必須同一套規則的純函式（`text-match.ts`）；**不 import 任何東西** | [http-api.md](http-api.md) |
 | `src/config` | 環境變數、路徑、秘密遮蔽 | [security.md](security.md) |
 | `src/db` | SQLite 與 migration | 本檔 |
 | `src/core` | CoreService、狀態機、revision、diff、提案套用 | [core-service.md](core-service.md)、[state-machine.md](state-machine.md)、[review-proposals.md](review-proposals.md) |

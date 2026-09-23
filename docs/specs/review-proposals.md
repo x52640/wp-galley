@@ -121,6 +121,10 @@ interface Observation {
 那一項沒有跳轉按鈕——**包括 observation**，它自帶的 `blockIndex` 是 Agent 看它
 那一版時算的，不拿來充數。
 
+**定位忽略所有空白**（`src/contract/text-match.ts`，前後端共用）：Agent 引用原文時會自己在中文與
+數字、英文之間加空格（「佔 40%」對「佔40%」），逐字比對會漏掉（P5-T008）。只用在定位與字上標記；
+逐項**套用**照舊逐字比對。
+
 ## 中文 diff
 
 Git 那種靠空格切詞的 diff 套到中文會退化成逐字比對，產出一堆碎片

@@ -1,5 +1,6 @@
 import { parseFragment, serializeOuter } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
+import { findIgnoringSpaces } from '../contract/text-match.js';
 
 /**
  * 正文的「頂層區塊」拆解。
@@ -108,13 +109,10 @@ export function normalizeText(value: string): string {
  * 用途只有一個：讓待處理清單上的一項可以「跳到那一段並標亮」。所以定位失敗
  * 不是錯誤，只是那一項沒有跳轉按鈕——猜一個段落跳過去比不能跳更糟。
  *
- * 比對前先把空白正規化：正文的 HTML 常常在標籤之間換行縮排，`textContent`
- * 拿到的字串會夾著換行，直接跟 Agent 給的片段比一定對不上。
+ * 比對時忽略所有空白，規則跟前端字上標記共用（見 `findIgnoringSpaces`）。
  */
 export function findBlockContaining(blocks: readonly TopLevelBlock[], needle: string): number | null {
-  const target = normalizeText(needle);
-  if (target.length === 0) return null;
-  const index = blocks.findIndex((block) => normalizeText(block.text).includes(target));
+  const index = blocks.findIndex((block) => findIgnoringSpaces(block.text, needle) !== null);
   return index < 0 ? null : index;
 }
 
