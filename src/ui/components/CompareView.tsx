@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { Comparison, CompareRow, DiffSegment, LoadedJob } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { ViewSwitch, type StageMode } from './ViewSwitch.js';
 
 /**
  * 左右對照。
@@ -23,15 +22,11 @@ import { ViewSwitch, type StageMode } from './ViewSwitch.js';
 
 export function CompareView({
   job,
-  mode,
-  onMode,
   focusBlock,
   /** 內容一改就重抓；父層把目前的 content hash 傳進來當作重抓的依據。 */
   revisionKey,
 }: {
   job: LoadedJob;
-  mode: StageMode;
-  onMode: (next: StageMode) => void;
   /**
    * 待處理清單點過來的段落。
    *
@@ -89,7 +84,6 @@ export function CompareView({
             <span className="proof-bar-note">左右對照</span>
           )}
         </div>
-        <ViewSwitch mode={mode} onMode={onMode} />
       </header>
 
       <div className="compare-scroll" ref={scrollRef}>

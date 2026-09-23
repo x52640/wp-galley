@@ -392,34 +392,6 @@ h1, h2, h3 { font-weight: 600; }
 
 .workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: .6rem 1rem;
-  border-bottom: 1px solid var(--shell-line);
-  background: var(--shell-panel);
-}
-.topbar-id { min-width: 0; flex: 1; }
-/* 長標題不能把狀態與按鈕擠出畫面（1024px 尤其明顯）。 */
-.topbar-title {
-  margin: 0;
-  font-size: 1rem;
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.topbar-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .45rem;
-  margin: 0;
-  font-size: .78rem;
-  color: var(--shell-text-dim);
-}
-.topbar-actions { display: flex; gap: .35rem; }
 .topbar-error {
   margin: 0;
   padding: .4rem 1rem;
@@ -427,234 +399,6 @@ h1, h2, h3 { font-weight: 600; }
   color: var(--danger-on-shell);
   font-size: .82rem;
 }
-
-.panes {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 15.5rem minmax(0, 1fr) 23rem;
-}
-
-/* --- 左狀態軌（簽名元素） ----------------------------------------------- */
-
-.rail {
-  border-right: 1px solid var(--shell-line);
-  background: var(--shell-panel);
-  padding: 1.25rem .9rem 3.5rem;
-  overflow-y: auto;
-}
-
-.rail-steps { list-style: none; margin: 0; padding: 0; }
-.rail-steps-tail { margin-top: .25rem; }
-
-.rail-step {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1.1rem auto 1fr;
-  grid-template-areas: 'node num label' '. . note';
-  align-items: center;
-  column-gap: .55rem;
-  padding: .5rem 0 .5rem .1rem;
-}
-
-/* 把每一步串起來的那條線。走過的亮，還沒到的暗。 */
-.rail-step::before {
-  content: '';
-  position: absolute;
-  left: .48rem;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--shell-line);
-}
-.rail-steps li:first-child::before { top: 50%; }
-.rail-steps li:last-child::before { bottom: 50%; }
-.rail-step[data-status='done']::before { background: color-mix(in srgb, var(--shell-text) 45%, var(--shell-line)); }
-
-.rail-node {
-  grid-area: node;
-  position: relative;
-  z-index: 1;
-  width: .55rem; height: .55rem;
-  margin-left: .21rem;
-  border-radius: 50%;
-  border: 1.5px solid var(--shell-text-dim);
-  background: var(--shell-panel);
-  transition: background var(--slow), border-color var(--slow);
-}
-.rail-step[data-status='done'] .rail-node { background: var(--shell-text); border-color: var(--shell-text); }
-.rail-step[data-status='current'] .rail-node {
-  border-color: var(--mark-on-shell);
-  background: var(--mark-on-shell);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark-on-shell) 25%, transparent);
-}
-
-.rail-num {
-  grid-area: num;
-  font-family: var(--font-num);
-  font-size: .95rem;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .02em;
-  color: var(--shell-text-dim);
-  transition: color var(--slow);
-}
-.rail-step[data-status='done'] .rail-num { color: var(--shell-text); }
-.rail-step[data-status='current'] .rail-num { color: var(--mark-on-shell); font-weight: 700; }
-
-.rail-label {
-  grid-area: label;
-  display: flex;
-  flex-direction: column;
-  color: var(--shell-text-dim);
-  font-size: .9rem;
-  transition: color var(--slow);
-}
-.rail-step[data-status='done'] .rail-label,
-.rail-step[data-status='current'] .rail-label { color: var(--shell-text); }
-.rail-step[data-status='current'] .rail-label { font-weight: 600; }
-
-.rail-status-text { font-size: .7rem; color: var(--shell-text-dim); font-weight: 400; }
-.rail-note {
-  grid-area: note;
-  font-size: .72rem;
-  color: var(--shell-text-dim);
-  padding-top: .1rem;
-}
-
-.rail-terminal {
-  display: flex;
-  gap: .35rem;
-  align-items: center;
-  margin: .75rem 0 0;
-  font-size: .82rem;
-  color: var(--danger-on-shell);
-}
-
-.rail-blockers {
-  margin-top: 1.25rem;
-  padding-top: .9rem;
-  border-top: 1px solid var(--shell-line);
-}
-.rail-blockers-title {
-  margin: 0 0 .4rem;
-  font-size: .7rem;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--shell-text-dim);
-}
-.rail-blockers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
-.rail-blockers li {
-  display: flex;
-  gap: .35rem;
-  align-items: flex-start;
-  font-size: .8rem;
-  color: var(--warn-on-shell);
-  line-height: 1.5;
-}
-.rail-blockers svg { flex: none; margin-top: .35rem; }
-
-/* --- 蓋章位 -------------------------------------------------------------
-   核准那一格不是一個步驟，是一個**實體的凹槽**：壓進去的印章、撕掉後留下的
-   缺口。核准失效時形狀會破、會歪、會缺一角，不是只有顏色變灰。
-   ------------------------------------------------------------------------ */
-
-.seal-slot {
-  margin: .6rem 0;
-  padding: .9rem .1rem;
-  border-top: 1px dashed var(--shell-line);
-  border-bottom: 1px dashed var(--shell-line);
-}
-
-.seal-recess {
-  position: relative;
-  height: 6.4rem;
-  border-radius: 10px;
-  border: 1px dashed var(--shell-line);
-  background:
-    radial-gradient(120% 100% at 50% 0%, color-mix(in srgb, #000 30%, var(--shell-panel)), color-mix(in srgb, #000 16%, var(--shell-panel)));
-  box-shadow:
-    inset 0 3px 6px rgba(0, 0, 0, .45),
-    inset 0 -1px 0 color-mix(in srgb, #fff 7%, transparent);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
-
-.seal-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: .3rem;
-  color: var(--shell-text-dim);
-}
-.seal-empty-text { font-size: .78rem; letter-spacing: .1em; }
-
-.seal-stamp {
-  position: absolute;
-  top: 50%; left: 50%;
-  width: 5rem; height: 5rem;
-  transform: translate(-50%, -50%) rotate(-5deg);
-  border: 2.5px solid var(--seal-on-shell);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--seal-on-shell) 12%, transparent);
-  color: var(--seal-on-shell);
-  display: grid;
-  place-content: center;
-  text-align: center;
-  gap: .05rem;
-  box-shadow: 0 2px 3px rgba(0, 0, 0, .35);
-  transition: transform var(--slow), opacity var(--slow), filter var(--slow);
-}
-.seal-glyph { font-size: 1.6rem; font-weight: 700; line-height: 1; }
-.seal-word { font-size: .58rem; letter-spacing: .16em; }
-.seal-hash { font-size: .55rem; opacity: .75; }
-
-/* 印章被撕掉：缺角的邊、歪掉的角度、灰掉的墨，加上掉在旁邊的碎片。 */
-.seal-stamp.is-torn {
-  top: 44%; left: 40%;
-  transform: translate(-50%, -50%) rotate(-18deg);
-  clip-path: polygon(0 0, 100% 0, 100% 30%, 84% 41%, 98% 52%, 76% 60%, 90% 72%, 58% 76%, 26% 94%, 12% 70%, 2% 56%);
-  filter: grayscale(1);
-  opacity: .46;
-  border-color: var(--shell-text-dim);
-  color: var(--shell-text-dim);
-  background: color-mix(in srgb, #000 25%, transparent);
-  box-shadow: none;
-}
-
-.seal-scrap {
-  position: absolute;
-  right: 1.4rem;
-  bottom: 1.5rem;
-  width: 1.7rem; height: 1.2rem;
-  border: 2px solid var(--shell-text-dim);
-  background: color-mix(in srgb, #000 25%, transparent);
-  opacity: .3;
-  transform: rotate(26deg);
-  clip-path: polygon(0 24%, 32% 0, 70% 14%, 100% 4%, 92% 58%, 100% 100%, 44% 86%, 8% 100%);
-}
-
-.seal-void {
-  position: absolute;
-  z-index: 3;
-  left: 0; right: 0;
-  bottom: .55rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: .35rem;
-  font-size: .8rem;
-  font-weight: 600;
-  color: var(--warn-on-shell);
-}
-
-.seal-slot[data-seal='torn'] .seal-recess { border-color: color-mix(in srgb, var(--warn-on-shell) 55%, transparent); }
-.seal-slot[data-seal='sealed'] .seal-recess { border-style: solid; border-color: color-mix(in srgb, var(--seal-on-shell) 35%, transparent); }
-
-.seal-meta { margin-top: .5rem; display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
-.seal-caption { margin: 0; font-size: .75rem; line-height: 1.6; color: var(--shell-text-dim); }
-.seal-caption-warn { color: var(--warn-on-shell); }
-.seal-caption-hash { opacity: .8; }
 
 /* --- 中央校樣 ----------------------------------------------------------- */
 
@@ -693,7 +437,7 @@ h1, h2, h3 { font-weight: 600; }
   text-align: center;
 }
 
-/* 紙。工作台是深色的，紙是白的——兩者永遠不會被搞混。 */
+/* 紙。桌面是暖灰的，紙是白的——文章永遠跟介面分得開。 */
 .proof-sheet {
   position: relative;
   max-width: 56rem;
@@ -701,7 +445,7 @@ h1, h2, h3 { font-weight: 600; }
   padding-left: var(--gutter);
   background: var(--proof-bg);
   border-radius: 2px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
+  box-shadow: 0 1px 3px rgba(28, 27, 25, .1), 0 14px 36px rgba(28, 27, 25, .08);
 }
 
 .proof-frame {
@@ -786,64 +530,7 @@ h1, h2, h3 { font-weight: 600; }
 .mark-pop-before { color: #6b7280; text-decoration: line-through; text-decoration-thickness: 1px; }
 .mark-pop-after { color: var(--proof-text); }
 
-/* --- 右操作面板 --------------------------------------------------------- */
-
-.panel {
-  border-left: 1px solid var(--shell-line);
-  background: var(--shell-panel);
-  padding: 1rem .9rem 2.5rem;
-  overflow-y: auto;
-}
-
-.panel-head { margin-bottom: .85rem; }
-.panel-eyebrow {
-  margin: 0;
-  font-size: .68rem;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--shell-text-dim);
-}
-.panel-title { margin: 0; font-size: 1.15rem; }
-
-.cards { display: flex; flex-direction: column; gap: .4rem; }
-
-.card { border: 1px solid var(--shell-line); border-radius: var(--radius); overflow: hidden; }
-.card[data-open='yes'] { background: color-mix(in srgb, #000 10%, var(--shell-panel)); }
-
-.card-head { margin: 0; }
-.card-toggle {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  width: 100%;
-  padding: .5rem .6rem;
-  border: 0;
-  background: transparent;
-  color: var(--shell-text);
-  font: inherit;
-  font-size: .875rem;
-  cursor: pointer;
-  text-align: left;
-}
-.card-icon { color: var(--shell-text-dim); flex: none; }
-.card-title { font-weight: 600; }
-.card-hint { margin-left: auto; font-size: .75rem; color: var(--shell-text-dim); }
-.card-caret { color: var(--shell-text-dim); flex: none; }
-.card[data-open='yes'] .card-hint { display: none; }
-
-.card-body { padding: .3rem .7rem .8rem; border-top: 1px solid var(--shell-line); padding-top: .8rem; }
-
-.terminal-card {
-  margin-bottom: .8rem;
-  padding: .7rem .8rem;
-  border: 1px solid color-mix(in srgb, var(--danger-on-shell) 40%, transparent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--danger-on-shell) 10%, transparent);
-}
-.terminal-state { display: flex; gap: .4rem; align-items: center; margin: 0 0 .3rem; color: var(--danger-on-shell); font-weight: 600; }
-.terminal-message { margin: 0; font-size: .84rem; line-height: 1.7; }
-.terminal-code { margin: .3rem 0 0; font-size: .72rem; color: var(--shell-text-dim); }
-
+/* --- 抽屜裡沿用的面板內容 ------------------------------------------------ */
 
 .approve-copy { margin: 0; font-size: .84rem; line-height: 1.75; color: var(--shell-text-dim); }
 .approve-hash { color: var(--shell-text); padding: 0 .25rem; }
@@ -1196,8 +883,8 @@ h1, h2, h3 { font-weight: 600; }
 .pending { color: var(--warn-on-shell); }
 
 
-/* --- 主區：校樣與左右對照共用同一格 -------------------------------------
-   只有兩個檢視。校樣是讀整篇的地方（預設），左右對照是逐字比對的地方。
+/* --- 主區：編輯、對照、成品共用同一格 ------------------------------------
+   編輯與成品是同一張校樣（差在標不標建議），對照蓋在它上面。
    ------------------------------------------------------------------------ */
 
 .stage { position: relative; display: flex; min-width: 0; min-height: 0; }
@@ -1207,7 +894,7 @@ h1, h2, h3 { font-weight: 600; }
   切到左右對照時，校樣**不卸載**，只是被蓋住。
 
   用 visibility 而不是 display:none 是必要的：display:none 會讓 iframe 的版面
-  歸零，ProofView 的 ResizeObserver 隨即把量到的段落位置全部洗成 0，右面板的
+  歸零，ProofView 的 ResizeObserver 隨即把量到的段落位置全部洗成 0，圖片區的
   「把圖片插在第 n 段後面」就會指到錯的地方，而且要切回校樣才會修好。
   visibility:hidden 保留版面盒，量測照常正確。
 */
@@ -1221,9 +908,6 @@ h1, h2, h3 { font-weight: 600; }
   background: var(--shell-bg);
 }
 
-.view-switch { margin-left: auto; }
-.proof-toggle + .view-switch { margin-left: .6rem; }
-.view-switch .segmented-item { display: inline-flex; align-items: center; gap: .3rem; }
 
 /* 從待處理清單點過來的那一段。框畫在 iframe 外面，不去碰校樣文件的內部。 */
 .proof-focus {
@@ -1232,9 +916,9 @@ h1, h2, h3 { font-weight: 600; }
   right: 0;
   /* iframe 是不透明的白紙，畫在它下面等於看不見。頁邊符號是 4，要留在框上面。 */
   z-index: 2;
-  border: 2px solid var(--mark);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--mark) 7%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--mark) 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mark) 4%, transparent);
   pointer-events: none;
   animation: focus-in var(--slow) var(--ease) both;
 }
@@ -1339,115 +1023,6 @@ h1, h2, h3 { font-weight: 600; }
   background: color-mix(in srgb, var(--mark) 10%, transparent);
 }
 
-/* 右面板是深色外殼，同一組標記要換成加亮版本才有 4.5:1。 */
-.review-diff .seg[data-op='removed'] { color: var(--shell-text-dim); }
-.review-diff .seg[data-op='added'] {
-  color: var(--mark-on-shell);
-  background: color-mix(in srgb, var(--mark-on-shell) 12%, transparent);
-}
-
-/* --- 待處理清單 ---------------------------------------------------------- */
-
-.review-meta { display: flex; align-items: baseline; gap: .5rem; margin: 0; font-size: .8rem; }
-.review-summary { color: var(--shell-text-dim); }
-
-.review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-
-.review-item {
-  border: 1px solid var(--shell-line);
-  border-radius: var(--radius);
-  padding: .55rem .65rem;
-  background: var(--shell-bg);
-}
-/* 處理過的項目留在清單上（看得到自己做過什麼），但安靜下去。 */
-.review-item[data-state='applied'],
-.review-item[data-state='skipped'] { opacity: .55; }
-.review-item[data-state='unappliable'] { border-color: color-mix(in srgb, var(--warn-on-shell) 45%, transparent); }
-
-.review-item-head { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
-.review-check { display: inline-flex; align-items: center; cursor: pointer; }
-.review-glyph { display: inline-flex; color: var(--shell-text-dim); }
-
-.review-kind {
-  font-size: .72rem;
-  letter-spacing: .05em;
-  padding: .05rem .35rem;
-  border: 1px solid var(--shell-line);
-  border-radius: 4px;
-  color: var(--shell-text-dim);
-}
-/* 自承改變原意的標紅。這一項預設不勾選，紅色是要人停下來看。 */
-.review-kind[data-risky='yes'] {
-  color: var(--danger-on-shell);
-  border-color: color-mix(in srgb, var(--danger-on-shell) 45%, transparent);
-}
-
-.review-state { font-size: .72rem; color: var(--shell-text-dim); }
-.review-jump { margin-left: auto; font-size: .72rem; }
-
-.review-body { margin-top: .35rem; font-size: .82rem; }
-.review-diff { display: flex; align-items: baseline; gap: .3rem; flex-wrap: wrap; margin: 0 0 .25rem; }
-.review-diff svg { flex: none; color: var(--shell-text-dim); }
-.review-reason { margin: 0; color: var(--shell-text-dim); }
-.review-excerpt { margin: 0 0 .25rem; color: var(--shell-text); }
-.review-suggest {
-  display: flex;
-  align-items: baseline;
-  gap: .25rem;
-  margin: .25rem 0 0;
-  color: var(--shell-text-dim);
-}
-.review-suggest svg { flex: none; }
-
-.review-risk {
-  display: flex;
-  align-items: center;
-  gap: .3rem;
-  margin: .3rem 0 0;
-  font-size: .78rem;
-  color: var(--danger-on-shell);
-}
-.review-risk svg { flex: none; }
-
-.review-hint { margin: .35rem 0 0; font-size: .78rem; color: var(--warn-on-shell); }
-
-.review-item-actions { display: flex; justify-content: flex-end; gap: .35rem; margin-top: .4rem; }
-.review-actions { display: flex; gap: .5rem; align-items: center; }
-.review-actions-quiet { justify-content: space-between; }
-
-
-/* --- 一鍵動作 ------------------------------------------------------------ */
-
-.quick-tasks { display: flex; flex-direction: column; gap: .4rem; }
-
-.quick-task {
-  display: flex;
-  align-items: flex-start;
-  gap: .6rem;
-  width: 100%;
-  padding: .55rem .65rem;
-  font: inherit;
-  text-align: left;
-  color: var(--shell-text);
-  background: var(--shell-bg);
-  border: 1px solid var(--shell-line);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color var(--fast), background var(--fast);
-}
-.quick-task:hover:not(:disabled) { border-color: var(--shell-text-dim); }
-.quick-task:disabled { opacity: .45; cursor: not-allowed; }
-.quick-task svg { flex: none; margin-top: .1rem; color: var(--shell-text-dim); }
-
-/* 最常按的那一顆看得出來是主要的，但不用強調色——它不是「需要做決定」的地方。 */
-.quick-task[data-primary='yes'] { background: var(--shell-panel); border-color: var(--shell-text-dim); }
-.quick-task[data-primary='yes'] svg { color: var(--shell-text); }
-.quick-task[data-primary='yes'] .quick-task-label { font-weight: 600; }
-
-.quick-task-text { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
-.quick-task-label { font-size: .9rem; }
-.quick-task-hint { font-size: .76rem; color: var(--shell-text-dim); }
-
 /* --- Agent 執行中 --------------------------------------------------------
    一趟要跑幾十秒到幾分鐘。使用者需要知道「它還活著」與「大概還要多久」，
    但我們**真的不知道**進度——子行程只在結束時回話。所以是一條不表示進度的
@@ -1503,11 +1078,6 @@ h1, h2, h3 { font-weight: 600; }
 
 /* 發布中也用這條（PublishPanel）。 */
 .agent-running { display: flex; gap: .5rem; align-items: center; margin: 0; font-size: .86rem; }
-
-.agent-busy { display: flex; flex-direction: column; gap: .5rem; }
-.agent-busy-head { display: flex; align-items: center; gap: .45rem; margin: 0; font-size: .875rem; }
-.agent-busy-head svg { flex: none; }
-.agent-busy-time { margin-left: auto; color: var(--mark-on-shell); font-variant-numeric: tabular-nums; }
 
 /* --- 配圖需求 ------------------------------------------------------------ */
 
@@ -1581,23 +1151,300 @@ h1, h2, h3 { font-weight: 600; }
 .brief-actions { display: flex; align-items: center; gap: .35rem; margin-top: .45rem; flex-wrap: wrap; }
 .brief-drop { margin-left: auto; }
 
+/* --- B1 工作區 ----------------------------------------------------------- */
+
+.docbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.75rem;
+  padding: .5rem 1rem;
+  border-bottom: 1px solid var(--shell-line);
+  background: var(--shell-panel);
+}
+.docbar-left { display: flex; align-items: center; gap: .7rem; min-width: 0; flex: 1; }
+.docbar-right { display: flex; align-items: center; gap: .6rem; flex: none; }
+/* 長標題不能把按鈕擠出畫面（1024px 尤其明顯）。 */
+.docbar-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.docbar-state { flex: none; font-size: .8rem; color: var(--shell-text-dim); }
+.docbar-state[data-state='APPROVED'], .docbar-state[data-state='PUBLISHED'] { color: var(--seal-on-shell); font-weight: 700; }
+.docbar-state[data-state='FAILED'] { color: var(--danger-on-shell); font-weight: 700; }
+
+/* 三段切換：編輯／對照／成品。 */
+.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--shell-sunken); }
+.seg-item {
+  height: 2.1rem;
+  padding: 0 .9rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--shell-text-dim);
+  font: inherit;
+  font-size: .88rem;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+.seg-item:hover { color: var(--shell-text); }
+.seg-item[data-active='yes'] {
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(28, 27, 25, .12);
+}
+
+.badge {
+  margin-left: .2rem;
+  padding: .05rem .5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--on-accent) 22%, transparent);
+  font-size: .78rem;
+  font-weight: 600;
+}
+
+/* 「請 AI 看一遍」＋選單 */
+.split { position: relative; display: inline-flex; }
+.split-main { border-top-right-radius: 0; border-bottom-right-radius: 0; font-weight: 700; }
+.split-main svg { color: var(--accent); }
+.split-toggle { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; padding-inline: .5rem; }
+
+.menu {
+  position: absolute;
+  top: calc(100% + .4rem);
+  right: 0;
+  z-index: 30;
+  width: 22rem;
+  padding: .45rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+  background: var(--shell-panel);
+  box-shadow: 0 12px 32px rgba(28, 27, 25, .16);
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.menu-item {
+  display: flex;
+  gap: .65rem;
+  align-items: flex-start;
+  width: 100%;
+  padding: .55rem .6rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--shell-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover { background: var(--shell-sunken); }
+.menu-item svg { flex: none; margin-top: .2rem; color: var(--shell-text-dim); }
+.menu-item-text { display: flex; flex-direction: column; gap: .1rem; }
+.menu-item-label { font-weight: 700; font-size: .9rem; }
+.menu-item-hint { font-size: .78rem; color: var(--shell-text-dim); }
+.menu-sep { height: 1px; margin: .25rem .3rem; background: var(--shell-line); }
+.menu-block { display: flex; flex-direction: column; gap: .45rem; padding: .4rem .6rem .5rem; }
+.menu-block-label { font-size: .8rem; font-weight: 700; color: var(--shell-text-dim); }
+
+.terminal-bar {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .5rem 1rem;
+  background: color-mix(in srgb, var(--danger-on-shell) 10%, var(--shell-bg));
+  color: var(--danger-on-shell);
+  font-size: .86rem;
+}
+
+/* 中間是文章，右邊是建議。 */
+.desk {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 25rem;
+}
+
+.margin {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem 1rem 3rem;
+  border-left: 1px solid var(--shell-line);
+  background: var(--shell-bg);
+}
+.margin-inner { display: flex; flex-direction: column; gap: .7rem; }
+.margin-filters { position: sticky; top: -1rem; z-index: 2; padding: .5rem 0; margin-top: -.5rem; background: var(--shell-bg); }
+.pill-small { height: 2rem; padding: 0 .75rem; font-size: .82rem; }
+.pill[data-kind='typo'] { color: var(--kind-typo); }
+.pill[data-kind='fact'] { color: var(--kind-fact); }
+.pill[data-kind='source'] { color: var(--kind-source); }
+.pill[data-kind='style'] { color: var(--kind-style); }
+.pill[data-active='yes'][data-kind] { color: var(--shell-bg); }
+.margin-summary { margin: 0; font-size: .85rem; color: var(--shell-text-dim); line-height: 1.7; }
+
+.margin-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 2.5rem 1rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 14px;
+  color: var(--shell-text-dim);
+  text-align: center;
+}
+.margin-empty svg { color: var(--accent); }
+.margin-empty p { margin: 0; font-size: .88rem; line-height: 1.8; }
+
+/* 一張建議卡片。左邊那條色帶就是它在文章上的顏色。 */
+.s-card {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: .85rem .95rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+  background: var(--shell-panel);
+  transition: border-color var(--fast), box-shadow var(--fast), transform var(--fast);
+}
+.s-card[data-active='yes'] {
+  border-color: var(--kind-color, var(--shell-text));
+  box-shadow: 0 0 0 1px var(--kind-color, var(--shell-text)), 0 8px 20px rgba(28, 27, 25, .1);
+  transform: translateX(-6px);
+}
+.s-card[data-kind='typo'] { --kind-color: var(--kind-typo); }
+.s-card[data-kind='fact'] { --kind-color: var(--kind-fact); }
+.s-card[data-kind='source'] { --kind-color: var(--kind-source); }
+.s-card[data-kind='style'] { --kind-color: var(--kind-style); }
+
+.s-card-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.s-kind { font-size: .78rem; font-weight: 700; color: var(--kind-color, var(--shell-text-dim)); }
+.s-kind[data-kind='typo'] { color: var(--kind-typo); }
+.s-note { font-size: .78rem; color: var(--shell-text-dim); }
+.s-risk { display: inline-flex; align-items: center; gap: .2rem; font-size: .75rem; font-weight: 700; color: var(--danger-on-shell); }
+.s-where { margin-left: auto; font-size: .75rem; color: var(--shell-text-dim); }
+
+.s-jump {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.s-body { font-size: .98rem; line-height: 1.7; }
+.s-diff { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.s-before { color: var(--kind-typo); text-decoration-thickness: 1.5px; }
+.s-after { color: var(--accent-strong); }
+.s-quote { font-family: var(--font-serif); }
+.s-reason, .s-suggest, .s-hint { margin: 0; font-size: .84rem; line-height: 1.7; color: var(--shell-text-dim); }
+.s-suggest { color: var(--shell-text); }
+.s-hint { color: var(--warn-on-shell); }
+.s-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+.s-group-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+.s-group-list .s-jump { padding: .25rem .4rem; border-radius: 6px; font-size: .92rem; }
+.s-group-list .s-jump:hover { background: var(--shell-sunken); }
+
+.margin-resolved summary { cursor: pointer; font-size: .84rem; color: var(--shell-text-dim); }
+.margin-resolved ul { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.margin-resolved li { display: flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--shell-text-dim); }
+.margin-resolved li span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.margin-footer { display: flex; justify-content: space-between; gap: .5rem; padding-top: .3rem; }
+
+.margin-section { border: 1px solid var(--shell-line); border-radius: 12px; background: var(--shell-panel); }
+.margin-section-head { margin: 0; }
+.margin-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  padding: .7rem .9rem;
+  border: 0;
+  background: none;
+  color: var(--shell-text);
+  font: inherit;
+  font-size: .92rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.margin-section-hint { margin-left: auto; font-size: .8rem; font-weight: 400; color: var(--shell-text-dim); }
+.margin-section-body { padding: .2rem .9rem 1rem; border-top: 1px solid var(--shell-line); padding-top: .9rem; }
+
+/* --- 抽屜 ---------------------------------------------------------------- */
+
+.sheet-layer { position: fixed; inset: 0; z-index: 40; display: flex; justify-content: flex-end; }
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(28, 27, 25, .28);
+  cursor: default;
+  animation: focus-in var(--fast) both;
+}
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, 100%);
+  height: 100%;
+  background: var(--shell-panel);
+  border-left: 1px solid var(--shell-line);
+  box-shadow: -12px 0 32px rgba(28, 27, 25, .12);
+  animation: sheet-in var(--slow) both;
+}
+.sheet[data-wide='yes'] { width: min(46rem, 100%); }
+.sheet:focus { outline: none; }
+@keyframes sheet-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem .75rem;
+  border-bottom: 1px solid var(--shell-line);
+}
+.sheet-title { margin: 0; font-family: var(--font-serif); font-size: 1.4rem; }
+.sheet-body { flex: 1; overflow-y: auto; padding: 1.1rem 1.25rem 2rem; }
+.sheet-section { display: flex; flex-direction: column; gap: .6rem; }
+.sheet-section + .sheet-section { padding-top: 1.1rem; border-top: 1px solid var(--shell-line); }
+.sheet-section-title { margin: 0; font-size: .95rem; }
+.sheet-foot { padding: 1.5rem 0 0; }
+
 /* --- 尺寸 ---------------------------------------------------------------
    桌面優先（這是本機工具），但 1024px 不能爆版。
    ------------------------------------------------------------------------ */
 
-@media (max-width: 1360px) {
-  .panes { grid-template-columns: 14rem minmax(0, 1fr) 21rem; }
-}
-
-@media (max-width: 1180px) {
-  .panes { grid-template-columns: 12.5rem minmax(0, 1fr) 19rem; }
+@media (max-width: 1280px) {
+  .desk { grid-template-columns: minmax(0, 1fr) 22rem; }
   .proof-scroll, .compare-scroll { padding: 0 .75rem 3rem; }
   .compare-row, .compare-head { padding-left: 1rem; padding-right: 1rem; gap: 0 .9rem; }
   .mark-pop { width: 17rem; }
   :root { --gutter: 2.5rem; }
 }
 
-@media (max-width: 1023px) {
-  .panes { grid-template-columns: 12rem minmax(0, 1fr); grid-template-rows: 1fr auto; }
-  .panel { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--shell-line); max-height: 26rem; }
+@media (max-width: 1100px) {
+  .docbar { flex-wrap: wrap; }
+  .docbar-right { flex-wrap: wrap; }
 }
+
+@media (max-width: 960px) {
+  .desk { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+  .margin { border-left: 0; border-top: 1px solid var(--shell-line); max-height: 45vh; }
+}
+

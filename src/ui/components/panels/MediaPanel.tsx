@@ -107,7 +107,7 @@ export function MediaPanel({
       {job.media.length === 0 && !needsFeatured && job.imageBriefs.length === 0 && (
         <p className="empty-line">
           還沒有圖片。日記多半用不到，長文一定要有精選圖片。
-          想不到配什麼圖的話，到「校稿」那一格按「一鍵配圖」。
+          想不到配什麼圖的話，按上面「請 AI 看一遍」旁的箭頭，選「一鍵配圖」。
         </p>
       )}
 

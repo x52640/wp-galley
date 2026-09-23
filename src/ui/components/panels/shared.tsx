@@ -1,38 +1,8 @@
 import { useCallback, useState, type JSX, type ReactNode } from 'react';
 import { ApiError, describeError } from '../../service/client.js';
-import { Icon, type IconName } from '../../icons.js';
+import { Icon } from '../../icons.js';
 
-/** 右面板的共用外殼與狀態。每張卡片只做一件事，錯誤就顯示在那張卡片裡。 */
-
-export function PanelCard({
-  icon,
-  title,
-  hint,
-  open,
-  onToggle,
-  children,
-}: {
-  icon: IconName;
-  title: string;
-  hint?: string | undefined;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}): JSX.Element {
-  return (
-    <section className="card" data-open={open ? 'yes' : 'no'}>
-      <h2 className="card-head">
-        <button type="button" className="card-toggle" onClick={onToggle} aria-expanded={open}>
-          <Icon name={icon} size={15} className="card-icon" />
-          <span className="card-title">{title}</span>
-          {hint !== undefined && <span className="card-hint">{hint}</span>}
-          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={15} className="card-caret" />
-        </button>
-      </h2>
-      {open && <div className="card-body">{children}</div>}
-    </section>
-  );
-}
+/** 面板共用的欄位與狀態。每個區塊只做一件事，錯誤就顯示在那個區塊裡。 */
 
 export function Field({
   label,

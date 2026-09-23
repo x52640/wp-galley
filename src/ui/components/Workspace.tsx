@@ -1,18 +1,29 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
-import { isLoaded, type JobDetail } from '../service/types.js';
+import { isLoaded, type JobDetail, type LoadedJob, type ReviewItem } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { STATE_LABEL, isFinished } from '../lib/steps.js';
+import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
+import { highlightText, kindOf } from '../lib/review-kinds.js';
 import { AgentBanner } from './AgentProgress.js';
+import { AgentButton } from './AgentButton.js';
 import { useConfirm } from './ConfirmDialog.js';
 import { CompareView } from './CompareView.js';
-import { ProofView } from './ProofView.js';
-import type { StageMode } from './ViewSwitch.js';
-import { StateRail } from './StateRail.js';
-import { StepPanel } from './StepPanel.js';
+import { typeLabel } from './JobList.js';
+import { ProofView, type ProofHighlight } from './ProofView.js';
+import { Sheet } from './Sheet.js';
+import { SuggestionColumn } from './SuggestionColumn.js';
+import { ViewSwitch, type StageMode } from './ViewSwitch.js';
+import { ApprovePanel } from './panels/ApprovePanel.js';
+import { MediaPanel } from './panels/MediaPanel.js';
+import { PublishPanel } from './panels/PublishPanel.js';
+import { SourcePanel } from './panels/SourcePanel.js';
+import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
 
 /**
- * 發布工作區：左狀態軌 + 大校樣 + 右操作面板。
+ * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
+ *
+ * 上方只有三件事：看哪一種檢視、請 AI 看一遍、發布。其他動作都跟著內容走——
+ * 要改字就在卡片上按、要改原文就打開抽屜，不必去找「現在是第幾步」。
  *
  * 只有一個資料來源：`GET /api/jobs/:uuid`。每個動作做完就重新抓一次，
  * 不在前端自己推算狀態——狀態機與核准失效都是後端的權責，前端猜錯會很危險。
@@ -20,21 +31,22 @@ import { StepPanel } from './StepPanel.js';
  * 介面上一律叫「稿件」；程式裡叫 job（型別、API、網址都是），兩者刻意不同名。
  */
 
+type SheetKey = 'source' | 'publish' | null;
+
 export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }): JSX.Element {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<{ index: number; text: string }[]>([]);
   // 校樣回應的 ETag：使用者眼前那一份的 hash。null = 還沒問到或問不到。
   const [previewHash, setPreviewHash] = useState<string | null>(null);
-  /** 主區的檢視。預設永遠是校樣——左右對照是「要逐字比對時才切過去」的地方。 */
-  const [mode, setMode] = useState<StageMode>('proof');
-  /**
-   * 待處理清單點過來的段落。
-   *
-   * 放在這裡而不是各自的元件裡，是因為兩個檢視都要用同一個值：在校樣上是畫框，
-   * 在左右對照上是標亮那一列。清單點一次，切到哪個檢視都看得到同一段。
-   */
+  const [mode, setMode] = useState<StageMode>('edit');
+  /** 亮起來的那一項建議（校樣上的標記與右欄卡片同步）。 */
+  const [activeId, setActiveId] = useState<number | null>(null);
+  /** 要框起來的段落。建議定位不到字（例如要自己改的那種）時，至少框出那一段。 */
   const [focusBlock, setFocusBlock] = useState<number | null>(null);
+  const [sheet, setSheet] = useState<SheetKey>(null);
+  const [imagesOpen, setImagesOpen] = useState<boolean | null>(null);
   /** 頂端長條上的「停止」按下之後，避免連按。 */
   const [cancelling, setCancelling] = useState(false);
   const confirm = useConfirm();
@@ -43,9 +55,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
    * 重新讀取的世代編號。
    *
    * 校樣載入、輪詢、手動重讀、每個動作做完的重讀會同時在路上，回應的順序不保證
-   * 跟送出的順序一樣。沒有這個編號的話，最後才回來的那個（可能是最舊的快照）
-   * 會蓋掉比較新的畫面——狀態機的畫面倒退回去，看起來像後端壞了。
-   * 規則很簡單：只有最新一次送出的回應可以寫進畫面。
+   * 跟送出的順序一樣。只有最新一次送出的回應可以寫進畫面，否則最後才回來的舊快照
+   * 會把畫面倒退回去。
    */
   const generation = useRef(0);
 
@@ -77,7 +88,10 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setError(null);
     setBlocks([]);
     setPreviewHash(null);
+    setActiveId(null);
     setFocusBlock(null);
+    setSheet(null);
+    setMode('edit');
   }, [uuid]);
 
   useEffect(() => {
@@ -93,7 +107,6 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   }, [working, refresh]);
 
   // 後端在 GET /preview 時把 RENDERED 推進 PREVIEWED，所以看完校樣要重讀一次。
-  // 只有真的可能改變狀態時才重讀，不要每次載入都多打一次 API。
   const stateRef = useRef(job?.state);
   stateRef.current = job?.state;
   const onPreviewed = useCallback(() => {
@@ -108,8 +121,36 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     );
   }, []);
 
-  const onPreviewHash = useCallback((hash: string | null) => {
-    setPreviewHash(hash);
+  const onPreviewHash = useCallback((hash: string | null) => setPreviewHash(hash), []);
+  const closeSheet = useCallback(() => setSheet(null), []);
+
+  const items = useMemo(() => job?.review?.items ?? [], [job?.review]);
+  const highlights = useMemo<ProofHighlight[]>(
+    () =>
+      items.flatMap((item) => {
+        const text = highlightText(item);
+        return text === null ? [] : [{ id: item.id, kind: kindOf(item), text, blockIndex: item.blockIndex }];
+      }),
+    [items],
+  );
+
+  const activate = useCallback((item: ReviewItem | null) => {
+    setActiveId(item?.id ?? null);
+    setFocusBlock(item?.blockIndex ?? null);
+  }, []);
+
+  const onHighlight = useCallback(
+    (id: number) => {
+      const item = items.find((candidate) => candidate.id === id);
+      if (item) activate(item);
+    },
+    [items, activate],
+  );
+
+  const openPublish = useCallback(() => {
+    // 發布前要看的是成品：跟網站上一模一樣、什麼都不標的那一份。
+    setMode('final');
+    setSheet('publish');
   }, []);
 
   if (error && !job) {
@@ -120,7 +161,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         </p>
         <button type="button" className="btn btn-quiet" onClick={onBack}>
           <Icon name="arrow-left" size={14} />
-          回到列表
+          回到稿件總覽
         </button>
       </div>
     );
@@ -131,7 +172,6 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   }
 
   // 設定檔把發布目標拿掉時，這篇稿件沒有模板也沒有目標，做不了任何事。
-  // 說清楚怎麼修，並且留下取消這條路。
   if (!isLoaded(job)) {
     return (
       <div className="screen-error">
@@ -143,104 +183,67 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         <div className="row">
           <button type="button" className="btn btn-quiet" onClick={onBack}>
             <Icon name="arrow-left" size={14} />
-            回到列表
+            回到稿件總覽
           </button>
-          <button
-            type="button"
-            className="btn btn-danger"
-            onClick={() =>
-              confirm({
-                title: '取消這篇稿件？',
-                danger: true,
-                body: <p>「{job.title ?? '未命名'}」會標記為已取消，之後不能再編輯或發布。</p>,
-                confirmLabel: '取消這篇',
-                onConfirm: async () => {
-                  await api.cancelJob(job.uuid);
-                  await refresh();
-                },
-              })
-            }
-          >
-            取消這篇
-          </button>
+          <CancelButton job={job} refresh={refresh} confirm={confirm} />
         </div>
       </div>
     );
   }
 
+  const pending = job.review?.pendingCount ?? 0;
+  const imagesAttention =
+    job.imageBriefs.some((brief) => !brief.fulfilled) ||
+    (job.target.requireFeaturedImage && job.featuredMediaId === null);
+  const showImages = imagesOpen ?? imagesAttention;
+
   return (
     <div className="workspace">
-      <header className="topbar">
-        <button type="button" className="btn btn-quiet btn-tiny" onClick={onBack}>
-          <Icon name="arrow-left" size={14} />
-          全部稿件
-        </button>
-
-        <div className="topbar-id">
-          <h1 className="topbar-title">{job.title ?? '未命名'}</h1>
-          <p className="topbar-meta">
-            <span>{job.target.displayName}</span>
-            <span className="dot" aria-hidden="true" />
-            <span className="mono">{job.template.id}</span>
-            <span className="dot" aria-hidden="true" />
-            <span className="mono" title="稿件代號">
-              {job.uuid.slice(0, 8)}
-            </span>
-            <span className="dot" aria-hidden="true" />
-            <span className="mono" title="版本數">
-              {job.revisionCount} 版
-            </span>
-          </p>
+      <header className="docbar">
+        <div className="docbar-left">
+          <button type="button" className="icon-btn" aria-label="回到稿件總覽" title="回到稿件總覽" onClick={onBack}>
+            <Icon name="arrow-left" size={18} />
+          </button>
+          <span className="type-tag" data-type={job.target.contentType}>
+            {typeLabel(job.target.contentType)}
+          </span>
+          <h1 className="docbar-title">{job.title ?? '未命名'}</h1>
+          <span className="docbar-state" data-state={job.state}>
+            {STATE_LABEL[job.state]}
+          </span>
         </div>
 
-        <span className="state-badge" data-state={job.state}>
-          {STATE_LABEL[job.state]}
-        </span>
-
-        <div className="topbar-actions">
-          <button type="button" className="btn btn-quiet btn-tiny" onClick={() => void refresh()}>
-            <Icon name="refresh" size={13} />
-            重新讀取
-          </button>
-          {!isFinished(job.state) && (
-            <button
-              type="button"
-              className="btn btn-quiet btn-tiny btn-danger-text"
-              onClick={() =>
-                confirm({
-                  title: '取消這篇稿件？',
-                  danger: true,
-                  body: (
-                    <p>
-                      「{job.title ?? '未命名'}」會標記為已取消，之後不能再編輯或發布。
-                      已經上傳到 WordPress 的東西不會被刪掉。
-                    </p>
-                  ),
-                  confirmLabel: '取消這篇',
-                  onConfirm: async () => {
-                    await api.cancelJob(job.uuid);
-                    await refresh();
-                  },
-                })
-              }
-            >
-              <Icon name="x" size={13} />
-              取消這篇
-            </button>
+        <div className="docbar-right">
+          <ViewSwitch mode={mode} onMode={setMode} />
+          {!isFinished(job.state) && <AgentButton job={job} refresh={refresh} onError={setAgentError} />}
+          {job.published ? (
+            <a className="btn" href={job.published.link} target="_blank" rel="noreferrer">
+              <Icon name="external-link" size={15} />
+              已發布，去看看
+            </a>
+          ) : (
+            !isTerminal(job.state) && (
+              <button type="button" className="btn btn-primary" onClick={openPublish}>
+                發布…
+                {pending > 0 && <span className="badge">還有 {pending} 項</span>}
+              </button>
+            )
           )}
+          <button type="button" className="icon-btn" aria-label="重新讀取" title="重新讀取" onClick={() => void refresh()}>
+            <Icon name="refresh" size={16} />
+          </button>
         </div>
       </header>
 
-      {error && (
+      {(error ?? agentError) && (
         <p className="topbar-error" role="alert">
-          <Icon name="alert" size={14} /> {error}
+          <Icon name="alert" size={14} /> {error ?? agentError}
         </p>
       )}
 
       {/*
         Agent 在跑的時候，這條長條在工作區的任何畫面都看得到。
-        使用者在看校樣或左右對照時不會把右面板打開，「還在跑」這件事必須自己找上門，
-        否則等了兩分鐘只會覺得軟體卡死了。
+        「還在跑」這件事必須自己找上門，否則等了兩分鐘只會覺得軟體卡死了。
       */}
       {job.agentRun?.status === 'running' && (
         <AgentBanner
@@ -259,59 +262,171 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         />
       )}
 
-      <div className="panes">
-        <StateRail
-          job={job}
-          onRevoke={() =>
-            confirm({
-              title: '撤銷核准？',
-              danger: true,
-              body: (
-                <p>
-                  這一版的核准會作廢，這篇稿件退回「已渲染」，要重新看過校樣再核准一次才能發布。
-                </p>
-              ),
-              confirmLabel: '撤銷核准',
-              onConfirm: async () => {
-                await api.revokeApproval(job.uuid, '使用者在發布台手動撤銷');
-                await refresh();
-              },
-            })
-          }
-        />
+      {isTerminal(job.state) && (
+        <div className="terminal-bar" role="status">
+          <Icon name="alert" size={15} />
+          <span>
+            這篇稿件{STATE_LABEL[job.state]}。
+            {job.blockers.join('、')}
+          </span>
+        </div>
+      )}
+
+      <div className="desk">
         {/*
-          校樣永遠掛在樹上，切到左右對照時只是被蓋住（見 styles.css 的 .stage）。
-          卸載掉的話 iframe 會重載、量到的區塊也會清空，右面板的「插入位置」
-          就會在切回來之前一直是空的。
+          校樣永遠掛在樹上，切到對照時只是被蓋住（見 styles.css 的 .stage）。
+          卸載掉的話 iframe 會重載、量到的區塊也會清空，插入圖片的位置就會是空的。
         */}
-        <div className="stage" data-mode={mode}>
+        <div className="stage" data-mode={mode === 'compare' ? 'compare' : 'proof'}>
           <ProofView
             job={job}
-            mode={mode}
-            onMode={setMode}
-            focusBlock={focusBlock}
+            mode={mode === 'final' ? 'final' : 'edit'}
+            highlights={highlights}
+            activeHighlight={activeId}
+            onHighlight={onHighlight}
+            focusBlock={mode === 'final' ? null : focusBlock}
             onBlocks={onBlocks}
             onPreviewed={onPreviewed}
             onPreviewHash={onPreviewHash}
+            tools={
+              !isFinished(job.state) && (
+                <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setSheet('source')}>
+                  <Icon name="file-text" size={13} />
+                  改原文
+                </button>
+              )
+            }
           />
           {mode === 'compare' && (
-            <CompareView
-              job={job}
-              mode={mode}
-              onMode={setMode}
-              focusBlock={focusBlock}
-              revisionKey={job.currentRevision?.contentHash ?? 'none'}
-            />
+            <CompareView job={job} focusBlock={focusBlock} revisionKey={job.currentRevision?.contentHash ?? 'none'} />
           )}
         </div>
-        <StepPanel
-          job={job}
-          refresh={refresh}
-          blocks={blocks}
-          previewHash={previewHash}
-          onFocusBlock={setFocusBlock}
-        />
+
+        <aside className="margin" aria-label="修改建議與圖片">
+          <SuggestionColumn
+            job={job}
+            refresh={refresh}
+            activeId={activeId}
+            onActivate={(item) => {
+              if (mode === 'final') setMode('edit');
+              activate(item);
+            }}
+            onEditSource={() => setSheet('source')}
+          />
+
+          <section className="margin-section" data-open={showImages ? 'yes' : 'no'}>
+            <h2 className="margin-section-head">
+              <button
+                type="button"
+                className="margin-section-toggle"
+                aria-expanded={showImages}
+                onClick={() => setImagesOpen(!showImages)}
+              >
+                <Icon name="image" size={16} />
+                <span>圖片</span>
+                <span className="margin-section-hint">
+                  {job.target.requireFeaturedImage && job.featuredMediaId === null
+                    ? '還缺封面圖'
+                    : job.imageBriefs.some((brief) => !brief.fulfilled)
+                      ? `AI 建議 ${job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張`
+                      : job.media.length > 0
+                        ? `${job.media.length} 張`
+                        : ''}
+                </span>
+                <Icon name={showImages ? 'chevron-down' : 'chevron-right'} size={15} />
+              </button>
+            </h2>
+            {showImages && (
+              <div className="margin-section-body">
+                <MediaPanel job={job} refresh={refresh} blocks={blocks} />
+              </div>
+            )}
+          </section>
+        </aside>
       </div>
+
+      {sheet === 'source' && (
+        <Sheet title="改原文" onClose={closeSheet} wide>
+          <SourcePanel job={job} refresh={refresh} />
+        </Sheet>
+      )}
+
+      {sheet === 'publish' && (
+        <Sheet title="發布" onClose={closeSheet}>
+          <PublishSheetBody job={job} refresh={refresh} previewHash={previewHash} />
+          <div className="sheet-foot">
+            <CancelButton job={job} refresh={refresh} confirm={confirm} />
+          </div>
+        </Sheet>
+      )}
     </div>
+  );
+}
+
+/** P5-T007 之前的發布抽屜：沿用分類、核准、發布三張卡片的內容。 */
+function PublishSheetBody({
+  job,
+  refresh,
+  previewHash,
+}: {
+  job: LoadedJob;
+  refresh: () => Promise<void>;
+  previewHash: string | null;
+}): JSX.Element {
+  return (
+    <div className="stack">
+      {job.target.taxonomy !== null && (
+        <section className="sheet-section">
+          <h3 className="sheet-section-title">分類</h3>
+          <TaxonomyPanel job={job} refresh={refresh} />
+        </section>
+      )}
+      <section className="sheet-section">
+        <h3 className="sheet-section-title">核准</h3>
+        <ApprovePanel job={job} refresh={refresh} previewHash={previewHash} />
+      </section>
+      <section className="sheet-section">
+        <h3 className="sheet-section-title">發布</h3>
+        <PublishPanel job={job} refresh={refresh} />
+      </section>
+    </div>
+  );
+}
+
+function CancelButton({
+  job,
+  refresh,
+  confirm,
+}: {
+  job: JobDetail;
+  refresh: () => Promise<void>;
+  confirm: ReturnType<typeof useConfirm>;
+}): JSX.Element | null {
+  if (isFinished(job.state)) return null;
+  return (
+    <button
+      type="button"
+      className="btn btn-quiet btn-tiny btn-danger-text"
+      onClick={() =>
+        confirm({
+          title: '取消這篇稿件？',
+          danger: true,
+          body: (
+            <p>
+              「{job.title ?? '未命名'}」會標記為已取消，之後不能再編輯或發布。
+              已經上傳到 WordPress 的東西不會被刪掉。
+            </p>
+          ),
+          confirmLabel: '取消這篇',
+          onConfirm: async () => {
+            await api.cancelJob(job.uuid);
+            await refresh();
+          },
+        })
+      }
+    >
+      <Icon name="x" size={13} />
+      取消這篇稿件
+    </button>
   );
 }

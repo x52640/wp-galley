@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { api, describeError, isFixtureMode } from '../service/client.js';
 import type { LoadedJob, ProofMark } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { shortHash } from '../lib/format.js';
-import { ViewSwitch, type StageMode } from './ViewSwitch.js';
+import type { SuggestionKind } from '../lib/review-kinds.js';
 
 /**
  * 中央校樣。
@@ -24,7 +24,29 @@ import { ViewSwitch, type StageMode } from './ViewSwitch.js';
  * **二、iframe 不自己捲動。**
  * 高度撐到內容的完整高度，捲動交給外層容器。這樣每一段的座標在文件裡是固定的，
  * 頁邊符號只要絕對定位在同一個捲動容器裡就會跟著一起動，不需要同步兩個捲軸。
+ *
+ * **三、建議標在字上（B1）。**
+ * 外層把待處理的那段字包進 `<mark>`，顏色用 CSSOM（`element.style`）設定：文件的
+ * CSP 擋的是 `<style>` 與 style 屬性，不管外層透過 CSSOM 改樣式；也不注入任何 script。
+ * 點標記的事件由外層掛在文件上（處理函式屬於外層，iframe 自己仍然不能跑 script）。
  */
+
+/** 校樣上要標出來的一段字。 */
+export interface ProofHighlight {
+  id: number;
+  kind: SuggestionKind;
+  text: string;
+  /** 掛在第幾個頂層區塊；null＝定位不到，就在整篇裡找第一個。 */
+  blockIndex: number | null;
+}
+
+/** 標記的顏色。跟 styles.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。 */
+const HIGHLIGHT_COLORS: Record<SuggestionKind, { bg: string; line: string }> = {
+  typo: { bg: '#FCE3D6', line: '#C2410C' },
+  style: { bg: '#E4EDE8', line: '#3F5B4F' },
+  fact: { bg: '#DDE8F5', line: '#1E4F8A' },
+  source: { bg: '#F6EDCF', line: '#8A6A14' },
+};
 
 interface BlockBox {
   index: number;
@@ -42,19 +64,28 @@ interface BlockBox {
 export function ProofView({
   job,
   mode,
-  onMode,
+  highlights = [],
+  activeHighlight = null,
+  onHighlight,
+  tools,
   focusBlock,
   onBlocks,
   onPreviewed,
   onPreviewHash,
 }: {
   job: LoadedJob;
-  mode: StageMode;
-  onMode: (next: StageMode) => void;
+  /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
+  mode: 'edit' | 'final';
+  highlights?: readonly ProofHighlight[];
+  activeHighlight?: number | null;
+  /** 點了文章裡某個標記。 */
+  onHighlight?: (id: number) => void;
+  /** 放在校樣上方工具列右邊的按鈕（例如「改原文」）。 */
+  tools?: ReactNode;
   /** 待處理清單點過來的段落。會捲到那一段並畫一個框。 */
   focusBlock: number | null;
   /**
-   * 把量到的區塊回報上去，右面板的「插入位置」要用。
+   * 把量到的區塊回報上去，圖片區的「插入位置」要用。
    *
    * 換版本時會先回報一個空陣列。舊的區塊索引對新版本沒有意義，留著會讓使用者
    * 把圖片插到上一版的第 3 段——那個位置在新版本可能是別的東西。
@@ -97,12 +128,25 @@ export function ProofView({
   onPreviewedRef.current = onPreviewed;
   const onPreviewHashRef = useRef(onPreviewHash);
   onPreviewHashRef.current = onPreviewHash;
+  const onHighlightRef = useRef(onHighlight);
+  onHighlightRef.current = onHighlight;
+  const [loadCount, setLoadCount] = useState(0);
 
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
   const fixtures = isFixtureMode();
+  /**
+   * 渲染的世代。
+   *
+   * 「渲染」不一定換 hash，但後端要等校樣**在渲染之後被載入一次**才把 RENDERED 推進
+   * PREVIEWED（人一定看過才准核准）。所以每次進入 RENDERED 就換一個網址重載一次。
+   */
+  const [renderEpoch, setRenderEpoch] = useState(0);
+  useEffect(() => {
+    if (job.state === 'RENDERED') setRenderEpoch((epoch) => epoch + 1);
+  }, [job.state]);
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
-  const previewSrc = `${job.previewUrl}?v=${revisionKey}`;
+  const previewSrc = `${job.previewUrl}?v=${revisionKey}&r=${renderEpoch}`;
 
   useEffect(() => {
     if (!fixtures) return;
@@ -130,7 +174,7 @@ export function ProofView({
   /**
    * 換版本＝上一版量到的東西全部作廢。
    *
-   * 只把 loading 打開是不夠的：舊的 blocks 還在 state 裡，右面板的「插入位置」
+   * 只把 loading 打開是不夠的：舊的 blocks 還在 state 裡，圖片區的「插入位置」
    * 就還選得到上一版的第 n 段，送出去的索引會落在新版本的別的地方。所以這裡把
    * 區塊清空並且通知父層，等新的校樣量完才會再有東西可選。
    */
@@ -206,6 +250,14 @@ export function ProofView({
     // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
     setBodyMissing(doc.querySelector('.preview-body') === null);
     onPreviewedRef.current?.();
+    setLoadCount((count) => count + 1);
+    // 點文章裡的標記＝在右欄亮起那一項。處理函式屬於外層，iframe 自己不跑 script。
+    doc.addEventListener('click', (event) => {
+      // 不能用 instanceof Element：iframe 裡的節點屬於另一個視窗，外層的 Element 認不得它。
+      const target = event.target as Element | null;
+      const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
+      if (mark) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
+    });
     // 字型與圖片載入完會改變高度，要再量一次。
     void doc.fonts.ready.then(() => measure(token));
     observerRef.current?.disconnect();
@@ -230,7 +282,42 @@ export function ProofView({
     });
   }, [focused?.index, focused?.top]);
 
-  const markGroups = groupMarks(job.marks);
+  // 把建議標到字上。內容、清單或模式一變就整個重標：先拆掉舊的，再包新的。
+  const highlightKey = highlights.map((h) => `${h.id}:${h.kind}:${h.blockIndex}:${h.text}`).join('|');
+  useEffect(() => {
+    const doc = frameRef.current?.contentDocument;
+    const body = doc?.querySelector('.preview-body');
+    if (!doc || !body) return;
+    for (const mark of Array.from(body.querySelectorAll('mark[data-hl]'))) {
+      mark.replaceWith(...Array.from(mark.childNodes));
+    }
+    body.normalize();
+    if (mode !== 'edit') return;
+    for (const highlight of highlights) {
+      const scope = highlight.blockIndex === null ? body : body.children[highlight.blockIndex];
+      if (scope) wrapFirst(doc, scope, highlight, highlight.id === activeHighlight);
+    }
+    measure(measureToken.current);
+    // highlights 由 highlightKey 代表；陣列本身每次都是新的。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightKey, activeHighlight, mode, loadCount, measure]);
+
+  // 從右欄點過來的那一項：捲到它在文章裡的位置。
+  useEffect(() => {
+    if (activeHighlight === null || mode !== 'edit') return;
+    const frame = frameRef.current;
+    const scroller = scrollRef.current;
+    const mark = frame?.contentDocument?.querySelector(`mark[data-hl='${activeHighlight}']`);
+    if (!frame || !scroller || !mark) return;
+    const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    const top = mark.getBoundingClientRect().top + (frame.contentWindow?.scrollY ?? 0);
+    scroller.scrollTo({
+      top: Math.max(offset + top - 160, 0),
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
+  }, [activeHighlight, mode, loadCount]);
+
+  const markGroups = mode === 'edit' ? groupMarks(job.marks) : [];
 
   return (
     <section className="proof" aria-label="校樣">
@@ -245,7 +332,7 @@ export function ProofView({
             {job.marks.length === 0 ? '與上一版相同' : `${job.marks.length} 處改動`}
           </span>
         </div>
-        {job.marks.length > 0 && (
+        {job.marks.length > 0 && mode === 'edit' && (
           <label className="proof-toggle">
             <input
               type="checkbox"
@@ -255,7 +342,7 @@ export function ProofView({
             <span>顯示校對符號</span>
           </label>
         )}
-        <ViewSwitch mode={mode} onMode={onMode} />
+        {tools}
       </header>
 
       <div className="proof-scroll" ref={scrollRef}>
@@ -326,6 +413,40 @@ export function ProofView({
       </div>
     </section>
   );
+}
+
+/**
+ * 在 scope 裡找第一段完全相同的文字，包進 `<mark>`。
+ *
+ * 只在單一文字節點裡找：跨過標籤的（`今天<em>讀完`）不包，跟後端逐項套用的規則
+ * 一致（docs/specs/review-proposals.md）——找不到就不標，右欄的卡片照樣在。
+ */
+function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): void {
+  if (highlight.text.length === 0) return;
+  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node as Text;
+    if (text.parentElement?.closest('mark[data-hl]')) continue;
+    const at = text.data.indexOf(highlight.text);
+    if (at < 0) continue;
+    const range = doc.createRange();
+    range.setStart(text, at);
+    range.setEnd(text, at + highlight.text.length);
+    const mark = doc.createElement('mark');
+    mark.setAttribute('data-hl', String(highlight.id));
+    const color = HIGHLIGHT_COLORS[highlight.kind];
+    mark.style.background = color.bg;
+    mark.style.color = 'inherit';
+    mark.style.borderBottom = `2px solid ${color.line}`;
+    mark.style.borderRadius = '2px';
+    mark.style.cursor = 'pointer';
+    if (active) {
+      mark.style.outline = `2px solid ${color.line}`;
+      mark.style.outlineOffset = '2px';
+    }
+    range.surroundContents(mark);
+    return;
+  }
 }
 
 const KIND_LABEL: Record<ProofMark['kind'], string> = {

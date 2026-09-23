@@ -1,7 +1,7 @@
 ---
 id: P5-T007
 phase: 5
-status: blocked
+status: in_progress
 depends_on: [P5-T006]
 specs: [design-system.md, state-machine.md, security.md, templates.md]
 write_paths: ["src/ui/", "tests/", "docs/specs/design-system.md"]
@@ -24,7 +24,7 @@ D-013。發布從右側滑出；最上面寫「發到哪裡」，列出還沒處
 ## 中斷／接手紀錄
 - 最後完成：尚未開始
 - 已通過驗證：—
-- 下一步：等 P5-T006
-- Blocker：P5-T006
+- 下一步：發布抽屜骨架
+- Blocker：無
 
 ## 完成結果

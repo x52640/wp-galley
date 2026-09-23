@@ -55,8 +55,8 @@ export function IndeterminateBar(): JSX.Element {
 }
 
 /**
- * 頂端那條長條。稿件工作區任何時候都看得到它——使用者在看校樣或左右對照的時候
- * 不會把右面板打開，那時候「還在跑」這件事必須自己找上門。
+ * 頂端那條長條。稿件工作區任何時候都看得到它——使用者在看文章或對照的時候
+ * 不會盯著按鈕，那時候「還在跑」這件事必須自己找上門。
  */
 export function AgentBanner({
   run,
@@ -77,42 +77,13 @@ export function AgentBanner({
       </span>
       <span className="agent-banner-time mono">{formatElapsed(seconds)}</span>
       <IndeterminateBar />
-      <span className="agent-banner-note">通常 30 秒到 3 分鐘</span>
+      <span className="agent-banner-note">
+        {seconds < 90 ? '通常 30 秒到 3 分鐘，可以先看文章' : '比平常久一點；真的等太久就按停止再試一次'}
+      </span>
       <button type="button" className="btn btn-quiet btn-tiny" disabled={cancelling} onClick={onCancel}>
         <Icon name="x" size={13} />
         停止
       </button>
-    </div>
-  );
-}
-
-/**
- * 面板裡的版本。比長條多講一些：它現在沒有哪些權限。
- *
- * 那句話不是裝飾。這個專案的賣點就是「Agent 進不了你的 WordPress」，
- * 而使用者唯一會盯著它想的時刻，就是等它跑完的這幾分鐘。
- */
-export function AgentBusy({ run }: { run: AgentRun }): JSX.Element {
-  const seconds = useElapsedSeconds(run.startedAt, true);
-
-  return (
-    <div className="agent-busy" role="status" aria-live="polite">
-      <p className="agent-busy-head">
-        <Icon name="spinner" size={15} className="spin" />
-        <span>
-          <strong>{run.provider}</strong> {TASK_VERB[run.task]}…
-        </span>
-        <span className="agent-busy-time mono">{formatElapsed(seconds)}</span>
-      </p>
-      <IndeterminateBar />
-      <p className="field-hint">
-        {seconds < 90
-          ? '通常 30 秒到 3 分鐘。文章越長越久，這段時間可以先去看校樣。'
-          : '比平常久一點。長文本來就會跑比較久；真的等太久就按停止再試一次。'}
-      </p>
-      <p className="field-hint">
-        它現在沒有 shell、檔案寫入、網路與 WordPress 權限，只會回傳結構化資料。
-      </p>
     </div>
   );
 }

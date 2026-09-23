@@ -1,19 +1,22 @@
 import type { JSX } from 'react';
-import { Icon } from '../icons.js';
 
 /**
- * 主區的檢視切換。
+ * 主區的檢視切換（B1 頂列）。
  *
- * **只有兩個。** 校樣是讀整篇的地方（預設），左右對照是逐字比對的地方。
- * 單人工具不該有四個分頁——階段 6 的查證發現不會再開第三個檢視，它跟校稿改動
- * 一起掛在右邊的待處理清單上（見 docs/specs/review-proposals.md「主區只要兩個模式」）。
+ * - **編輯**：校樣上標出建議，右邊是對應的卡片。預設就是這個。
+ * - **對照**：跟 AI 的提案或上一版逐段比對。
+ * - **成品**：跟網站上一模一樣，什麼都不標。發布前要在這裡看過才准核准。
+ *
+ * 三個就夠。查證的發現不會再開第四個，它跟校稿建議一起掛在右欄
+ * （docs/specs/review-proposals.md「主區只要兩個模式」，B 版多了一個成品）。
  */
 
-export type StageMode = 'proof' | 'compare';
+export type StageMode = 'edit' | 'compare' | 'final';
 
-const MODES: { id: StageMode; label: string; icon: 'file-text' | 'columns' }[] = [
-  { id: 'proof', label: '校樣', icon: 'file-text' },
-  { id: 'compare', label: '左右對照', icon: 'columns' },
+const MODES: { id: StageMode; label: string }[] = [
+  { id: 'edit', label: '編輯' },
+  { id: 'compare', label: '對照' },
+  { id: 'final', label: '成品' },
 ];
 
 export function ViewSwitch({
@@ -24,18 +27,17 @@ export function ViewSwitch({
   onMode: (next: StageMode) => void;
 }): JSX.Element {
   return (
-    <div className="segmented view-switch" role="radiogroup" aria-label="檢視方式">
+    <div className="seg" role="radiogroup" aria-label="檢視方式">
       {MODES.map((option) => (
         <button
           key={option.id}
           type="button"
           role="radio"
           aria-checked={mode === option.id}
-          className="segmented-item"
+          className="seg-item"
           data-active={mode === option.id ? 'yes' : 'no'}
           onClick={() => onMode(option.id)}
         >
-          <Icon name={option.icon} size={13} />
           {option.label}
         </button>
       ))}
