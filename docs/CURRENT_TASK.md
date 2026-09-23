@@ -4,14 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **33 檔 / 527 測試**全綠（2026-09-23，P5-T008 後）
+- `npm run verify`：typecheck 通過；Vitest **34 檔 / 542 測試**全綠（2026-09-23，P5-T010 後）
 - migration head：`004-image-briefs`
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-P5-T001 實測進行中（走到第 2 步）。使用者要求把實測發現的問題當場修：P5-T008 定位忽略空白 ✅；
-接著修捲動（兩欄分開捲、點建議捲到那一段）與「改原文」（不露 HTML、只改那一段、「沒問題」改名）。
+P5-T001 實測進行中（走到第 2 步）。使用者要求把實測發現的問題當場修，已完成：P5-T008 定位忽略空白、
+P5-T009 兩欄各自捲動、P5-T010 直接在文章上改。下一步：回到實測第 3 步（只接受一個錯字）。
 
 ## 上次停在哪（2026-09-23）
 
@@ -45,10 +45,12 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
 - `core-service.md` 的方法清單是節錄 → P5-T004。
 - D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。
+- Agent 的 prompt 同時帶「原稿」（sourceText）與目前的 templateData；接受建議或直接在文章上改都不更新
+  sourceText，兩者會不一致（P5-T010 審查發現，原本就存在），尚未開 Task。
+- 直接在文章上改的整理規則只處理頂層：巢狀 `div`（例如清單項目裡）不轉成段落、空標題不刪（P5-T010 審查，少見）。
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。
 - 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。
-- 「改原文」抽屜的正文是原始 HTML，對寫作者不友善，尚未開 Task。
 - 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
   `docs/specs/review-proposals.md` 的逐項套用定位規則。
 

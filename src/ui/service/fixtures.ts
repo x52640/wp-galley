@@ -659,7 +659,12 @@ export const fixtureApi: PublisherApi = {
     const next = revision(
       (current?.number ?? 0) + 1,
       input.origin ?? 'manual',
-      { ...(current?.templateData ?? {}), ...(input.templateData ?? {}) },
+      {
+        ...(current?.templateData ?? {}),
+        ...(input.templateData ?? {}),
+        // 示範資料不做後端的整理（normalizeEditedBody），原樣收下。
+        ...(input.editedBody === undefined ? {} : { body: input.editedBody }),
+      },
       nextHash(),
     );
     job.currentRevision = next;

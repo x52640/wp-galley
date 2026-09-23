@@ -63,6 +63,7 @@ const CreateJobBody = z.object({
 
 const CreateRevisionBody = z.object({
   templateData: z.record(z.string(), z.unknown()).optional(),
+  editedBody: z.string().max(500_000).optional(),
   sourceText: z.string().max(200_000).optional(),
   featuredMediaId: z.number().int().positive().nullable().optional(),
   origin: z.enum(['source', 'agent_review', 'media', 'template_switch', 'chat', 'manual']).optional(),
@@ -313,6 +314,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     const revision = await guard(() =>
       core().createRevision(uuid, {
         ...(body.templateData === undefined ? {} : { templateData: body.templateData }),
+        ...(body.editedBody === undefined ? {} : { editedBody: body.editedBody }),
         ...(body.sourceText === undefined ? {} : { sourceText: body.sourceText }),
         ...(body.featuredMediaId === undefined ? {} : { featuredMediaId: body.featuredMediaId }),
         ...(body.origin === undefined ? {} : { origin: body.origin }),

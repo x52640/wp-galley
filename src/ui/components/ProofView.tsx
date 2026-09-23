@@ -30,7 +30,20 @@ import type { SuggestionKind } from '../lib/review-kinds.js';
  * 外層把待處理的那段字包進 `<mark>`，顏色用 CSSOM（`element.style`）設定：文件的
  * CSP 擋的是 `<style>` 與 style 屬性，不管外層透過 CSSOM 改樣式；也不注入任何 script。
  * 點標記的事件由外層掛在文件上（處理函式屬於外層，iframe 自己仍然不能跑 script）。
+ *
+ * **四、直接在文章上改（P5-T010）。**
+ * 編輯時把 `.preview-body` 設成 contenteditable：使用者看到的是排好版的文章，不是標籤。
+ * 這不需要 iframe 跑任何 script——打字是瀏覽器本身的行為，貼上的攔截與游標定位都由外層做。
+ * 編輯中暫停字上標記與頁邊符號（位置會隨打字跑掉）。存檔送的是正文 HTML，後端整理後照常渲染。
  */
+
+/** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
+export interface ProofEditRequest {
+  /** 游標要停在哪段字前面；null＝文章開頭。 */
+  caret: string | null;
+  blockIndex: number | null;
+  nonce: number;
+}
 
 /** 校樣上要標出來的一段字。 */
 export interface ProofHighlight {
@@ -73,6 +86,9 @@ export function ProofView({
   onBlocks,
   onPreviewed,
   onPreviewHash,
+  editing = null,
+  onSaveEdit,
+  onEndEdit,
 }: {
   job: LoadedJob;
   /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
@@ -103,6 +119,15 @@ export function ProofView({
    * 核准要綁的是使用者眼睛看到的那一份，這個值就是拿來跟稿件的 hash 對帳的。
    */
   onPreviewHash?: (hash: string | null) => void;
+  /** 不是 null 就是在直接改文章。 */
+  editing?: ProofEditRequest | null;
+  /**
+   * 存檔：送出改過的正文 HTML，回傳存完之後那一版的 content hash。成功後由上層結束編輯；
+   * 失敗就丟錯，留在編輯中。
+   */
+  onSaveEdit?: (html: string) => Promise<string>;
+  /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
+  onEndEdit?: (notice?: string) => void;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,6 +157,15 @@ export function ProofView({
   const onHighlightRef = useRef(onHighlight);
   onHighlightRef.current = onHighlight;
   const [loadCount, setLoadCount] = useState(0);
+  const isEditing = editing !== null;
+  const editingRef = useRef(isEditing);
+  editingRef.current = isEditing;
+  const onEndEditRef = useRef(onEndEdit);
+  onEndEditRef.current = onEndEdit;
+  /** 進入編輯那一刻的正文，用來判斷「有沒有改」與取消時還原。 */
+  const originalBody = useRef<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
@@ -192,6 +226,12 @@ export function ProofView({
    * 區塊清空並且通知父層，等新的校樣量完才會再有東西可選。
    */
   useEffect(() => {
+    // 編輯到一半版本被換掉（理論上編輯中動作都鎖住了，這是最後一道防線）：
+    // 校樣要重載，打的字留不住，至少要講出來，不能靜靜消失。
+    if (editingRef.current) {
+      originalBody.current = null;
+      onEndEditRef.current?.('這篇稿件在你編輯的時候有了新版本，剛才打的字沒有存到。請再改一次。');
+    }
     measureToken.current += 1;
     setLoading(true);
     setBodyMissing(false);
@@ -269,7 +309,17 @@ export function ProofView({
       // 不能用 instanceof Element：iframe 裡的節點屬於另一個視窗，外層的 Element 認不得它。
       const target = event.target as Element | null;
       const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
-      if (mark) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
+      if (mark && !editingRef.current) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
+    });
+    // 編輯中：打字會改變高度，要重量；貼上一律當純文字，不讓別處的樣式與標籤混進來。
+    doc.addEventListener('input', () => {
+      if (editingRef.current) measure(measureToken.current);
+    });
+    doc.addEventListener('paste', (event) => {
+      if (!editingRef.current) return;
+      event.preventDefault();
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      doc.execCommand('insertText', false, text);
     });
     // 字型與圖片載入完會改變高度，要再量一次。
     void doc.fonts.ready.then(() => measure(token));
@@ -298,6 +348,9 @@ export function ProofView({
   // 把建議標到字上。內容、清單或模式一變就整個重標：先拆掉舊的，再包新的。
   const highlightKey = highlights.map((h) => `${h.id}:${h.kind}:${h.blockIndex}:${h.text}`).join('|');
   useEffect(() => {
+    // 編輯中不碰正文：輪詢換掉清單也不重標，否則 normalize() 會讓游標跳掉。
+    // 進入編輯時的拆標記由下面的編輯 effect 負責。
+    if (isEditing) return;
     const doc = frameRef.current?.contentDocument;
     const body = doc?.querySelector('.preview-body');
     if (!doc || !body) return;
@@ -313,11 +366,11 @@ export function ProofView({
     measure(measureToken.current);
     // highlights 由 highlightKey 代表；陣列本身每次都是新的。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightKey, activeHighlight, mode, loadCount, measure]);
+  }, [highlightKey, activeHighlight, mode, loadCount, measure, isEditing]);
 
   // 從右欄點過來的那一項：捲到它在文章裡的位置。
   useEffect(() => {
-    if (activeHighlight === null || mode !== 'edit') return;
+    if (activeHighlight === null || mode !== 'edit' || isEditing) return;
     const frame = frameRef.current;
     const scroller = scrollRef.current;
     const mark = frame?.contentDocument?.querySelector(`mark[data-hl='${activeHighlight}']`);
@@ -330,7 +383,83 @@ export function ProofView({
     });
   }, [activeHighlight, mode, loadCount]);
 
-  const markGroups = mode === 'edit' ? groupMarks(job.marks) : [];
+  // 進入／離開編輯。標記的拆除由上面那個 effect 負責（isEditing 變了它會重跑）。
+  useEffect(() => {
+    const frame = frameRef.current;
+    const doc = frame?.contentDocument;
+    const body = doc?.querySelector<HTMLElement>('.preview-body');
+    if (!frame || !doc || !body) return;
+    if (editing === null) {
+      body.removeAttribute('contenteditable');
+      originalBody.current = null;
+      return;
+    }
+    for (const mark of Array.from(body.querySelectorAll('mark[data-hl]'))) {
+      mark.replaceWith(...Array.from(mark.childNodes));
+    }
+    body.normalize();
+    if (originalBody.current === null) originalBody.current = body.innerHTML;
+    body.setAttribute('contenteditable', 'true');
+    // 按 Enter 開新段落用 <p>，不要 Chrome 預設的 <div>。
+    doc.execCommand('defaultParagraphSeparator', false, 'p');
+    setSaveError(null);
+
+    const range = caretRange(doc, body, editing);
+    frame.contentWindow?.focus();
+    body.focus();
+    const selection = doc.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const scroller = scrollRef.current;
+    const anchor = range.startContainer.nodeType === 1 ? (range.startContainer as Element) : range.startContainer.parentElement;
+    if (scroller && anchor) {
+      const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const top = anchor.getBoundingClientRect().top + (frame.contentWindow?.scrollY ?? 0);
+      scroller.scrollTo({
+        top: Math.max(offset + top - 160, 0),
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+    }
+    // editing 物件本身每次都是新的；nonce 才代表「又要求了一次」。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.nonce, isEditing, loadCount]);
+
+  const cancelEdit = (): void => {
+    const body = frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+    if (body && originalBody.current !== null) body.innerHTML = originalBody.current;
+    measure(measureToken.current);
+    onEndEdit?.();
+  };
+
+  const saveEdit = async (): Promise<void> => {
+    const body = frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+    if (!body) return;
+    const html = body.innerHTML.trim();
+    // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
+    const original = originalBody.current;
+    if (html === (original ?? '').trim()) {
+      onEndEdit?.();
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const savedHash = await onSaveEdit?.(html);
+      // 整理之後跟原本一樣（例如只多按了一個 Enter），後端不建新版本，校樣也不會重載；
+      // 把畫面還原成那一版，不要留著沒整理過的樣子。
+      if (savedHash === revisionKey && original !== null) {
+        body.innerHTML = original;
+        measure(measureToken.current);
+      }
+    } catch (cause) {
+      setSaveError(describeError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
 
   return (
     <section className="proof" aria-label="校樣">
@@ -345,6 +474,19 @@ export function ProofView({
             {job.marks.length === 0 ? '與上一版相同' : `${job.marks.length} 處改動`}
           </span>
         </div>
+        {isEditing ? (
+          <div className="proof-editbar" role="status">
+            <span className="proof-editbar-note">直接在文章上打字；貼上的內容會變成純文字。</span>
+            <button type="button" className="btn btn-quiet btn-tiny" disabled={saving} onClick={cancelEdit}>
+              取消
+            </button>
+            <button type="button" className="btn btn-primary btn-tiny" disabled={saving} onClick={() => void saveEdit()}>
+              <Icon name="check" size={13} />
+              {saving ? '儲存中…' : '儲存'}
+            </button>
+          </div>
+        ) : (
+          <>
         {job.marks.length > 0 && mode === 'edit' && (
           <label className="proof-toggle">
             <input
@@ -356,7 +498,14 @@ export function ProofView({
           </label>
         )}
         {tools}
+          </>
+        )}
       </header>
+      {saveError && (
+        <p className="proof-status proof-status-bad" role="alert">
+          <Icon name="alert" size={15} /> 沒存成功：{saveError}
+        </p>
+      )}
 
       <div className="proof-scroll" ref={scrollRef}>
         {loading && <p className="proof-status">載入校樣…</p>}
@@ -381,7 +530,7 @@ export function ProofView({
         )}
 
         {hasRevision && (fixtures ? srcDoc !== null : true) && (
-          <div className="proof-sheet" style={{ height: `${height}px` }}>
+          <div className="proof-sheet" data-editing={isEditing ? 'yes' : 'no'} style={{ height: `${height}px` }}>
             {showMarks && (
               <div className="proof-gutter" aria-label="校對符號">
                 {markGroups.map(({ blockIndex, marks }) =>
@@ -404,7 +553,7 @@ export function ProofView({
               </div>
             )}
 
-            {focused !== undefined && (
+            {focused !== undefined && !isEditing && (
               <div
                 className="proof-focus"
                 style={{ top: `${focused.top - 6}px`, height: `${focused.height + 12}px` }}
@@ -426,6 +575,28 @@ export function ProofView({
       </div>
     </section>
   );
+}
+
+/**
+ * 游標要放哪裡：那一項引用的字前面（忽略空白，跟定位同一套規則）；找不到就放那一段的開頭，
+ * 再不行就放文章開頭。
+ */
+function caretRange(doc: Document, body: Element, request: ProofEditRequest): Range {
+  const range = doc.createRange();
+  const scope = request.blockIndex === null ? body : (body.children[request.blockIndex] ?? body);
+  if (request.caret !== null) {
+    const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const hit = findIgnoringSpaces((node as Text).data, request.caret);
+      if (hit === null) continue;
+      range.setStart(node, hit.start);
+      range.collapse(true);
+      return range;
+    }
+  }
+  range.selectNodeContents(scope);
+  range.collapse(true);
+  return range;
 }
 
 /**

@@ -37,6 +37,7 @@ import {
 import {
   escapeHtml,
   findBlockContaining,
+  normalizeEditedBody,
   insertBlockAfter,
   removeBlocksWhere,
   replaceBlocksWhere,
@@ -148,6 +149,8 @@ export interface CreateRevisionInput {
   readonly origin?: RevisionOrigin | undefined;
   /** 整份取代目前的 templateData；沒給就沿用上一版。 */
   readonly templateData?: Record<string, unknown> | undefined;
+  /** 直接在文章上改：只換正文（publishSlot），其他欄位沿用上一版。見 normalizeEditedBody。 */
+  readonly editedBody?: string | undefined;
   readonly sourceText?: string | undefined;
   /** `null` 代表清除精選圖片；`undefined` 代表沿用。 */
   readonly featuredMediaId?: number | null | undefined;
@@ -477,8 +480,16 @@ export class CoreService {
       ? this.payloadOf(baseRow)
       : { templateData: {}, featuredMediaAssetId: null };
 
+    if (input.editedBody !== undefined && input.templateData !== undefined) {
+      throw new InvalidInputError('editedBody 與 templateData 不能同時給：一個只換正文，一個整份取代');
+    }
+    const templateData =
+      input.editedBody === undefined
+        ? (input.templateData ?? base.templateData)
+        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody) };
+
     const payload: RevisionPayload = {
-      templateData: input.templateData ?? base.templateData,
+      templateData,
       featuredMediaAssetId:
         input.featuredMediaId === undefined ? base.featuredMediaAssetId : input.featuredMediaId,
     };
@@ -488,6 +499,12 @@ export class CoreService {
       if (!asset || asset.job_id !== job.id) {
         throw new InvalidInputError(`找不到這個工作項目的圖片 ${payload.featuredMediaAssetId}`);
       }
+    }
+
+    // 直接在文章上改：整理之後跟目前這一版一樣（例如只多按了一個 Enter）就不算改動——
+    // 不建新版本、不撤銷核准。否則核准會為了一個看不見的差異失效。
+    if (input.editedBody !== undefined && baseRow && this.renderPayload(template, payload).contentHash === baseRow.content_hash) {
+      return this.toRevision(baseRow);
     }
 
     // 1) 先撤銷核准（契約三之「核准失效的實作點」）。

@@ -223,3 +223,108 @@ export function escapeHtml(value: string): string {
 export function escapeTextNode(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+/** 瀏覽器編輯器會用、但模板不認得的行內標籤：換成模板認得的那一個。 */
+const EDITOR_RENAMES: Readonly<Record<string, string>> = { b: 'strong', i: 'em' };
+/** 只帶樣式、沒有語意的包裝：拆掉，裡面的字留著。`mark` 是校樣上的建議標記。 */
+const EDITOR_UNWRAP: ReadonlySet<string> = new Set(['span', 'font', 'mark']);
+/** 編輯器塞進來的屬性。class 不在這裡：正文的 `wp-block-*` class 要留著。 */
+const EDITOR_DROP_ATTRS: ReadonlySet<string> = new Set(['style', 'contenteditable', 'data-hl', 'spellcheck']);
+
+type Element = DefaultTreeAdapterMap['element'];
+
+function cleanChildren(parent: ParentNode): void {
+  const next: Node[] = [];
+  for (const child of childrenOf(parent as Node)) {
+    if (!isElement(child)) {
+      next.push(child);
+      continue;
+    }
+    const element = child as Element;
+    cleanChildren(element);
+    if (EDITOR_UNWRAP.has(element.tagName)) {
+      for (const grandchild of element.childNodes) {
+        grandchild.parentNode = parent;
+        next.push(grandchild as Node);
+      }
+      continue;
+    }
+    const renamed = EDITOR_RENAMES[element.tagName];
+    if (renamed) {
+      element.tagName = renamed;
+      element.nodeName = renamed;
+    }
+    element.attrs = element.attrs.filter((attr) => !EDITOR_DROP_ATTRS.has(attr.name));
+    next.push(element);
+  }
+  (parent as { childNodes: Node[] }).childNodes = next;
+}
+
+/**
+ * Chrome 按 Enter 或刪光一段之後留下的空段落：`<p><br></p>`、`<p></p>`。
+ *
+ * **只認這個形狀。** `<p>&nbsp;</p>` 常是作者刻意留的間隔段，而整理規則作用在整篇，
+ * 連使用者沒碰過的段落也會被整理——把它刪掉等於偷改別人的排版（P5-T010 審查）。
+ */
+function isEditorEmptyParagraph(element: Element): boolean {
+  if (element.tagName !== 'p') return false;
+  return element.childNodes.every((child) =>
+    child.nodeName === '#text'
+      ? /^[ \t\r\n]*$/.test((child as DefaultTreeAdapterMap['textNode']).value)
+      : (child as Element).tagName === 'br',
+  );
+}
+
+/**
+ * 整理「直接在文章上改」送回來的正文（P5-T010）。
+ *
+ * contenteditable 產出的 HTML 會帶著模板不認得的東西：`<b>`／`<i>`、帶樣式的 `<span>`、
+ * 按 Enter 生出的 `<div>` 與 `<p><br></p>`、全選刪光重打之後頂層的裸文字與 `<br>`。
+ * 不整理的話 sanitize 會照規則把 `<b>` 拆掉（粗體靜靜消失），hybrid 模板的結構驗證
+ * 會因為頂層裸文字整份退回。
+ *
+ * 頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），不留給 render 的
+ * `wrapBareTopLevelText`：結構驗證跑在它之前，驗的是這裡的輸出。
+ *
+ * **這不是安全關卡**：整理完照樣走 schema、sanitize、結構驗證。
+ */
+export function normalizeEditedBody(html: string): string {
+  const fragment = parseFragment(html) as unknown as ParentNode;
+  cleanChildren(fragment);
+
+  const out: string[] = [];
+  let run = '';
+  const flush = (): void => {
+    const text = run.trim();
+    run = '';
+    if (text.length > 0) out.push(`<p class="wp-block-paragraph">${text}</p>`);
+  };
+
+  for (const child of childrenOf(fragment as Node)) {
+    if (!isElement(child)) {
+      if (child.nodeName === '#text') {
+        // 行內內容之間的空白有意義（`<strong>a</strong> <em>b</em>`）；區塊之間的是排版，flush 會修掉。
+        run += escapeTextNode((child as DefaultTreeAdapterMap['textNode']).value);
+      }
+      continue;
+    }
+    const element = child as Element;
+    if (element.tagName === 'br') {
+      flush();
+      continue;
+    }
+    if (INLINE_TAGS.has(element.tagName)) {
+      run += serializeOuter(element);
+      continue;
+    }
+    flush();
+    if (element.tagName === 'div') {
+      element.tagName = 'p';
+      element.nodeName = 'p';
+    }
+    if (isEditorEmptyParagraph(element)) continue;
+    out.push(serializeOuter(element));
+  }
+  flush();
+  return out.join('\n');
+}

@@ -9,7 +9,7 @@ import { AgentButton } from './AgentButton.js';
 import { useConfirm } from './ConfirmDialog.js';
 import { CompareView } from './CompareView.js';
 import { typeLabel } from './JobList.js';
-import { ProofView, type ProofHighlight } from './ProofView.js';
+import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn } from './SuggestionColumn.js';
 import { ViewSwitch, type StageMode } from './ViewSwitch.js';
@@ -21,7 +21,7 @@ import { SourcePanel } from './panels/SourcePanel.js';
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
  *
  * 上方只有三件事：看哪一種檢視、請 AI 看一遍、發布。其他動作都跟著內容走——
- * 要改字就在卡片上按、要改原文就打開抽屜，不必去找「現在是第幾步」。
+ * 要改字就在卡片上按、要自己改就直接在文章上打字（P5-T010），不必去找「現在是第幾步」。
  *
  * 只有一個資料來源：`GET /api/jobs/:uuid`。每個動作做完就重新抓一次，
  * 不在前端自己推算狀態——狀態機與核准失效都是後端的權責，前端猜錯會很危險。
@@ -44,6 +44,12 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   /** 要框起來的段落。建議定位不到字（例如要自己改的那種）時，至少框出那一段。 */
   const [focusBlock, setFocusBlock] = useState<number | null>(null);
   const [sheet, setSheet] = useState<SheetKey>(null);
+  /**
+   * 直接在文章上改。編輯中右欄與上方動作都鎖住：那些動作會產生新版本、讓校樣重載，
+   * 打到一半的字就沒了。
+   */
+  const [editing, setEditing] = useState<ProofEditRequest | null>(null);
+  const [editNotice, setEditNotice] = useState<string | null>(null);
   const [imagesOpen, setImagesOpen] = useState<boolean | null>(null);
   /** 頂端長條上的「停止」按下之後，避免連按。 */
   const [cancelling, setCancelling] = useState(false);
@@ -89,6 +95,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setActiveId(null);
     setFocusBlock(null);
     setSheet(null);
+    setEditing(null);
+    setEditNotice(null);
     setMode('edit');
   }, [uuid]);
 
@@ -98,6 +106,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
 
   // 有東西在跑的時候才輪詢。閒著的時候不打擾後端。
   const working = job?.state === 'PUBLISHING' || job?.agentRun?.status === 'running';
+  const workingRef = useRef(working);
+  workingRef.current = working;
   useEffect(() => {
     if (!working) return;
     const timer = window.setInterval(() => void refresh(), 1500);
@@ -144,6 +154,26 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     },
     [items, activate],
   );
+
+  const startEdit = useCallback((item: ReviewItem | null) => {
+    // AI 跑完會產生新版本、校樣會重載，編到一半的字就沒了。等它跑完再改。
+    if (workingRef.current) {
+      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+      return;
+    }
+    setEditNotice(null);
+    setMode('edit');
+    setSheet(null);
+    setEditing({
+      caret: item === null ? null : (highlightText(item) ?? item.observation?.excerpt ?? item.change?.before ?? null),
+      blockIndex: item?.blockIndex ?? null,
+      nonce: Date.now(),
+    });
+  }, []);
+  const endEdit = useCallback((notice?: string) => {
+    setEditing(null);
+    setEditNotice(notice ?? null);
+  }, []);
 
   const openPublish = useCallback(() => {
     // 發布前要看的是成品：跟網站上一模一樣、什麼都不標的那一份。
@@ -197,7 +227,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
 
   return (
     <div className="workspace">
-      <header className="docbar">
+      {/* 編輯中整條鎖住：包括返回鍵，按下去會卸載工作區，打的字就沒了。 */}
+      <header className="docbar" inert={editing !== null}>
         <div className="docbar-left">
           <button type="button" className="icon-btn" aria-label="回到稿件總覽" title="回到稿件總覽" onClick={onBack}>
             <Icon name="arrow-left" size={18} />
@@ -233,9 +264,9 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         </div>
       </header>
 
-      {(error ?? agentError) && (
+      {(error ?? agentError ?? editNotice) && (
         <p className="topbar-error" role="alert">
-          <Icon name="alert" size={14} /> {error ?? agentError}
+          <Icon name="alert" size={14} /> {error ?? agentError ?? editNotice}
         </p>
       )}
 
@@ -286,12 +317,38 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             onBlocks={onBlocks}
             onPreviewed={onPreviewed}
             onPreviewHash={onPreviewHash}
+            editing={editing}
+            onEndEdit={endEdit}
+            onSaveEdit={async (html) => {
+              const base = job.currentRevision?.contentHash;
+              const saved = await api.createRevision(job.uuid, {
+                editedBody: html,
+                origin: 'manual',
+                reason: '直接在文章上改',
+                // 後端還沒檢查這個（P5-T005），先帶上：做好之後編輯中被換版本就會被擋下來。
+                ...(base === undefined ? {} : { expectedContentHash: base }),
+              });
+              setEditing(null);
+              await refresh();
+              return saved.contentHash;
+            }}
             tools={
               !isFinished(job.state) && (
-                <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setSheet('source')}>
-                  <Icon name="file-text" size={13} />
-                  改原文
-                </button>
+                <>
+                  <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setSheet('source')}>
+                    標題與網址
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-quiet btn-tiny"
+                    disabled={working}
+                    title={working ? 'AI 還在處理這篇，等它跑完再改' : undefined}
+                    onClick={() => startEdit(null)}
+                  >
+                    <Icon name="file-text" size={13} />
+                    改原文
+                  </button>
+                </>
               )
             }
           />
@@ -300,7 +357,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
           )}
         </div>
 
-        <aside className="margin" aria-label="修改建議與圖片">
+        <aside className="margin" aria-label="修改建議與圖片" inert={editing !== null} data-locked={editing !== null ? 'yes' : 'no'}>
           <SuggestionColumn
             job={job}
             refresh={refresh}
@@ -309,7 +366,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
               if (mode === 'final') setMode('edit');
               activate(item);
             }}
-            onEditSource={() => setSheet('source')}
+            onEditSource={startEdit}
           />
 
           <section className="margin-section" data-open={showImages ? 'yes' : 'no'}>
@@ -344,7 +401,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
       </div>
 
       {sheet === 'source' && (
-        <Sheet title="改原文" onClose={closeSheet} wide>
+        <Sheet title="標題與網址" onClose={closeSheet}>
           <SourcePanel job={job} refresh={refresh} />
         </Sheet>
       )}

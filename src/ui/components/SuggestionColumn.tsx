@@ -40,8 +40,8 @@ export function SuggestionColumn({
   activeId: number | null;
   /** 點某一項：亮起來，校樣捲到那一段。 */
   onActivate: (item: ReviewItem | null) => void;
-  /** 「自己改」：打開改原文的抽屜。 */
-  onEditSource: () => void;
+  /** 「自己改」：直接在文章上改，游標停在這一項引用的字前面（P5-T010）。 */
+  onEditSource: (item: ReviewItem) => void;
 }): JSX.Element {
   const review = job.review;
   const items = useMemo(() => review?.items ?? [], [review]);
@@ -186,7 +186,7 @@ export function SuggestionColumn({
           busy={resolve.busy}
           onActivate={() => onActivate(activeId === item.id ? null : item)}
           onDecide={(decision) => decide([item.id], decision)}
-          onEditSource={onEditSource}
+          onEditSource={() => onEditSource(item)}
         />
       ))}
 
@@ -330,7 +330,7 @@ function SuggestionCard({
           {change ? '自己改' : '去原文改'}
         </button>
         <button type="button" className="btn btn-quiet btn-tiny" disabled={busy} onClick={() => onDecide('skip')}>
-          {change ? '保留原文' : '沒問題'}
+          {change ? '保留原文' : '不用改'}
         </button>
       </div>
     </article>

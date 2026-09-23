@@ -414,6 +414,11 @@ export interface CreateRevisionRequest {
   readonly origin?: RevisionOrigin;
   /** 整份取代目前的 templateData；沒給就沿用上一版。 */
   readonly templateData?: Record<string, unknown>;
+  /**
+   * 直接在文章上改（P5-T010）：只換正文，其他欄位沿用上一版。後端先整理瀏覽器
+   * 編輯器產生的雜訊再渲染。不能跟 `templateData` 同時給。
+   */
+  readonly editedBody?: string;
   readonly sourceText?: string;
   /** `null` 代表清除精選圖片；不給代表沿用。 */
   readonly featuredMediaId?: number | null;

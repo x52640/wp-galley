@@ -6,10 +6,10 @@ import { readString } from '../../lib/format.js';
 import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 
 /**
- * 原稿。
+ * 標題與網址片段。
  *
- * 契約 §二 刻意保留 `SOURCE → RENDERED`：使用者可以完全不用 Agent，貼完稿直接
- * 渲染發布。所以這張卡片必須自成一條完整的路，不能只是「等 Agent 的地方」。
+ * 正文不在這裡改：直接在文章上改（P5-T010）。以前這裡是一大格原始 HTML，對寫作者不友善。
+ * 「渲染」留著：契約 §二 刻意保留 `SOURCE → RENDERED`，使用者可以完全不用 Agent。
  *
  * 日記的標題慣例是 YYYYMMDD（見 docs/specs/wordpress-site.md），所以給一個一鍵填入。
  *
@@ -104,16 +104,6 @@ export function SourcePanel({
         />
       </Field>
 
-      <Field label="正文" hint="純文字或 HTML 都可以。渲染時會清成模板允許的標籤，多餘的會被移除。">
-        <textarea
-          className="input textarea"
-          rows={12}
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          placeholder="把稿子貼進來…"
-        />
-      </Field>
-
       <ErrorNote message={save.error ?? render.error} />
 
       <div className="row row-end">
@@ -129,7 +119,7 @@ export function SourcePanel({
           }
         >
           {save.busy ? <Spinner /> : <Icon name="file-text" size={14} />}
-          儲存原稿
+          儲存
         </button>
 
         <button
