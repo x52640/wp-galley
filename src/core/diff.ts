@@ -1,5 +1,6 @@
 import { splitTopLevelBlocks, type TopLevelBlock } from './html-blocks.js';
 import { diffWords, type DiffSegment } from './word-diff.js';
+import type { CompareRow, ProofMark, ProofMarkKind } from '../contract/api.js';
 
 /**
  * 校對符號（docs/specs/http-api.md 的 ProofMark）。
@@ -12,18 +13,8 @@ import { diffWords, type DiffSegment } from './word-diff.js';
  * 改了什麼不算數，實際改了什麼要由固定程式比對出來。
  */
 
-export type ProofMarkKind = 'inserted' | 'deleted' | 'replaced' | 'moved';
 
-export interface ProofMark {
-  /** 對應正文第幾個頂層區塊（以**目前**這一版的索引為準）。 */
-  readonly blockIndex: number;
-  readonly kind: ProofMarkKind;
-  /** 頁邊顯示的符號。用文字不用圖檔，才能跟著字級縮放。 */
-  readonly glyph: '＋' | '－' | '～' | '⇄';
-  readonly summary: string;
-  readonly before: string | null;
-  readonly after: string | null;
-}
+export type { CompareRow, ProofMark, ProofMarkKind };
 
 const GLYPHS: Record<ProofMarkKind, ProofMark['glyph']> = {
   inserted: '＋',
@@ -248,8 +239,8 @@ function promoteMoves(marks: readonly ProofMark[]): ProofMark[] {
 
 // --- 左右對照（階段 5.5-B） -------------------------------------------------
 
-/**
- * 左右對照的一列。
+/*
+ * 左右對照的一列（CompareRow，形狀定義在 src/contract/api.ts）。
  *
  * 粒度是**頂層區塊**，跟校對符號、跟「把圖片插在第 n 段後面」用的是同一套索引。
  * 三者共用同一套索引是刻意的：使用者在對照畫面點某一段、在校樣上看到的符號、
@@ -258,20 +249,6 @@ function promoteMoves(marks: readonly ProofMark[]): ProofMark[] {
  * 欄位裡放的是**純文字**不是 HTML：這個畫面的用途是逐字比對，不是再看一次排版
  * （排版看校樣）。而且逐詞標記要疊在文字上，把 HTML 一起丟進來只會兩邊打架。
  */
-export interface CompareRow {
-  readonly kind: 'same' | 'replaced' | 'inserted' | 'deleted';
-  /** 在左邊那一版的區塊索引；新增的列沒有左邊，是 null。 */
-  readonly leftIndex: number | null;
-  readonly rightIndex: number | null;
-  readonly left: DiffSegment[] | null;
-  readonly right: DiffSegment[] | null;
-  /**
-   * 文字一模一樣、但標記被改掉時的說明（換了連結、換了圖片、h2 變 h3）。
-   * 沒有這一句的話，這種列在對照畫面上會長得跟「沒改」完全一樣——
-   * 使用者核准的就會是他沒看到的改動。
-   */
-  readonly note: string | null;
-}
 
 /**
  * 兩版正文的左右對照。

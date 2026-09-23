@@ -1,4 +1,5 @@
 import { CoreError, coreErrorCodes } from './errors.js';
+import { JOB_STATES, type JobState } from '../contract/api.js';
 
 /**
  * Job 狀態機（docs/specs/state-machine.md）。
@@ -15,21 +16,8 @@ import { CoreError, coreErrorCodes } from './errors.js';
  * `SOURCE → RENDERED` 是刻意留的：使用者可以完全不用 Agent，貼完稿直接渲染發布。
  */
 
-export const JOB_STATES = [
-  'SOURCE',
-  'REVIEWED',
-  'MEDIA_READY',
-  'RENDERED',
-  'PREVIEWED',
-  'APPROVED',
-  'PUBLISHING',
-  'PUBLISHED',
-  'FAILED',
-  'CANCELLED',
-  'SUPERSEDED',
-] as const;
-
-export type JobState = (typeof JOB_STATES)[number];
+// 狀態清單屬於線上契約（前端也要用），定義在 src/contract/api.ts。
+export { JOB_STATES, type JobState };
 
 /** 走到這些狀態就結束了，不再往下轉。 */
 export const TERMINAL_STATES: readonly JobState[] = ['FAILED', 'CANCELLED', 'SUPERSEDED'];

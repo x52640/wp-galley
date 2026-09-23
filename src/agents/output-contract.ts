@@ -14,48 +14,12 @@
  * 嵌進去同時也讓 Agent 拿到精確形狀，比用文字描述可靠。
  */
 
-export interface ReviewChange {
-  readonly type: 'typo' | 'grammar' | 'clarity' | 'style';
-  readonly before: string;
-  readonly after: string;
-  readonly reason: string;
-  /** Agent 自評有沒有改變原意。true 者 UI 必須標紅並預設不套用。 */
-  readonly meaningChanged: boolean;
-}
+// ReviewChange、Observation 與配圖需求會原樣送到前端，形狀定義在 src/contract/api.ts。
+// 這裡只負責 JSON Schema（給 CLI 與後端驗證用）；兩邊對不上時以 schema 為準並回頭改契約。
+export type { Observation, ReviewChange } from '../contract/api.js';
+export type { ImageBriefDraft as ImageBrief } from '../contract/api.js';
 
-/**
- * 需要人判斷的觀察（階段 5.5-A）。
- *
- * `changes` 的形狀是「把 A 改成 B」，但校稿真正有價值的另一半不是字詞替換：
- * 「第 3 段寫 1985、第 7 段寫 1987，講的是同一件事」不是一個可以自動套用的改動，
- * 是一個要人去確認的疑點。以前沒有地方放，Agent 只能硬塞進 `changes` 裡假裝
- * 自己知道正確答案，或者乾脆不講。
- *
- * **不需要連外就做得到**，所以它屬於現在這個階段：把要查的東西列出來，
- * 而不是假裝自己查過了。真的去查是階段 6 的事（見 docs/specs/factcheck.md）。
- */
-export interface Observation {
-  readonly kind: 'contradiction' | 'unsupported-claim' | 'missing-source' | 'gap';
-  /** 對應正文第幾個頂層區塊，讓 UI 把它掛到那一段的頁邊。 */
-  readonly blockIndex: number;
-  /** 原文中被指涉的片段，用來標亮。 */
-  readonly excerpt: string;
-  readonly detail: string;
-  /** 建議怎麼處理；**不是**自動套用的改動。 */
-  readonly suggestion: string;
-}
-
-export interface ImageBrief {
-  /** 供 templateData 的 featuredImageBriefKey 指向。 */
-  readonly key: string;
-  readonly purpose: string;
-  readonly prompt: string;
-  readonly aspectRatio: string;
-  readonly altText: string;
-  readonly caption?: string;
-  /** 建議插入的位置描述，例如「第三段之後」。 */
-  readonly placement?: string;
-}
+import type { ImageBriefDraft, Observation, ReviewChange } from '../contract/api.js';
 
 export interface ReviewOutput {
   readonly title: string;
@@ -64,7 +28,7 @@ export interface ReviewOutput {
   readonly changes: ReviewChange[];
   readonly observations: Observation[];
   readonly templateData: Record<string, unknown>;
-  readonly imageBriefs: ImageBrief[];
+  readonly imageBriefs: ImageBriefDraft[];
 }
 
 export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {

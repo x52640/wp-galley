@@ -44,7 +44,7 @@ prompt 長怎樣、比例多少、alt 寫什麼」，使用者按「複製 promp
 或「不要了」。`brief_key` 對得上 `media_assets.brief_key`（那一欄 001 就有了，
 一直沒有東西去填它），`fulfilled` 就是這樣算出來的。
 
-配圖需求的 API 見 [http-api.md](http-api.md#配圖需求)。
+配圖需求的 API 見 [http-api.md](http-api.md)。
 
 生圖 API 選定之後，接的位置是這張卡片上再多一顆按鈕，資料結構不用動。
 

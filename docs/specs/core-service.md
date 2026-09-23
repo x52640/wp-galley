@@ -4,6 +4,7 @@
 > HTTP 對應在 [http-api.md](http-api.md)。
 > 程式：`src/core/service.ts`、`src/core/repository.ts`。
 > MCP 與 UI 共用同一個實例（規則見 [security.md](security.md)）。
+> 方法的回傳型別定義在 `src/contract/api.ts`；`service.ts` 以舊名字（`ApprovalView` 等）轉出。
 
 下面是**節錄**，列出核心流程的方法。提案制與配圖需求另有 `getReview`、
 `resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison`、

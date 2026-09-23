@@ -1,3 +1,5 @@
+import type { DiffSegment, SegmentOp } from '../contract/api.js';
+
 /**
  * 逐詞比對（階段 5.5-B）。
  *
@@ -14,12 +16,7 @@
  * 這是**不特別處理就會默默產出垃圾**的地方，所以獨立成一個模組，直接測得到。
  */
 
-export type SegmentOp = 'same' | 'removed' | 'added';
-
-export interface DiffSegment {
-  readonly op: SegmentOp;
-  readonly text: string;
-}
+export type { DiffSegment, SegmentOp };
 
 /**
  * 斷詞用 `zh-Hant`。中英數混排也吃得下——Segmenter 會把 `hello`、`123` 各自

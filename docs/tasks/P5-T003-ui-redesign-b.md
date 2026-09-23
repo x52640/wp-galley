@@ -1,7 +1,7 @@
 ---
 id: P5-T003
 phase: 5
-status: blocked
+status: ready
 depends_on: [P5-T002]
 specs: [design-system.md, review-proposals.md, agent-tasks.md, templates.md]
 write_paths: ["src/ui/", "tests/", "docs/specs/design-system.md"]
@@ -41,7 +41,7 @@ design-system.md、review-proposals.md（「畫面」一節）、agent-tasks.md�
 ## 中斷／接手紀錄
 - 最後完成：尚未開始
 - 已通過驗證：—
-- 下一步：等 P5-T002 完成後拆分
-- Blocker：P5-T002
+- 下一步：拆分成 B0／B1／B2
+- Blocker：無
 
 ## 完成結果

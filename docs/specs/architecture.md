@@ -31,6 +31,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 
 | 目錄 | 負責 | 規格 |
 | --- | --- | --- |
+| `src/contract` | 前後端共用的 HTTP 型別，**不 import 任何東西** | [http-api.md](http-api.md) |
 | `src/config` | 環境變數、路徑、秘密遮蔽 | [security.md](security.md) |
 | `src/db` | SQLite 與 migration | 本檔 |
 | `src/core` | CoreService、狀態機、revision、diff、提案套用 | [core-service.md](core-service.md)、[state-machine.md](state-machine.md)、[review-proposals.md](review-proposals.md) |
@@ -45,8 +46,12 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 
 ## 依賴方向
 
-`server → preview → templates → core`。`db/templates/core/preview` 全部不得 import
-Fastify 或 HTTP。改動前先跑一次依賴檢查。
+`server → preview → templates → core → contract`，`ui → contract`。
+
+- `db/templates/core/preview` 全部不得 import Fastify 或 HTTP。
+- `src/contract` 不得 import 任何模組（`tests/contract.test.ts` 守著），否則會把後端
+  拖進瀏覽器 bundle。`ui` 只能從 `contract` 拿後端的型別，不得 import `src/core`。
+- 改動前先跑一次依賴檢查。
 
 ## 程式慣例
 

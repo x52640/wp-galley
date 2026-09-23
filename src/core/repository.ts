@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobState } from './state-machine.js';
 import type { LoadedTemplate } from '../templates/types.js';
 import type { PublishTarget } from '../wordpress/targets.js';
+import type { AgentRunStatus, ReviewItemState, ReviewItemType, RevisionOrigin } from '../contract/api.js';
 
 /**
  * CoreService 的 SQLite 存取層。
@@ -14,10 +15,10 @@ import type { PublishTarget } from '../wordpress/targets.js';
  * 所以每個查詢都要 `as unknown as` 轉型；欄位名稱與 001-init.ts 必須一致。
  */
 
-export type RevisionOrigin = 'source' | 'agent_review' | 'media' | 'template_switch' | 'chat' | 'manual';
+// 會過網路的列舉定義在 src/contract/api.ts，這裡轉出去讓既有的 import 不用改。
+export type { AgentRunStatus, ReviewItemState, ReviewItemType, RevisionOrigin };
 export type EventActor = 'ui' | 'mcp' | 'system';
 export type EventStatus = 'started' | 'succeeded' | 'failed' | 'rejected';
-export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timeout';
 
 export interface JobRow {
   readonly id: number;
@@ -105,8 +106,6 @@ export interface AgentRunRow {
 }
 
 export type ReviewProposalStatus = 'open' | 'closed';
-export type ReviewItemType = 'change' | 'observation';
-export type ReviewItemState = 'pending' | 'applied' | 'skipped' | 'unappliable';
 
 export interface ReviewProposalRow {
   readonly id: number;

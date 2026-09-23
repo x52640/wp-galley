@@ -11,6 +11,38 @@ import { TemplateLoadError } from '../../templates/registry.js';
 import { WorkspaceError } from '../../agents/workspace.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { BlockConversionError } from '../../wordpress/block-types.js';
+import type {
+  AgentRunRequest,
+  AgentRunResult,
+  ApprovalResponse,
+  ApproveRequest,
+  CancelledResponse,
+  Comparison,
+  CreateJobRequest,
+  CreateRevisionRequest,
+  DiscardReviewRequest,
+  DiscardedResponse,
+  DismissedResponse,
+  JobDetail,
+  JobResponse,
+  ListJobsResponse,
+  MarksResponse,
+  MediaResponse,
+  MediaUploadRequest,
+  PlaceMediaRequest,
+  ProposalRefRequest,
+  PublishRequest,
+  PublishResponse,
+  RemovedResponse,
+  RenderOutcome,
+  ResolveReviewRequest,
+  ReviewResolveResult,
+  ReviewResponse,
+  RevisionResponse,
+  RevisionsResponse,
+  RevokeApprovalRequest,
+  RevokedResponse,
+} from '../../contract/api.js';
 
 /**
  * 發布台的 HTTP 介面（docs/specs/http-api.md）。
@@ -89,6 +121,44 @@ const PublishBody = z.object({
   status: z.enum(['draft', 'publish']),
   confirm: z.boolean().optional(),
 });
+
+/**
+ * 請求 schema 與共用契約（src/contract/api.ts）必須說同一件事：欄位一樣多，
+ * 而且前端照契約送來的東西 schema 都收。
+ *
+ * 對不上就在這裡編譯失敗。最常見的是前端多送一個欄位、zod 默默把它丟掉——
+ * 前端以為有的保護，後端其實沒有（P5-T002 就是這樣抓到 expectedContentHash）。
+ */
+type SameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : false) : false;
+type Accepts<Schema extends z.ZodType, Req> = [Req] extends [NonNullable<z.input<Schema>>]
+  ? SameKeys<Req, NonNullable<z.input<Schema>>>
+  : false;
+
+export const REQUEST_CONTRACT_CHECK: {
+  readonly createJob: Accepts<typeof CreateJobBody, CreateJobRequest>;
+  readonly createRevision: Accepts<typeof CreateRevisionBody, CreateRevisionRequest>;
+  readonly agent: Accepts<typeof AgentBody, AgentRunRequest>;
+  readonly media: Accepts<typeof MediaBody, MediaUploadRequest>;
+  readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
+  readonly resolve: Accepts<typeof ResolveReviewBody, ResolveReviewRequest>;
+  readonly proposalRef: Accepts<typeof ProposalRefBody, ProposalRefRequest>;
+  readonly discard: Accepts<typeof DiscardReviewBody, DiscardReviewRequest>;
+  readonly approve: Accepts<typeof ApproveBody, ApproveRequest>;
+  readonly revoke: Accepts<typeof RevokeBody, RevokeApprovalRequest>;
+  readonly publish: Accepts<typeof PublishBody, PublishRequest>;
+} = {
+  createJob: true,
+  createRevision: true,
+  agent: true,
+  media: true,
+  place: true,
+  resolve: true,
+  proposalRef: true,
+  discard: true,
+  approve: true,
+  revoke: true,
+  publish: true,
+};
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -189,7 +259,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- job ------------------------------------------------------------------
 
-  app.get<{ Querystring: { state?: string } }>('/api/jobs', async (request) => {
+  app.get<{ Querystring: { state?: string } }>('/api/jobs', async (request): Promise<ListJobsResponse> => {
     const raw = request.query.state;
     const states = (raw ?? '')
       .split(',')
@@ -206,7 +276,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
-  app.post('/api/jobs', async (request, reply) => {
+  app.post('/api/jobs', async (request, reply): Promise<JobResponse> => {
     const body = parse(CreateJobBody, request.body);
     const job = await guard(() =>
       core().createJob({
@@ -220,24 +290,24 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return { job };
   });
 
-  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid', async (request) => {
+  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid', async (request): Promise<JobDetail> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => core().getJob(uuid));
   });
 
-  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid', async (request) => {
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid', async (request): Promise<JobResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => ({ job: core().cancelJob(uuid) }));
   });
 
   // --- 內容 -----------------------------------------------------------------
 
-  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/revisions', async (request) => {
+  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/revisions', async (request): Promise<RevisionsResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => ({ revisions: core().listRevisions(uuid) }));
   });
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/revisions', async (request, reply) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/revisions', async (request, reply): Promise<RevisionResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(CreateRevisionBody, request.body ?? {});
     const revision = await guard(() =>
@@ -253,7 +323,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return { revision };
   });
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/render', async (request) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/render', async (request): Promise<RenderOutcome> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => core().render(uuid));
   });
@@ -272,7 +342,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { uuid: string }; Querystring: { revision?: string } }>(
     '/api/jobs/:uuid/diff',
-    async (request) => {
+    async (request): Promise<MarksResponse> => {
       const { uuid } = parse(UuidParams, request.params);
       const raw = request.query.revision;
       const revisionNumber = raw === undefined ? undefined : Number(raw);
@@ -285,7 +355,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- Agent ----------------------------------------------------------------
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/agent', async (request) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/agent', async (request): Promise<AgentRunResult> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(AgentBody, request.body);
     return guard(() =>
@@ -299,7 +369,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     );
   });
 
-  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/agent', async (request) => {
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/agent', async (request): Promise<CancelledResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => {
       core().cancelAgentRun(uuid);
@@ -309,12 +379,12 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- 待處理清單（階段 5.5） ------------------------------------------------
 
-  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request) => {
+  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request): Promise<ReviewResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => ({ review: core().getReview(uuid) }));
   });
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/resolve', async (request) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/resolve', async (request): Promise<ReviewResolveResult> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(ResolveReviewBody, request.body);
     return guard(() => core().resolveReviewItems(uuid, body));
@@ -326,7 +396,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
    * 跟「把每一項都勾起來送 resolve」不是同一件事：那個只會套上 Agent 申報過的
    * 改動，這個是整份採用。差別寫在 CoreService.acceptWholeProposal。
    */
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/accept-all', async (request) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/accept-all', async (request): Promise<ReviewResolveResult> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(ProposalRefBody, request.body ?? {});
     return guard(() =>
@@ -334,7 +404,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     );
   });
 
-  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request) => {
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request): Promise<DiscardedResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(DiscardReviewBody, request.body ?? {});
     return guard(() => {
@@ -347,7 +417,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.delete<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/briefs/:id', async (request) => {
+  app.delete<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/briefs/:id', async (request): Promise<DismissedResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const briefId = parseId(request.params.id);
     return guard(() => {
@@ -358,7 +428,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { uuid: string }; Querystring: { against?: string } }>(
     '/api/jobs/:uuid/compare',
-    async (request) => {
+    async (request): Promise<Comparison> => {
       const { uuid } = parse(UuidParams, request.params);
       const against = request.query.against;
       if (against !== undefined && against !== 'proposal' && against !== 'previous') {
@@ -370,7 +440,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- 媒體 -----------------------------------------------------------------
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/media', async (request, reply) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/media', async (request, reply): Promise<MediaResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(MediaBody, request.body);
     const bytes = decodeMedia(body);
@@ -388,7 +458,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return { media: asset };
   });
 
-  app.put<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id', async (request) => {
+  app.put<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id', async (request): Promise<MediaResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const assetId = parseId(request.params.id);
     const body = parse(MediaBody, request.body);
@@ -404,7 +474,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     }));
   });
 
-  app.delete<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id', async (request) => {
+  app.delete<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id', async (request): Promise<RemovedResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const assetId = parseId(request.params.id);
     return guard(() => {
@@ -413,20 +483,20 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.post<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id/place', async (request) => {
+  app.post<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id/place', async (request): Promise<RevisionResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const assetId = parseId(request.params.id);
     const body = parse(PlaceBody, request.body);
     return guard(() => ({ revision: core().placeMedia(uuid, assetId, body.afterBlockIndex) }));
   });
 
-  app.post<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id/featured', async (request) => {
+  app.post<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/media/:id/featured', async (request): Promise<RevisionResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const assetId = parseId(request.params.id);
     return guard(() => ({ revision: core().setFeaturedMedia(uuid, assetId) }));
   });
 
-  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/featured', async (request) => {
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/featured', async (request): Promise<RevisionResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     return guard(() => ({ revision: core().setFeaturedMedia(uuid, null) }));
   });
@@ -437,7 +507,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
    * 核准。actor 在這裡寫死 'ui'——**這條路由就是本機介面本身**。
    * MCP 走的是 CoreService，那條路徑上 actor 不是 'ui'，會被 approve() 擋下來。
    */
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/approve', async (request, reply) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/approve', async (request, reply): Promise<ApprovalResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(ApproveBody, request.body);
     const approval = await guard(() => core().approve(uuid, { contentHash: body.contentHash, actor: 'ui' }));
@@ -445,7 +515,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return { approval };
   });
 
-  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/approve', async (request) => {
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/approve', async (request): Promise<RevokedResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(RevokeBody, request.body ?? {});
     return guard(() => {
@@ -456,7 +526,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- 發布 -----------------------------------------------------------------
 
-  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/publish', async (request) => {
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/publish', async (request): Promise<PublishResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(PublishBody, request.body);
     return guard(async () => ({

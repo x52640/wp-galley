@@ -1,21 +1,27 @@
 import type {
+  ApprovalResponse,
+  JobResponse,
+  ListJobsResponse,
+  MediaResponse,
+  MediaUploadRequest,
+  PublishResponse,
+  PublishTargetSummary,
+  RevisionResponse,
+  RevisionsResponse,
+  TermsResponse,
+} from '../../contract/api.js';
+import type {
   AddMediaInput,
   AgentReviewInput,
   AgentRunResult,
-  Approval,
   Comparison,
   CreateJobInput,
   CreateRevisionInput,
   JobDetail,
   JobState,
-  JobSummary,
-  JobTarget,
-  MediaAsset,
   PublishInput,
   PublisherApi,
-  PublishResult,
   RenderOutcome,
-  Revision,
   ReviewResolveResult,
   Term,
 } from './types.js';
@@ -133,7 +139,7 @@ async function sendJson<T>(path: string, method: string, body?: unknown): Promis
  *
  * SVG 不會走到這裡：WordPress 不收 SVG，前端在 lib/svg-to-png.ts 先轉成 PNG。
  */
-async function mediaBody(input: AddMediaInput): Promise<Record<string, unknown>> {
+async function mediaBody(input: AddMediaInput): Promise<MediaUploadRequest> {
   const buffer = await input.file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   // 一次 8 KB，避免大圖把 String.fromCharCode 的參數塞爆。
@@ -155,12 +161,12 @@ const httpApi: PublisherApi = {
   async listJobs(filter) {
     const query =
       filter?.state && filter.state.length > 0 ? `?state=${filter.state.join(',')}` : '';
-    const body = await getJson<{ jobs: JobSummary[] }>(`/api/jobs${query}`);
+    const body = await getJson<ListJobsResponse>(`/api/jobs${query}`);
     return body.jobs;
   },
 
   async createJob(input: CreateJobInput) {
-    const body = await sendJson<{ job: { uuid: string } }>('/api/jobs', 'POST', input);
+    const body = await sendJson<JobResponse>('/api/jobs', 'POST', input);
     return { uuid: body.job.uuid };
   },
 
@@ -171,7 +177,7 @@ const httpApi: PublisherApi = {
   },
 
   async createRevision(uuid: string, input: CreateRevisionInput) {
-    const body = await sendJson<{ revision: Revision }>(
+    const body = await sendJson<RevisionResponse>(
       `/api/jobs/${uuid}/revisions`,
       'POST',
       input,
@@ -180,7 +186,7 @@ const httpApi: PublisherApi = {
   },
 
   async listRevisions(uuid: string) {
-    const body = await getJson<{ revisions: Revision[] }>(`/api/jobs/${uuid}/revisions`);
+    const body = await getJson<RevisionsResponse>(`/api/jobs/${uuid}/revisions`);
     return body.revisions;
   },
 
@@ -242,7 +248,7 @@ const httpApi: PublisherApi = {
   },
 
   async addMedia(uuid: string, input: AddMediaInput) {
-    const body = await sendJson<{ media: MediaAsset }>(
+    const body = await sendJson<MediaResponse>(
       `/api/jobs/${uuid}/media`,
       'POST',
       await mediaBody(input),
@@ -251,7 +257,7 @@ const httpApi: PublisherApi = {
   },
 
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput) {
-    const body = await sendJson<{ media: MediaAsset }>(
+    const body = await sendJson<MediaResponse>(
       `/api/jobs/${uuid}/media/${assetId}`,
       'PUT',
       await mediaBody(input),
@@ -280,7 +286,7 @@ const httpApi: PublisherApi = {
   },
 
   async approve(uuid: string, contentHash: string) {
-    const body = await sendJson<{ approval: Approval }>(`/api/jobs/${uuid}/approve`, 'POST', {
+    const body = await sendJson<ApprovalResponse>(`/api/jobs/${uuid}/approve`, 'POST', {
       contentHash,
     });
     return body.approval;
@@ -291,7 +297,7 @@ const httpApi: PublisherApi = {
   },
 
   async publish(uuid: string, input: PublishInput) {
-    const body = await sendJson<{ result: PublishResult }>(
+    const body = await sendJson<PublishResponse>(
       `/api/jobs/${uuid}/publish`,
       'POST',
       input,
@@ -300,7 +306,7 @@ const httpApi: PublisherApi = {
   },
 
   async listTerms(taxonomy: string) {
-    const body = await getJson<{ terms: Term[] }>(
+    const body = await getJson<TermsResponse>(
       `/api/wordpress/terms?taxonomy=${encodeURIComponent(taxonomy)}`,
     );
     return body.terms;
@@ -310,7 +316,7 @@ const httpApi: PublisherApi = {
     sendJson<Term>('/api/wordpress/terms', 'POST', { taxonomy, name }),
 
   async listTargets() {
-    const body = await getJson<{ publishTargets?: JobTarget[] }>('/api/wordpress');
+    const body = await getJson<{ publishTargets?: PublishTargetSummary[] }>('/api/wordpress');
     return body.publishTargets ?? [];
   },
 };

@@ -8,9 +8,9 @@ import type {
   CreateRevisionInput,
   JobDetail,
   JobSummary,
-  JobTarget,
   MediaAsset,
   ProofMark,
+  PublishTargetSummary,
   PublisherApi,
   PublishInput,
   PublishResult,
@@ -23,9 +23,13 @@ import type {
   Term,
 } from './types.js';
 
+/** 契約的欄位都是 readonly（讀到的資料）；示範資料扮演後端，得能改自己的狀態。 */
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
+
 /** 示範資料多帶兩個欄位，因為 JobSummary 需要而 JobDetail 沒有。 */
-interface FixtureJob extends JobDetail {
-  target: JobTarget;
+interface FixtureJob extends Writable<Omit<JobDetail, 'target' | 'review'>> {
+  target: PublishTargetSummary;
+  review: Writable<ReviewProposal> | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,19 +44,23 @@ interface FixtureJob extends JobDetail {
  * 誤認成真的稿件。
  */
 
-const DIARY_TARGET: JobTarget = {
+const DIARY_TARGET: PublishTargetSummary = {
   key: 'diary',
   displayName: '日•記',
   contentType: 'diary',
+  postType: 'diary',
+  templateId: 'diary-v1',
   taxonomy: 'diary-category',
   requireFeaturedImage: false,
   allowCreateTerms: false,
 };
 
-const LONGFORM_TARGET: JobTarget = {
+const LONGFORM_TARGET: PublishTargetSummary = {
   key: 'read-think',
   displayName: '思想•讀•鑰（長文）',
   contentType: 'longform',
+  postType: 'read-think',
+  templateId: 'longform-v1',
   taxonomy: 'read-think-tag',
   requireFeaturedImage: true,
   allowCreateTerms: false,
@@ -721,7 +729,16 @@ export const fixtureApi: PublisherApi = {
         summary: '兩個配圖建議',
         changes: [],
         observations: [],
-        imageBriefs: clone(job.imageBriefs),
+        // 後端回的是 Agent 交回來的原樣（還沒有 id），不是存進去之後的樣子。
+        imageBriefs: job.imageBriefs.map((brief) => ({
+          key: brief.key,
+          purpose: brief.purpose,
+          prompt: brief.prompt,
+          aspectRatio: brief.aspectRatio,
+          altText: brief.altText,
+          ...(brief.caption === null ? {} : { caption: brief.caption }),
+          ...(brief.placement === null ? {} : { placement: brief.placement }),
+        })),
         task,
         review: clone(job.review),
       };

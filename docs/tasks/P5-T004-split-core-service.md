@@ -1,7 +1,7 @@
 ---
 id: P5-T004
 phase: 5
-status: blocked
+status: ready
 depends_on: [P5-T002]
 specs: [core-service.md, architecture.md]
 write_paths: ["src/core/", "tests/", "docs/specs/core-service.md", "docs/specs/architecture.md"]
@@ -38,7 +38,7 @@ core-service.md、state-machine.md（核准失效必須仍集中在一處）
 ## 中斷／接手紀錄
 - 最後完成：尚未開始
 - 已通過驗證：—
-- 下一步：等 P5-T002
-- Blocker：P5-T002
+- 下一步：盤點 service.ts 的方法分群
+- Blocker：無
 
 ## 完成結果

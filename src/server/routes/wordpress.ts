@@ -4,6 +4,7 @@ import { probeSite, unconfiguredProbe } from '../../wordpress/site.js';
 import { fetchPostTypes } from '../../wordpress/site.js';
 import { validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
 import { listTerms, resolveTerms } from '../../wordpress/terms.js';
+import type { CreateTermRequest, PublishTargetSummary, Term, TermsResponse } from '../../contract/api.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import { AppError, errorCodes } from '../errors.js';
 import { mapCoreError } from './jobs.js';
@@ -47,7 +48,7 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
    * 分類項目清單。UI 的分類挑選器靠它，沒有它使用者只能盲打——打錯就變成
    * 「對不上的名稱」，發布出去的文章沒有分類。
    */
-  app.get<{ Querystring: { taxonomy?: string } }>('/api/wordpress/terms', async (request) => {
+  app.get<{ Querystring: { taxonomy?: string } }>('/api/wordpress/terms', async (request): Promise<TermsResponse> => {
     const taxonomy = requireKnownTaxonomy(app, request.query.taxonomy);
     const client = requireClient(app);
     return guard(async () => ({ terms: await listTerms(client, taxonomy) }));
@@ -64,7 +65,7 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
    * 實際建立走 `resolveTerms(..., { allowCreate: true })` 而不是自己寫一份 POST：
    * 同名的既有項目會直接回傳，不會建出第二個。
    */
-  app.post('/api/wordpress/terms', async (request, reply) => {
+  app.post('/api/wordpress/terms', async (request, reply): Promise<Term> => {
     const body = parseBody(CreateTermBody, request.body);
     const target = requireTargetForTaxonomy(app, body.taxonomy);
     if (!target.allowCreateTerms) {
@@ -94,7 +95,7 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
 const CreateTermBody = z.object({
   taxonomy: z.string().min(1).max(64),
   name: z.string().min(1).max(120),
-});
+}) satisfies z.ZodType<CreateTermRequest>;
 
 function parseBody<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -159,7 +160,7 @@ function requireKnownTaxonomy(app: FastifyInstance, taxonomy: string | undefined
 }
 
 /** 只回報 UI 需要的欄位。設定檔沒有秘密，但也沒必要整包吐出去。 */
-function summarize(targets: readonly PublishTarget[]) {
+function summarize(targets: readonly PublishTarget[]): PublishTargetSummary[] {
   return targets.map((target) => ({
     key: target.key,
     displayName: target.displayName,

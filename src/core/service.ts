@@ -3,6 +3,24 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
+import type {
+  AgentRun as AgentRunView,
+  AgentRunResult,
+  AgentTask,
+  Approval as ApprovalView,
+  Comparison as ComparisonView,
+  ImageBrief as ImageBriefView,
+  Job,
+  JobDetail,
+  JobSummary,
+  MediaAsset,
+  PublishResult,
+  RenderOutcome,
+  Revision,
+  ReviewItem as ReviewItemView,
+  ReviewProposal as ReviewProposalView,
+  ReviewResolveResult,
+} from '../contract/api.js';
 import { computeRevisionHash } from './content-hash.js';
 import { computeComparison, computeProofMarks, type CompareRow, type ProofMark } from './diff.js';
 import {
@@ -94,110 +112,29 @@ import type { PublishTarget, PublishTargetRegistry } from '../wordpress/targets.
  * 3. 只有本機 UI 能核准 → `approve()` 擋掉 actor !== 'ui'，DB 的 CHECK 再擋一次。
  */
 
-// --- 對外型別（前端與 MCP 都照這份寫） --------------------------------------
+// --- 對外型別 ---------------------------------------------------------------
+//
+// 會過網路的形狀定義在 src/contract/api.ts（前端 import 同一份）。這裡只加上
+// 後端才需要的欄位，並沿用既有的名字轉出去，讓呼叫端不用改。
 
-export interface Job {
-  readonly uuid: string;
-  readonly state: JobState;
-  readonly title: string | null;
-  readonly targetKey: string | null;
-  readonly templateId: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
-export interface JobSummary extends Job {
-  readonly revisionCount: number;
-  readonly revisionNumber: number | null;
-  readonly approved: boolean;
-  readonly publishedId: number | null;
-}
-
-export interface Revision {
-  readonly id: number;
-  readonly number: number;
-  readonly origin: RevisionOrigin;
-  readonly contentHash: string;
-  readonly templateData: Record<string, unknown>;
-  readonly featuredMediaId: number | null;
-  readonly publishHtml: string;
-  readonly createdAt: string;
-}
-
-export interface MediaAsset {
-  readonly id: number;
-  readonly jobId: number;
-  readonly mimeType: string;
-  readonly byteSize: number;
-  readonly sha256: string;
-  /** 目前不解析影像尺寸，永遠是 null；欄位保留給日後需要時填。 */
-  readonly width: number | null;
-  readonly height: number | null;
-  readonly altText: string | null;
-  readonly caption: string | null;
-  readonly briefKey: string | null;
-  readonly wordpressMediaId: number | null;
-  /** WordPress 媒體庫的公開網址；沒上傳成功就是 null。 */
-  readonly url: string | null;
-  /** 有沒有被插進目前這一版的正文。 */
-  readonly placed: boolean;
-  /**
-   * 圖片被插在第幾個頂層區塊後面（-1 = 最前面），沒插進正文就是 null。
-   * 跟 `placeMedia(uuid, assetId, afterBlockIndex)` 的參數是同一套索引。
-   */
-  readonly placedAfterBlockIndex: number | null;
-  readonly featured: boolean;
-  readonly createdAt: string;
-}
-
-export interface ApprovalView {
-  readonly id: number;
-  readonly contentHash: string;
-  readonly createdAt: string;
-  /** hash 還對得上目前的 revision 才算有效。 */
-  readonly valid: boolean;
-}
-
-export interface AgentRunView {
-  readonly status: AgentRunStatus;
-  readonly provider: string;
-  /** 這一趟做的是什麼。畫面靠它決定要說「校稿」還是「想配圖」。 */
-  readonly task: AgentTask;
-  readonly startedAt: string;
-  readonly finishedAt: string | null;
-  readonly errorMessage: string | null;
-}
-
-export interface JobDetail {
-  readonly uuid: string;
-  readonly state: JobState;
-  readonly title: string | null;
-  readonly target: {
-    readonly key: string;
-    readonly displayName: string;
-    readonly contentType: string;
-    readonly taxonomy: string | null;
-    readonly requireFeaturedImage: boolean;
-  } | null;
-  readonly template: { readonly id: string; readonly hash: string; readonly strictness: string } | null;
-  readonly currentRevision: Revision | null;
-  readonly revisionCount: number;
-  /** 預覽用 HTML 的網址，不是內容本身——內容走 iframe 載入。 */
-  readonly previewUrl: string;
-  readonly marks: ProofMark[];
-  readonly media: MediaAsset[];
-  readonly featuredMediaId: number | null;
-  readonly approval: ApprovalView | null;
-  /** 目前狀態下還缺什麼才能發布。空陣列代表可以發。 */
-  readonly blockers: string[];
-  readonly published: { readonly wordpressId: number; readonly status: string; readonly link: string } | null;
-  readonly agentRun: AgentRunView | null;
-  /** 待處理清單。沒有未結案的校稿提案就是 null。 */
-  readonly review: ReviewProposalView | null;
-  /** 配圖需求。已經丟掉的不列進來。 */
-  readonly imageBriefs: ImageBriefView[];
-  readonly sourceText: string | null;
-}
+export type {
+  AgentTask,
+  AgentRunResult,
+  Comparison as ComparisonView,
+  ImageBrief as ImageBriefView,
+  Job,
+  JobDetail,
+  JobSummary,
+  MediaAsset,
+  PublishResult,
+  RenderOutcome,
+  Revision,
+  ReviewItem as ReviewItemView,
+  ReviewProposal as ReviewProposalView,
+  ReviewResolveResult,
+  Approval as ApprovalView,
+  AgentRun as AgentRunView,
+} from '../contract/api.js';
 
 export interface CreateJobInput {
   readonly targetKey: string;
@@ -218,20 +155,7 @@ export interface CreateRevisionInput {
   readonly reason?: string | undefined;
 }
 
-export interface RenderOutcome {
-  readonly revisionId: number;
-  readonly revisionNumber: number;
-  readonly contentHash: string;
-  readonly publishHtml: string;
-  readonly previewDocument: string;
-  readonly sanitize: {
-    readonly changed: boolean;
-    readonly removedTags: string[];
-    readonly removedAttributes: string[];
-  };
-  readonly state: JobState;
-}
-
+/** 後端收到的是解碼後的位元組；線上的樣子是 MediaUploadRequest（base64）。 */
 export interface AddMediaInput {
   readonly bytes: Uint8Array;
   readonly mimeType: string;
@@ -239,54 +163,6 @@ export interface AddMediaInput {
   readonly altText?: string | undefined;
   readonly caption?: string | undefined;
   readonly briefKey?: string | undefined;
-}
-
-// --- 待處理清單（階段 5.5） -------------------------------------------------
-
-/**
- * 清單上的一項。
- *
- * 校稿改動與觀察**不是同一種東西**（一個可以自動套用，一個只能請人去判斷），
- * 但兩者都是「掛在文章某一段上的待辦事項」，所以裝在同一個容器裡。
- * 階段 6 的查證發現會是第三種，同樣掛進來（見 docs/specs/review-proposals.md「統一模型」）。
- */
-export interface ReviewItemView {
-  readonly id: number;
-  readonly ordinal: number;
-  readonly type: ReviewItemType;
-  readonly state: ReviewItemState;
-  /** `type === 'change'` 時才有。 */
-  readonly change: ReviewChange | null;
-  /** `type === 'observation'` 時才有。 */
-  readonly observation: Observation | null;
-  /**
-   * 這一項掛在正文第幾個頂層區塊上，讓畫面可以「跳到那一段並標亮」。
-   *
-   * **每次讀取時重算**，不是存下來的：內容改過之後，存下來的索引會指到別的段落，
-   * 使用者按了跳轉會跳到錯的地方。定位不到就是 null，那一項就沒有跳轉按鈕——
-   * 猜一個段落跳過去比不能跳更糟。
-   */
-  readonly blockIndex: number | null;
-  readonly resolvedAt: string | null;
-}
-
-export interface ReviewProposalView {
-  readonly id: number;
-  readonly provider: string;
-  readonly summary: string | null;
-  readonly createdAt: string;
-  /** 這份提案是對著哪一份內容做的。 */
-  readonly baseContentHash: string;
-  /**
-   * 做完提案之後，內容又被別的動作改過（手動編輯、插圖、換封面）。
-   *
-   * 逐項套用照樣可以試——找得到就套得上，找不到會誠實回報。但「全部接受」會被
-   * 擋下來：那是拿 Agent 的舊稿整份蓋掉目前的內容，中間那些修改會無聲消失。
-   */
-  readonly stale: boolean;
-  /** 還沒有下場的項目數：`pending` 加上 `unappliable`（定位不到、等使用者決定）。 */
-  readonly pendingCount: number;
-  readonly items: ReviewItemView[];
 }
 
 export interface ResolveReviewInput {
@@ -305,52 +181,6 @@ export interface ProposalRef {
   readonly proposalId?: number | undefined;
 }
 
-export interface ReviewResolveResult {
-  /** 有東西真的被套用才會產生新版本；只是略過的話是 null。 */
-  readonly revision: Revision | null;
-  readonly applied: number[];
-  readonly skipped: number[];
-  /** 想套用但在目前內容裡定位不到的項目。這幾項得使用者自己改。 */
-  readonly unappliable: number[];
-  readonly review: ReviewProposalView | null;
-}
-
-/** 左右對照的一份結果。 */
-export interface ComparisonView {
-  /** `proposal`＝跟 Agent 的提案比；`previous`＝跟上一版比；`none`＝沒得比。 */
-  readonly against: 'proposal' | 'previous' | 'none';
-  readonly leftLabel: string;
-  readonly rightLabel: string;
-  readonly rows: CompareRow[];
-}
-
-/**
- * 這一趟要 Agent 做什麼。
- *
- * `review` 是校稿（產生待處理清單），`images` 是配圖需求（產生 imageBriefs）。
- * 兩者共用同一份輸出 schema，差別在 prompt 與**結果怎麼落地**——配圖那一趟
- * 不會建立提案，所以按「一鍵配圖」不會把還沒清完的校稿清單洗掉。
- */
-export type AgentTask = 'review' | 'images';
-
-/** 一條配圖需求。**這裡不生圖**，只把「該配什麼圖」講清楚。 */
-export interface ImageBriefView {
-  readonly id: number;
-  readonly key: string;
-  readonly purpose: string;
-  /** 拿去貼進生圖工具的那段文字。 */
-  readonly prompt: string;
-  readonly aspectRatio: string;
-  readonly altText: string;
-  readonly caption: string | null;
-  /** Agent 講的位置描述（「第三段之後」）。**不是**區塊索引，別拿去當定位用。 */
-  readonly placement: string | null;
-  /** 已經有圖對上這條需求了。 */
-  readonly fulfilled: boolean;
-  readonly dismissed: boolean;
-  readonly createdAt: string;
-}
-
 export interface AgentReviewInput {
   readonly provider: AgentId;
   /** 預設 `review`。 */
@@ -361,40 +191,12 @@ export interface AgentReviewInput {
   readonly timeoutMs?: number | undefined;
 }
 
-export interface AgentRunResult {
-  readonly runId: string;
-  readonly status: AgentRunStatus;
-  readonly summary: string | null;
-  readonly changes: readonly ReviewChange[];
-  readonly observations: readonly Observation[];
-  readonly imageBriefs: readonly ImageBrief[];
-  /** 這一趟做的是什麼。`images` 不會產生提案。 */
-  readonly task: AgentTask;
-  /**
-   * 校稿結果存成提案，**文章一個字都還沒動**。
-   *
-   * 沒有 `revision` 欄位是刻意的：以前這裡會回一個新版本，代表 Agent 的改動整份
-   * 落地了。逐項接受要成立，落地就必須等使用者決定（計畫 §358）。
-   */
-  readonly review: ReviewProposalView | null;
-}
-
 export interface PublishInput {
   readonly status: 'draft' | 'publish';
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
   readonly confirm?: boolean | undefined;
+  /** 只有後端知道呼叫的是誰；HTTP 路由寫死 'ui'，MCP 另給。 */
   readonly actor?: EventActor | undefined;
-}
-
-export interface PublishResult {
-  readonly wordpressId: number;
-  readonly status: string;
-  readonly link: string;
-  readonly created: boolean;
-  /** 對不上既有分類項目的名稱。不自動建立（會把分類變垃圾場），交給使用者處理。 */
-  readonly unknownTerms: string[];
-  /** 落到 wp:html 逃生門的區塊數，大於 0 值得提醒使用者。 */
-  readonly fallbackBlocks: number;
 }
 
 // --- 內部型別 ---------------------------------------------------------------
@@ -584,6 +386,7 @@ export class CoreService {
             contentType: target.contentType,
             taxonomy: target.taxonomy,
             requireFeaturedImage: target.requireFeaturedImage,
+            allowCreateTerms: target.allowCreateTerms,
           }
         : null,
       template: template
