@@ -566,3 +566,57 @@ describe('已發布之後', () => {
     expect(() => f.core.acceptWholeProposal(uuid)).toThrow(/不能再改內容/);
   });
 });
+
+describe('從卡片進去直接改，存檔時一起標成已處理（P5-T012）', () => {
+  function observationId(core: CoreService, uuid: string): number {
+    return core.getReview(uuid)!.items.find((item) => item.type === 'observation')!.id;
+  }
+
+  it('存成新版本，那張卡片變成已處理，而且看得出是「自己改了」', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    const body = f.core.getJob(uuid).currentRevision!.publishHtml.replace('不是書裡寫的那些', '書裡其實有寫的那些');
+
+    const revision = f.core.createRevision(uuid, { editedBody: body, resolveItemId: id });
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.resolvedByEdit).toBe(true);
+    expect(f.core.getJob(uuid).currentRevision!.id).toBe(revision.id);
+  });
+
+  it('按「不用改」略過的，resolvedByEdit 是 false', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'skip' });
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.resolvedByEdit).toBe(false);
+  });
+
+  it('沒有實質改動就不建版本，卡片也不動', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    const body = f.core.getJob(uuid).currentRevision!.publishHtml;
+    f.core.createRevision(uuid, { editedBody: body, resolveItemId: id });
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.state).toBe('pending');
+  });
+
+  it('不屬於目前提案的項目：整個存檔被拒絕，不留下半套', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const before = f.core.listRevisions(uuid).length;
+    expect(() => f.core.createRevision(uuid, { editedBody: P('全新'), resolveItemId: 99999 })).toThrow(InvalidInputError);
+    expect(f.core.listRevisions(uuid)).toHaveLength(before);
+  });
+
+  it('resolveItemId 只能跟 editedBody 一起用', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    expect(() => f.core.createRevision(uuid, { templateData: { title: 'x', body: P('x') }, resolveItemId: id })).toThrow(
+      InvalidInputError,
+    );
+  });
+});

@@ -202,7 +202,9 @@ export function SuggestionColumn({
                     ? `${item.change.before} → ${item.change.after}`
                     : `「${item.observation?.excerpt ?? ''}」`}
                 </span>
-                <span className="dim">{item.state === 'applied' ? '已接受' : '保留原文'}</span>
+                <span className="dim">
+                  {item.state === 'applied' ? '已接受' : item.resolvedByEdit ? '自己改了' : '保留原文'}
+                </span>
               </li>
             ))}
           </ul>

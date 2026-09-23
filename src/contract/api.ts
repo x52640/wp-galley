@@ -166,6 +166,8 @@ export interface ReviewItem {
    */
   readonly blockIndex: number | null;
   readonly resolvedAt: string | null;
+  /** 使用者從這張卡片進去直接改文章、存檔時一起結案的（P5-T012）。畫面寫「自己改了」，不是「保留原文」。 */
+  readonly resolvedByEdit: boolean;
 }
 
 export interface ReviewProposal {
@@ -419,6 +421,11 @@ export interface CreateRevisionRequest {
    * 編輯器產生的雜訊再渲染。不能跟 `templateData` 同時給。
    */
   readonly editedBody?: string;
+  /**
+   * 從哪張建議卡片進去改的（P5-T012）。存成新版本時那一項一起標成已處理（`resolvedByEdit`）；
+   * 沒有實質改動就不動它。只能跟 `editedBody` 一起用。
+   */
+  readonly resolveItemId?: number;
   readonly sourceText?: string;
   /** `null` 代表清除精選圖片；不給代表沿用。 */
   readonly featuredMediaId?: number | null;

@@ -165,6 +165,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setMode('edit');
     setSheet(null);
     setEditing({
+      itemId: item?.id ?? null,
       caret: item === null ? null : (highlightText(item) ?? item.observation?.excerpt ?? item.change?.before ?? null),
       blockIndex: item?.blockIndex ?? null,
       nonce: Date.now(),
@@ -325,6 +326,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                 editedBody: html,
                 origin: 'manual',
                 reason: '直接在文章上改',
+                // 從卡片進來改的：存成新版本時那張卡片一起結案，不用再按一次「不用改」。
+                ...(editing?.itemId == null ? {} : { resolveItemId: editing.itemId }),
                 // 後端還沒檢查這個（P5-T005），先帶上：做好之後編輯中被換版本就會被擋下來。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });

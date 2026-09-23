@@ -151,6 +151,8 @@ export interface CreateRevisionInput {
   readonly templateData?: Record<string, unknown> | undefined;
   /** 直接在文章上改：只換正文（publishSlot），其他欄位沿用上一版。見 normalizeEditedBody。 */
   readonly editedBody?: string | undefined;
+  /** 從哪張建議卡片進去改的：存成新版本時一起標成已處理。只能跟 editedBody 一起用。 */
+  readonly resolveItemId?: number | undefined;
   readonly sourceText?: string | undefined;
   /** `null` 代表清除精選圖片；`undefined` 代表沿用。 */
   readonly featuredMediaId?: number | null | undefined;
@@ -483,6 +485,17 @@ export class CoreService {
     if (input.editedBody !== undefined && input.templateData !== undefined) {
       throw new InvalidInputError('editedBody 與 templateData 不能同時給：一個只換正文，一個整份取代');
     }
+    // 要一起結案的那張卡片，寫入任何東西之前先驗：驗不過就整個存檔拒絕，不留下半套。
+    let resolveRow: ReviewItemRow | null = null;
+    if (input.resolveItemId !== undefined) {
+      if (input.editedBody === undefined) {
+        throw new InvalidInputError('resolveItemId 只能跟 editedBody 一起用（從卡片進去直接改文章）');
+      }
+      const proposal = this.repo.openReviewProposal(job.id);
+      resolveRow =
+        (proposal ? this.repo.listReviewItems(proposal.id) : []).find((row) => row.id === input.resolveItemId) ?? null;
+      if (!resolveRow) throw new InvalidInputError(`這一項不屬於目前的校稿提案：${input.resolveItemId}`);
+    }
     const templateData =
       input.editedBody === undefined
         ? (input.templateData ?? base.templateData)
@@ -541,6 +554,22 @@ export class CoreService {
       status: 'succeeded',
       detail: this.scrub({ origin: revisionRow.origin, reason: input.reason ?? null }),
     });
+
+    // 從卡片進去改的：那一項跟著這一版結案。記下是哪一版結的，畫面才分得出「自己改了」與「保留原文」。
+    // 已經套用過的不動——文字已經是 AI 的版本了，改標成略過會讓清單說謊。
+    if (resolveRow && resolveRow.state !== 'applied') {
+      this.repo.updateReviewItemState(resolveRow.id, 'skipped', revisionRow.id);
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: revisionRow.id,
+        approvalId: null,
+        actor: 'ui',
+        eventType: 'review_items_skipped',
+        status: 'succeeded',
+        detail: { proposalId: resolveRow.proposal_id, count: 1, ignored: 0, byEdit: true },
+      });
+      this.closeProposalIfDone(resolveRow.proposal_id);
+    }
 
     return this.toRevision(revisionRow);
   }
@@ -1252,6 +1281,8 @@ export class CoreService {
       observation,
       blockIndex: this.locateItem(blocks, change, observation, row.state),
       resolvedAt: row.resolved_at,
+      // 略過本身不寫 revision_id；只有「從卡片進去改、存檔結案」會寫。
+      resolvedByEdit: row.state === 'skipped' && row.revision_id !== null,
     };
   }
 

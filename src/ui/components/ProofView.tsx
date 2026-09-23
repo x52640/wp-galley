@@ -39,6 +39,8 @@ import type { SuggestionKind } from '../lib/review-kinds.js';
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
 export interface ProofEditRequest {
+  /** 從哪張建議卡片進來的；存檔時那一項一起標成已處理（P5-T012）。null＝從上方「改原文」。 */
+  itemId: number | null;
   /** 游標要停在哪段字前面；null＝文章開頭。 */
   caret: string | null;
   blockIndex: number | null;

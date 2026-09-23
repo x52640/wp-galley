@@ -228,7 +228,7 @@ function reviewItem(
   partial: Pick<ReviewItem, 'type' | 'change' | 'observation' | 'blockIndex'>,
   state: ReviewItem['state'] = 'pending',
 ): ReviewItem {
-  return { id, ordinal, state, resolvedAt: null, ...partial };
+  return { id, ordinal, state, resolvedAt: null, resolvedByEdit: false, ...partial };
 }
 
 function diaryReview(): ReviewProposal {
@@ -669,6 +669,17 @@ export const fixtureApi: PublisherApi = {
     );
     job.currentRevision = next;
     if (input.sourceText !== undefined) job.sourceText = input.sourceText;
+    // 從卡片進去改的：那一項跟著結案（後端 createRevision 的 resolveItemId）。
+    if (input.resolveItemId !== undefined && job.review) {
+      job.review = {
+        ...job.review,
+        items: job.review.items.map((item) =>
+          item.id === input.resolveItemId && item.state !== 'applied'
+            ? { ...item, state: 'skipped' as const, resolvedAt: new Date().toISOString(), resolvedByEdit: true }
+            : item,
+        ),
+      };
+    }
     return clone(next);
   },
 
@@ -804,7 +815,7 @@ export const fixtureApi: PublisherApi = {
       if (!wanted.has(item.id) || item.state === 'applied') return item;
       if (input.decision === 'skip') {
         skipped.push(item.id);
-        return { ...item, state: 'skipped', resolvedAt: new Date().toISOString() };
+        return { ...item, state: 'skipped', resolvedAt: new Date().toISOString(), resolvedByEdit: false };
       }
       // 後端是在標籤外面定位的；示範資料的正文都是規規矩矩的段落，
       // 直接換第一個出現的位置就夠像了。

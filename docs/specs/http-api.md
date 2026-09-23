@@ -61,6 +61,8 @@
   `src/core/html-blocks.ts` 的 `normalizeEditedBody`），再照常走 schema、sanitize、結構驗證。
   它不是信任來源。沒改內容時前端不送；整理後跟目前這一版相同（例如只多按一個 Enter）時後端不建新版本、
   不撤銷核准，回傳目前那一版。
+  `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下
+  `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。項目不屬於目前提案就整個拒絕。
 - 校對符號（`ProofMark`）是版面的簽名元素：改動不用紅綠色塊，用頁邊的符號標示；
   說明文字由 diff 產生，不是 Agent 寫的。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
