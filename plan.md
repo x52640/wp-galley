@@ -9,7 +9,7 @@
 
 只在使用者本機執行的 WordPress 發布台。使用者貼上文章，讓已訂閱並登入的
 Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、預覽、核准，
-最後透過 WordPress REST API 發布到 www.remusplus.com。不需要任何 AI API Key。
+最後透過 WordPress REST API 發布到使用者自己的站（作者本人是 www.remusplus.com，D-016）。不需要任何 AI API Key。
 
 **定位：本機 AI 當編輯，使用者當總編。** Agent 進不了 WordPress 是賣點不是限制——
 市面上的 AI 外掛都在講「裝上去、給權限、它幫你寫」，這個專案是反過來的。
@@ -21,7 +21,8 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 
 ### 包含
 
-- 僅監聽 `127.0.0.1` 的本機發布台，單一站台、單一使用者。
+- 僅監聽 `127.0.0.1` 的本機發布台，單一使用者、一次連一個站台；任何 WordPress 站都能連（D-016）。
+- 首次設定精靈：連線診斷、偵測 Agent、選發布目的地（D-016）。
 - 兩種內容類型：長文（`read-think`）、日記（`diary`）。對應見 `docs/specs/templates.md`。
 - 偵測並使用本機 Codex、Claude Code、Antigravity（`agy`）CLI。
 - 校稿以提案呈現，逐項接受／略過；observations 列出需要人判斷的疑點。
@@ -52,6 +53,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 | 5（續） | UI 改版為 B 版（D-013）✅、前後端共用契約（D-015）✅、拆分 CoreService ⬜ | 🔶 |
 | 6 | AI 查證、MCP Server | ⬜ |
 | 7 | 測試、文件與交付 | ⬜ |
+| 8 | 開源產品化：通用內容類型、站台設定檔、設定精靈（D-016） | ⬜ 排在 P5-T001 之後 |
 
 目前在做什麼：見 `docs/CURRENT_TASK.md`。
 
@@ -94,6 +96,12 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
   單人單 repo 用不到。
 - **D-015 前後端契約改為共用模組（2026-09-23 Remus 同意，P5-T002 執行）**：取代手抄的
   `src/ui/service/types.ts`，讓型別檢查擋住前後端不一致。排在 UI 改版之前。
+- **D-016 產品化為開源自架工具（2026-09-23 Remus 裁定，P8-T001／P8-T002 執行）**：定位是開源
+  作品，別人自己架、自己修，不提供支援。範圍從「只發到 remusplus」改為「任何 WordPress 站，一次連一個」。
+  站台相關設定抽成本機站台設定檔，remusplus 是第一份。新增首次設定精靈（連線診斷、偵測 Agent、
+  選文章／頁面）——使用者認為這是開始用之前的第一步，README 做不到當場診斷。第一版不做 API Key
+  （賣點是用既有訂閱），不支援 CPT（別人的 CPT 多半靠自訂欄位排版，只送正文會是空版面）。
+  排在 P5-T001 實測之後。未查證：各家 CLI 條款是否允許第三方工具呼叫，公開前要查。
 
 ## 待裁定
 

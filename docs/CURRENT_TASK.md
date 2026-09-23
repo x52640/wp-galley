@@ -31,6 +31,8 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 | Task | 等什麼 |
 | --- | --- |
 | [P6-T001](tasks/P6-T001-factcheck.md) AI 查證 | P5-T001 |
+| [P8-T001](tasks/P8-T001-site-profile.md) 通用文章類型與本機站台設定檔（D-016） | P5-T001 |
+| [P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016） | P8-T001 |
 
 ## 待專案擁有者
 
@@ -41,6 +43,7 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 - 前端以為建立 revision 有 `expectedContentHash` 保護，後端其實沒做 → P5-T005。
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
 - `core-service.md` 的方法清單是節錄 → P5-T004。
+- D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。
 - 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。
