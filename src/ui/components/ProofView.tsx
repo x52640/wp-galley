@@ -62,6 +62,33 @@ const HIGHLIGHT_COLORS: Record<SuggestionKind, { bg: string; line: string }> = {
   source: { bg: '#F6EDCF', line: '#8A6A14' },
 };
 
+/**
+ * 直接在文章上改時，標出「要改的是哪裡」（P5-T011）。
+ *
+ * 用 CSS Custom Highlight（`CSS.highlights` ＋ `::highlight()`），不用 `<mark>`：它只在畫面上
+ * 上色，不改 DOM，所以不會混進要存檔的正文，也不會在打字時被 contenteditable 拆成碎片。
+ * 顏色是螢光筆黃，刻意跟四種建議標記都不同——這個標記的意思是「游標在這裡」，不是「這裡有建議」。
+ */
+const EDIT_TARGET = 'publisher-edit-target';
+const EDIT_TARGET_RULE = `::highlight(${EDIT_TARGET}) { background-color: #FFE066; text-decoration: underline 2px #1C1B19; }`;
+
+function showEditTarget(frame: HTMLIFrameElement, target: Range | null): void {
+  // 要用 iframe 自己視窗的 CSS 與 Highlight：Range 屬於那份文件。
+  const win = frame.contentWindow as (Window & typeof globalThis) | null;
+  const doc = frame.contentDocument;
+  const registry = win?.CSS?.highlights;
+  if (!win || !doc || !registry || typeof win.Highlight !== 'function') return; // 舊瀏覽器：只有游標，沒有標色
+  registry.delete(EDIT_TARGET);
+  if (target === null) return;
+  const sheet = doc.styleSheets[0];
+  if (sheet && !doc.documentElement.hasAttribute('data-edit-target-rule')) {
+    // CSSOM 插規則，不動文件的 <style>；每份文件只插一次。
+    sheet.insertRule(EDIT_TARGET_RULE, sheet.cssRules.length);
+    doc.documentElement.setAttribute('data-edit-target-rule', '');
+  }
+  registry.set(EDIT_TARGET, new win.Highlight(target));
+}
+
 interface BlockBox {
   index: number;
   top: number;
@@ -390,6 +417,7 @@ export function ProofView({
     const body = doc?.querySelector<HTMLElement>('.preview-body');
     if (!frame || !doc || !body) return;
     if (editing === null) {
+      showEditTarget(frame, null);
       body.removeAttribute('contenteditable');
       originalBody.current = null;
       return;
@@ -404,7 +432,8 @@ export function ProofView({
     doc.execCommand('defaultParagraphSeparator', false, 'p');
     setSaveError(null);
 
-    const range = caretRange(doc, body, editing);
+    const { caret: range, target } = editTarget(doc, body, editing);
+    showEditTarget(frame, target);
     frame.contentWindow?.focus();
     body.focus();
     const selection = doc.getSelection();
@@ -578,25 +607,36 @@ export function ProofView({
 }
 
 /**
- * 游標要放哪裡：那一項引用的字前面（忽略空白，跟定位同一套規則）；找不到就放那一段的開頭，
- * 再不行就放文章開頭。
+ * 游標要放哪裡、要標出哪一段。
+ *
+ * - 游標：那一項引用的字前面（忽略空白，跟定位同一套規則）；找不到就放那一段的開頭，
+ *   再不行就放文章開頭。
+ * - 標色：找得到字就標那段字；找不到但知道是第幾段，就標整段（至少是「大概在這裡」）；
+ *   從上方「改原文」進來的沒有目標，不標。
  */
-function caretRange(doc: Document, body: Element, request: ProofEditRequest): Range {
-  const range = doc.createRange();
-  const scope = request.blockIndex === null ? body : (body.children[request.blockIndex] ?? body);
+function editTarget(doc: Document, body: Element, request: ProofEditRequest): { caret: Range; target: Range | null } {
+  const caret = doc.createRange();
+  const block = request.blockIndex === null ? null : (body.children[request.blockIndex] ?? null);
+  const scope = block ?? body;
   if (request.caret !== null) {
     const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
       const hit = findIgnoringSpaces((node as Text).data, request.caret);
       if (hit === null) continue;
-      range.setStart(node, hit.start);
-      range.collapse(true);
-      return range;
+      caret.setStart(node, hit.start);
+      caret.collapse(true);
+      const target = doc.createRange();
+      target.setStart(node, hit.start);
+      target.setEnd(node, hit.end);
+      return { caret, target };
     }
   }
-  range.selectNodeContents(scope);
-  range.collapse(true);
-  return range;
+  caret.selectNodeContents(scope);
+  caret.collapse(true);
+  if (block === null) return { caret, target: null };
+  const target = doc.createRange();
+  target.selectNodeContents(block);
+  return { caret, target };
 }
 
 /**
