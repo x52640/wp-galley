@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { PublishTargetSummary } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { typeLabel } from './JobList.js';
+import { NO_TARGETS_MESSAGE, typeLabel } from './JobList.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 
 /**
@@ -77,7 +77,7 @@ export function NewJob({
       </header>
 
       <main className="compose">
-        <h1 className="compose-title">{locked ? `新${typeLabel(target.contentType)}` : '新稿件'}</h1>
+        <h1 className="compose-title">{locked ? `新${typeLabel(target.contentType, target.postType)}` : '新稿件'}</h1>
 
         <ErrorNote message={loadError} />
 
@@ -86,6 +86,12 @@ export function NewJob({
             <span className="field-label">類型</span>
             <div className="type-cards" role="radiogroup" aria-label="類型">
               {targets === null && !loadError && <span className="field-hint">讀取發布目標…</span>}
+              {targets?.length === 0 && (
+                <p className="note note-warn" role="alert">
+                  <Icon name="alert" size={14} />
+                  <span>{NO_TARGETS_MESSAGE}</span>
+                </p>
+              )}
               {targets?.map((item) => (
                 <button
                   key={item.key}
@@ -96,7 +102,7 @@ export function NewJob({
                   data-active={targetKey === item.key ? 'yes' : 'no'}
                   onClick={() => setTargetKey(item.key)}
                 >
-                  <span className="type-card-name">{typeLabel(item.contentType)}</span>
+                  <span className="type-card-name">{typeLabel(item.contentType, item.postType)}</span>
                   <span className="type-card-note">
                     發到「{item.displayName}」{item.requireFeaturedImage ? '・要有封面圖' : ''}
                   </span>

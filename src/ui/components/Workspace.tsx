@@ -264,7 +264,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             <Icon name="arrow-left" size={18} />
           </button>
           <span className="type-tag" data-type={job.target.contentType}>
-            {typeLabel(job.target.contentType)}
+            {typeLabel(job.target.contentType, job.target.postType)}
           </span>
           <h1 className="docbar-title">{job.title ?? '未命名'}</h1>
           <span className="docbar-state" data-state={job.state}>

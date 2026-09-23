@@ -1,0 +1,139 @@
+{
+  "id": "article-v1",
+  "version": 1,
+  "contentType": "article",
+  "strictness": "hybrid",
+  "wordpressTargetKey": null,
+  "publishSlot": "body",
+  "requiredSlots": [
+    "title",
+    "body"
+  ],
+  "optionalSlots": [
+    "slug",
+    "category",
+    "featuredImageBriefKey"
+  ],
+  "allowedTags": [
+    "p",
+    "h2",
+    "h3",
+    "ul",
+    "ol",
+    "li",
+    "a",
+    "strong",
+    "em",
+    "blockquote",
+    "figure",
+    "figcaption",
+    "img",
+    "br",
+    "hr"
+  ],
+  "allowedAttributes": {
+    "a": [
+      "href",
+      "title",
+      "target",
+      "rel"
+    ],
+    "img": [
+      "src",
+      "alt",
+      "width",
+      "height",
+      "class"
+    ],
+    "p": [
+      "class"
+    ],
+    "h2": [
+      "class"
+    ],
+    "h3": [
+      "class"
+    ],
+    "ul": [
+      "class"
+    ],
+    "ol": [
+      "class"
+    ],
+    "blockquote": [
+      "class"
+    ],
+    "figure": [
+      "class"
+    ],
+    "figcaption": [
+      "class"
+    ],
+    "hr": [
+      "class"
+    ]
+  },
+  "allowedClasses": {
+    "p": [
+      "wp-block-paragraph"
+    ],
+    "h2": [
+      "wp-block-heading"
+    ],
+    "h3": [
+      "wp-block-heading"
+    ],
+    "ul": [
+      "wp-block-list"
+    ],
+    "ol": [
+      "wp-block-list"
+    ],
+    "blockquote": [
+      "wp-block-quote"
+    ],
+    "figure": [
+      "wp-block-image",
+      "aligncenter",
+      "alignleft",
+      "alignright",
+      "size-large",
+      "size-full",
+      "size-medium",
+      "is-resized"
+    ],
+    "figcaption": [
+      "wp-element-caption"
+    ],
+    "img": [
+      "wp-image-*"
+    ],
+    "hr": [
+      "wp-block-separator",
+      "has-alpha-channel-opacity",
+      "is-style-wide",
+      "is-style-dots"
+    ]
+  },
+  "allowedSchemes": [
+    "https",
+    "http",
+    "mailto"
+  ],
+  "structureRules": {
+    "allowedHeadingLevels": [
+      2,
+      3
+    ],
+    "requireTopLevelBlocks": true,
+    "maxNestingDepth": 6
+  },
+  "previewStrategy": "local",
+  "blockDefaults": {
+    "paragraphFontSize": null,
+    "headingFontSize": null,
+    "listItemFontSize": null,
+    "imageSizeSlug": "large",
+    "imageAlign": null
+  }
+}

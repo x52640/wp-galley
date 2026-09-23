@@ -7,7 +7,12 @@ import { z } from 'zod';
  * 不受信任資料，不能覆蓋這裡的任何規則。
  */
 
-export const ContentTypeSchema = z.enum(['homepage', 'longform', 'diary']);
+/**
+ * 內容類型。`longform`／`diary` 是作者站台（remusplus）專用的；`article` 是通用類型，
+ * 只用 WordPress 核心區塊，可以發到任何站的文章（post）或頁面（page）（D-016）。
+ * DB 層也有同一份清單的 CHECK（migration 007），加新值要一起加。
+ */
+export const ContentTypeSchema = z.enum(['homepage', 'longform', 'diary', 'article']);
 export type ContentType = z.infer<typeof ContentTypeSchema>;
 
 /**
@@ -32,13 +37,38 @@ export const StructureRulesSchema = z
 
 export type StructureRules = z.infer<typeof StructureRulesSchema>;
 
+const BlockSlugSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug 只能用小寫英數與連字號');
+
+/**
+ * 轉成 Gutenberg 區塊時的預設屬性（形狀同 `src/wordpress/block-types.ts` 的 BlockDefaults）。
+ *
+ * **沒寫就是作者站台的慣例**（段落、標題 `fontSize: medium`、圖片置中），
+ * 所以 `longform-v1`／`diary-v1` 不寫這欄，輸出跟以前逐字相同。通用模板要全部設成
+ * null：`medium` 這類字級是佈景主題的設定，別人的站不一定有。
+ */
+export const ManifestBlockDefaultsSchema = z
+  .object({
+    paragraphFontSize: BlockSlugSchema.nullable(),
+    headingFontSize: BlockSlugSchema.nullable(),
+    listItemFontSize: BlockSlugSchema.nullable(),
+    imageSizeSlug: BlockSlugSchema,
+    imageAlign: BlockSlugSchema.nullable(),
+  })
+  .partial()
+  .strict();
+
+export type ManifestBlockDefaults = z.infer<typeof ManifestBlockDefaultsSchema>;
+
 export const TemplateManifestSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'id 只能用小寫英數與連字號'),
     version: z.number().int().min(1),
     contentType: ContentTypeSchema,
     strictness: StrictnessSchema,
-    /** 對應 config/publish-targets.json 的 target key；階段 4 才會用到。 */
+    /**
+     * 參考用：這個模板主要給哪個 target。真正決定發到哪裡的是 target 的 templateId；
+     * 一個模板給多個 target 用（article-v1 同時給 post 與 page）時是 null。
+     */
     wordpressTargetKey: z.string().nullable().default(null),
     /** 哪一個欄位的 HTML 才是要送去 WordPress 的內容。其餘一律只用於預覽。 */
     publishSlot: z.string().min(1),
@@ -51,6 +81,8 @@ export const TemplateManifestSchema = z
     allowedSchemes: z.array(z.string().min(1)).default(['https', 'http', 'mailto']),
     structureRules: StructureRulesSchema.default({}),
     previewStrategy: z.enum(['local', 'wordpress_draft', 'staging']).default('local'),
+    /** 刻意不給預設值：不寫的模板存進 DB 的 manifest_json 跟以前一樣。 */
+    blockDefaults: ManifestBlockDefaultsSchema.optional(),
   })
   .strict()
   .superRefine((manifest, ctx) => {

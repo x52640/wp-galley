@@ -74,6 +74,38 @@ const LONGFORM_TARGET: PublishTargetSummary = {
   allowCreateTerms: false,
 };
 
+/** 通用站台（D-016）：同一個 article-v1 模板發文章與頁面。示範資料裡跟作者站台並列，只是為了兩種都看得到。 */
+const POST_TARGET: PublishTargetSummary = {
+  key: 'post',
+  displayName: '文章',
+  contentType: 'article',
+  postType: 'post',
+  templateId: 'article-v1',
+  taxonomy: 'category',
+  requireFeaturedImage: false,
+  allowCreateTerms: false,
+};
+
+const PAGE_TARGET: PublishTargetSummary = {
+  key: 'page',
+  displayName: '頁面',
+  contentType: 'article',
+  postType: 'page',
+  templateId: 'article-v1',
+  taxonomy: null,
+  requireFeaturedImage: false,
+  allowCreateTerms: false,
+};
+
+/** 只用核心區塊、沒有字級 class：通用模板不帶任何佈景主題設定。 */
+const ARTICLE_BODY = [
+  '<p>第一次架站的人最常問的問題，不是「要用哪個佈景主題」，而是「文章要怎麼寫才不會亂」。</p>',
+  '<h2 class="wp-block-heading">先決定一篇只講一件事</h2>',
+  '<p>標題講得出來的，正文才講得清楚。講不出來，通常是還沒想好。</p>',
+  '<ul class="wp-block-list"><li>一段一個重點。</li><li>小標只用兩層。</li><li>圖片放在它說明的段落後面。</li></ul>',
+  '<blockquote class="wp-block-quote"><p>寫清楚是對讀者的禮貌。</p></blockquote>',
+].join('\n');
+
 const DIARY_BODY = [
   '<p class="wp-block-paragraph has-medium-font-size">今天讀完這本書，想到很多事。不是書裡寫的那些，而是被書勾起來的、原本以為早就忘掉的片段。</p>',
   '<p class="wp-block-paragraph has-medium-font-size">下午的雨下得很急，路口的紅燈前積了一小攤水，反射著對面招牌的紅色。我在那裡站了大概四十秒，忽然覺得這種等待其實很難得。</p>',
@@ -571,6 +603,37 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
   };
 }
 
+function baseArticle(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
+  return {
+    uuid,
+    state: 'RENDERED',
+    title: '文章要怎麼寫才不會亂',
+    target: POST_TARGET,
+    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid' },
+    currentRevision: revision(
+      1,
+      'source',
+      { title: '文章要怎麼寫才不會亂', body: ARTICLE_BODY, category: '教學' },
+      'e1a7c9340f5d2b68',
+    ),
+    revisionCount: 1,
+    previewUrl: `/api/jobs/${uuid}/preview`,
+    marks: [],
+    media: [],
+    featuredMediaId: null,
+    approval: null,
+    blockers: ['還沒核准'],
+    published: null,
+    agentRun: null,
+    review: null,
+    imageBriefs: [],
+    sourceText: '第一次架站的人最常問的問題……',
+    createdAt: '2026-09-23T08:00:00Z',
+    updatedAt: '2026-09-23T08:10:00Z',
+    ...overrides,
+  };
+}
+
 function buildStore(): Map<string, FixtureJob> {
   const jobs: FixtureJob[] = [
     baseDiary('f-source', { state: 'SOURCE', blockers: ['還沒渲染，先按「渲染」產生校樣'] }),
@@ -650,6 +713,7 @@ function buildStore(): Map<string, FixtureJob> {
       state: 'FAILED',
       blockers: ['遠端文章在本次載入之後被改過。請重新載入內容並重新核准，再發布一次。'],
     }),
+    baseArticle('f-article', {}),
   ];
   return new Map(jobs.map((job) => [job.uuid, job]));
 }
@@ -664,6 +728,10 @@ const TERMS: Record<string, Term[]> = {
     { id: 15, name: '經濟學', slug: '%e7%b6%93%e6%bf%9f%e5%ad%b8', count: 2 },
   ],
   'diary-category': [],
+  category: [
+    { id: 1, name: '未分類', slug: 'uncategorized', count: 3 },
+    { id: 21, name: '教學', slug: 'tutorial', count: 5 },
+  ],
 };
 
 function clone<T>(value: T): T {
@@ -830,9 +898,12 @@ export const fixtureApi: PublisherApi = {
   async createJob(input: CreateJobInput): Promise<{ uuid: string }> {
     await delay();
     const uuid = `f-new-${store.size + 1}`;
-    const target = input.targetKey === 'diary' ? DIARY_TARGET : LONGFORM_TARGET;
-    const isDiary = target.key === 'diary';
-    const job = (isDiary ? baseDiary : baseLongform)(uuid, {
+    const target =
+      [DIARY_TARGET, LONGFORM_TARGET, POST_TARGET, PAGE_TARGET].find((item) => item.key === input.targetKey) ??
+      LONGFORM_TARGET;
+    const base =
+      target.contentType === 'diary' ? baseDiary : target.contentType === 'article' ? baseArticle : baseLongform;
+    const job = base(uuid, {
       state: 'SOURCE',
       title: input.title ?? null,
       target,
@@ -1337,6 +1408,6 @@ export const fixtureApi: PublisherApi = {
 
   async listTargets() {
     await delay(80);
-    return [LONGFORM_TARGET, DIARY_TARGET];
+    return [LONGFORM_TARGET, DIARY_TARGET, POST_TARGET, PAGE_TARGET];
   },
 };

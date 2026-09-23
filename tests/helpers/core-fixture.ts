@@ -156,7 +156,7 @@ export async function createCoreFixture(options: CoreFixtureOptions = {}): Promi
   const core = new CoreService({
     db: db.handle,
     templates: await loadTemplateRegistry(paths.templates),
-    targets: options.targets ?? (await loadPublishTargets(join(paths.config, 'publish-targets.json'))),
+    targets: options.targets ?? (await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json'))),
     agents: new AgentRegistry({ adapters: options.adapters ?? [] }),
     wordpress: client,
     draftsDir: join(workDir, 'drafts'),

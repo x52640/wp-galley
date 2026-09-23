@@ -1,0 +1,27 @@
+{#
+  本機預覽用的模板。
+
+  ⚠️ 這整份 HTML 都不會被發布。送去 WordPress 的只有 manifest.publishSlot
+  指定的 body 欄位（已清理過的 HTML）。這裡的標題、日期、精選圖片只是一個
+  中性的外框，實際長相由對方站台的佈景主題決定，發布台不知道也不模仿。
+#}
+<article class="preview-article preview-generic">
+  <header class="preview-frame" aria-label="佈景主題外框（不會發布）">
+    <p class="preview-frame-note">以下外框由網站佈景主題產生，發布台不會送出；實際長相依你的佈景主題而定</p>
+    {% if featuredImage %}
+    <figure class="preview-featured">
+      <img src="{{ featuredImage.src }}" alt="{{ featuredImage.alt }}" />
+      {% if featuredImage.caption %}<figcaption>{{ featuredImage.caption }}</figcaption>{% endif %}
+    </figure>
+    {% endif %}
+    <h1 class="preview-title">{{ title }}</h1>
+    <p class="preview-meta">
+      <span>{{ displayDate }}</span>
+      {% if category %}<span class="preview-tag">{{ category }}</span>{% endif %}
+    </p>
+  </header>
+
+  <div class="preview-body" aria-label="正文（會發布的內容）">
+    {{ body | safe }}
+  </div>
+</article>

@@ -1,0 +1,35 @@
+{
+  "targets": [
+    {
+      "key": "post",
+      "displayName": "文章",
+      "contentType": "article",
+      "postType": "post",
+      "restBase": "posts",
+      "templateId": "article-v1",
+      "taxonomy": "category",
+      "taxonomyRestBase": "categories",
+      "fixedObjectId": null,
+      "allowCreate": true,
+      "allowUpdate": true,
+      "allowCreateTerms": false,
+      "requireFeaturedImage": false,
+      "requireSecondConfirmation": false
+    },
+    {
+      "key": "page",
+      "displayName": "頁面",
+      "contentType": "article",
+      "postType": "page",
+      "restBase": "pages",
+      "templateId": "article-v1",
+      "taxonomy": null,
+      "fixedObjectId": null,
+      "allowCreate": true,
+      "allowUpdate": true,
+      "allowCreateTerms": false,
+      "requireFeaturedImage": false,
+      "requireSecondConfirmation": false
+    }
+  ]
+}

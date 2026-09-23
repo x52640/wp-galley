@@ -23,7 +23,8 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 
 - 僅監聽 `127.0.0.1` 的本機發布台，單一使用者、一次連一個站台；任何 WordPress 站都能連（D-016）。
 - 首次設定精靈：連線診斷、偵測 Agent、選發布目的地（D-016）。
-- 兩種內容類型：長文（`read-think`）、日記（`diary`）。對應見 `docs/specs/templates.md`。
+- 內容類型：通用的文章／頁面（`article`，發到任何站的 `post`／`page`，D-016）；作者站台另有
+  長文（`read-think`）、日記（`diary`）。對應見 `docs/specs/templates.md`。
 - 偵測並使用本機 Codex、Claude Code、Antigravity（`agy`）CLI。
 - 校稿以提案呈現，逐項接受／略過；observations 列出需要人判斷的疑點。
 - 配圖需求（Agent 產生 brief 與 prompt）、圖片上傳、精選圖片。

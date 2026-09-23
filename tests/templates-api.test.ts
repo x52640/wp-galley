@@ -21,7 +21,7 @@ beforeAll(async () => {
     templates: await loadTemplateRegistry(paths.templates),
     // 測試一律用假 adapter，不碰真實 CLI、不消耗訂閱額度。
     agents: new AgentRegistry({ adapters: [new FakeAdapter('codex', 'Codex')] }),
-    targets: await loadPublishTargets(join(paths.config, 'publish-targets.json')),
+    targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),
   });
   await app.ready();
 });
@@ -36,7 +36,7 @@ describe('GET /api/templates', () => {
     const res = await app.inject({ method: 'GET', url: '/api/templates', headers });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.templates.map((t: { id: string }) => t.id).sort()).toEqual(['diary-v1', 'longform-v1']);
+    expect(body.templates.map((t: { id: string }) => t.id).sort()).toEqual(['article-v1', 'diary-v1', 'longform-v1']);
     const longform = body.templates.find((t: { id: string }) => t.id === 'longform-v1');
     expect(longform.contentType).toBe('longform');
     expect(longform.strictness).toBe('hybrid');

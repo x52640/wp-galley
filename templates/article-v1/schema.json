@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "article-v1",
+  "title": "通用文章資料",
+  "description": "Agent 回傳的 templateData。只有 body 會被送去 WordPress 的 content 欄位；其餘欄位對應 WordPress 的標題、slug、分類與精選圖片。同一份資料可以發成文章（post）或頁面（page）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "body"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "標題。外框由佈景主題輸出，正文裡不要再放一次標題。"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[_-][a-z0-9]+)*$",
+      "maxLength": 80,
+      "description": "英文小寫網址片段。留空則由 WordPress 自動產生。"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200000,
+      "description": "正文 HTML。只能使用 manifest 允許的標籤與 class；標題只有 h2 與 h3。"
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "分類名稱，必須是站上既有的分類（不會自動建立）。發成頁面時不使用。"
+    },
+    "featuredImageBriefKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "指向某個 imageBrief 的 key，該圖會設為精選圖片。"
+    }
+  }
+}

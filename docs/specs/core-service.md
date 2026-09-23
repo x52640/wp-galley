@@ -14,6 +14,7 @@
 ```ts
 interface CoreService {
   // --- 建立與讀取 ---
+  /** 本機站台設定檔不存在（targets.setupRequired）時一律拒絕，訊息就是那句「還沒有站台設定…」。 */
   createJob(input: CreateJobInput): Job;
   getJob(uuid: string): JobDetail;
   listJobs(filter?: { state?: JobState[] }): JobSummary[];
@@ -59,6 +60,10 @@ interface CoreService {
   revokeApproval(uuid: string, reason: string): void;
 
   // --- 發布 ---
+  /**
+   * 正文轉 Gutenberg 區塊時用**模板的** `blockDefaults`（見 templates.md）；分類項目的查詢、
+   * 寫入欄位與遠端快照一律用分類法的 REST 名稱（`taxonomyRestBaseOf(target)`）。
+   */
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
 }
 ```

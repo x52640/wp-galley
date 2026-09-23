@@ -4,13 +4,16 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **43 檔 / 675 測試**全綠（2026-09-23，P5-T016 審查修正後）
-- migration head：`006-image-brief-anchor`（dev server 已自動套到本機 DB）
+- `npm run verify`：typecheck 通過；Vitest **46 檔 / 726 測試**全綠（2026-09-24，P8-T001 審查補強後）
+- migration head：`007-article-content-type`（dev server 已自動套到本機 DB）
+- 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-[P8-T001](tasks/P8-T001-site-profile.md) 通用文章類型與本機站台設定檔（D-016），交給 subagent。之後接 P8-T002 首次設定精靈。
+[P8-T001](tasks/P8-T001-site-profile.md) 通用文章類型與本機站台設定檔（D-016）已完成（未 commit）。
+通用站的區塊輸出沒有真站驗證過，第一次發到別的站要打開編輯器確認。下一個是 P8-T002 首次設定精靈
+（依賴已解除，front matter 待改 ready）。
 
 P5-T001 實測已結案（2026-09-23，使用者實測並發布）；實測中當場修的是 P5-T008～P5-T016，見該 Task 的完成結果。
 
@@ -38,7 +41,7 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 
 | Task | 等什麼 |
 | --- | --- |
-| [P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016） | P8-T001 |
+| [P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016） | P8-T001 已完成，待改成 ready |
 
 ## 待專案擁有者
 

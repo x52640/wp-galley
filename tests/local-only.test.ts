@@ -21,7 +21,7 @@ beforeAll(async () => {
     templates: await loadTemplateRegistry(paths.templates),
     // 測試一律用假 adapter，不碰真實 CLI、不消耗訂閱額度。
     agents: new AgentRegistry({ adapters: [new FakeAdapter('codex', 'Codex')] }),
-    targets: await loadPublishTargets(join(paths.config, 'publish-targets.json')),
+    targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),
   });
   await app.ready();
 });

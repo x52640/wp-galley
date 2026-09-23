@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { probeSite, unconfiguredProbe } from '../../wordpress/site.js';
-import { fetchPostTypes } from '../../wordpress/site.js';
-import { validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
+import { fetchPostTypes, fetchTaxonomies } from '../../wordpress/site.js';
+import { taxonomyRestBaseOf, validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
 import { listTerms, resolveTerms } from '../../wordpress/terms.js';
 import type { CreateTermRequest, PublishTargetSummary, Term, TermsResponse } from '../../contract/api.js';
 import type { WordPressClient } from '../../wordpress/client.js';
@@ -18,8 +18,13 @@ import { mapCoreError } from './jobs.js';
  * 絕不回傳 Application Password，連「有沒有填」以外的資訊都不給。
  */
 
-/** 發布台會用到的內容類型。首頁已移出 MVP（見 docs/adr/0003-homepage-out-of-mvp.md）。 */
-const EXPECTED_POST_TYPES = ['read-think', 'diary'] as const;
+/**
+ * 發布台會用到的內容類型＝站台設定檔裡的 target（D-016：一次連一個站，換站就換設定）。
+ * 不寫死：寫死 read-think／diary 的話，通用站的診斷會多報兩個「找不到」。
+ */
+function expectedPostTypes(targets: readonly PublishTarget[]): string[] {
+  return [...new Set(targets.map((target) => target.postType))];
+}
 
 export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/wordpress', async () => {
@@ -30,7 +35,7 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
       return { ...unconfiguredProbe(), targetIssues: [], publishTargets: summarize(targets) };
     }
 
-    const probe = await probeSite(client, EXPECTED_POST_TYPES);
+    const probe = await probeSite(client, expectedPostTypes(targets));
 
     // 認證都過不了就沒必要再驗設定，錯誤訊息會變成兩層噪音。
     if (!probe.authenticated) {
@@ -38,8 +43,8 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // 設定檔說要發到哪，跟站台實際有什麼，要對得起來才算真的可用。
-    const postTypes = await fetchPostTypes(client);
-    const targetIssues = validateTargetsAgainstSite(targets, postTypes);
+    const [postTypes, taxonomies] = await Promise.all([fetchPostTypes(client), fetchTaxonomies(client)]);
+    const targetIssues = validateTargetsAgainstSite(targets, postTypes, taxonomies);
 
     return { ...probe, targetIssues, publishTargets: summarize(targets) };
   });
@@ -49,9 +54,9 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
    * 「對不上的名稱」，發布出去的文章沒有分類。
    */
   app.get<{ Querystring: { taxonomy?: string } }>('/api/wordpress/terms', async (request): Promise<TermsResponse> => {
-    const taxonomy = requireKnownTaxonomy(app, request.query.taxonomy);
+    const restBase = requireKnownTaxonomy(app, request.query.taxonomy);
     const client = requireClient(app);
-    return guard(async () => ({ terms: await listTerms(client, taxonomy) }));
+    return guard(async () => ({ terms: await listTerms(client, restBase) }));
   });
 
   /**
@@ -79,7 +84,7 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
 
     const client = requireClient(app);
     const resolution = await guard(() =>
-      resolveTerms(client, target.taxonomy, [body.name], { allowCreate: true }),
+      resolveTerms(client, taxonomyRestBaseOf(target)!, [body.name], { allowCreate: true }),
     );
     const term = resolution.resolved[0]?.term;
     if (!term) {
@@ -155,8 +160,12 @@ function requireTargetForTaxonomy(app: FastifyInstance, taxonomy: string | undef
   return target;
 }
 
+/**
+ * 畫面用分類法 slug 問（跟 target.taxonomy 一樣），回傳的是要打的 REST 名稱
+ * （核心的 category → categories）。
+ */
 function requireKnownTaxonomy(app: FastifyInstance, taxonomy: string | undefined): string {
-  return requireTargetForTaxonomy(app, taxonomy).taxonomy;
+  return taxonomyRestBaseOf(requireTargetForTaxonomy(app, taxonomy))!;
 }
 
 /** 只回報 UI 需要的欄位。設定檔沒有秘密，但也沒必要整包吐出去。 */

@@ -11,6 +11,10 @@ backups/
 *.sqlite-wal
 *.sqlite-shm
 
+# --- 站台設定：每個人的站不一樣，一次連一個（D-016）---
+# 範例在 config/publish-targets.example.json 與 config/examples/，那些有進 Git。
+config/publish-targets.json
+
 # --- 建置產物 ---
 node_modules/
 dist/

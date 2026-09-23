@@ -14,7 +14,7 @@ import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
  * 所以要建新項目得使用者自己打字、自己按確認，而且發布目標的
  * `allowCreateTerms` 還要是開的。
  *
- * 長文用多選（tags），日記用單選（category）——這是兩個模板 schema 的差別，
+ * 長文用多選（tags）；日記與通用文章用單選（category）——這是模板 schema 的差別，
  * 不是這裡自己決定的。
  */
 
@@ -26,7 +26,7 @@ export function TaxonomyPanel({
   refresh: () => Promise<void>;
 }): JSX.Element {
   const taxonomy = job.target.taxonomy;
-  const multiple = job.target.contentType !== 'diary';
+  const multiple = job.target.contentType === 'longform';
   const dataKey = multiple ? 'tags' : 'category';
 
   const current = useMemo(

@@ -46,8 +46,8 @@
 | `POST` | `/api/jobs/:uuid/approve` | 核准（actor 寫死 `ui`） | `ApproveRequest` → `ApprovalResponse`（201） |
 | `DELETE` | `/api/jobs/:uuid/approve` | 撤銷核准 | `RevokeApprovalRequest` → `RevokedResponse` |
 | `POST` | `/api/jobs/:uuid/publish` | 發布 | `PublishRequest` → `PublishResponse` |
-| `GET` | `/api/wordpress` | 站台探查與發布目標 | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
-| `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` | → `TermsResponse` |
+| `GET` | `/api/wordpress` | 站台探查與發布目標；檢查的內容類型＝設定檔裡 target 的 `postType`（沒有站台設定時 `publishTargets` 是空陣列） | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
+| `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` 帶分類法 **slug**（跟 `taxonomy` 欄位一樣）；後端換成 REST 名稱去查（`category` → `/wp/v2/categories`） | → `TermsResponse` |
 | `POST` | `/api/wordpress/terms` | 建立分類項目（target 須 `allowCreateTerms`） | `CreateTermRequest` → `Term` |
 | `GET` | `/api/image-generation` | 能不能生圖（只有 Codex 能） | → `ImageGenerationStatus` |
 

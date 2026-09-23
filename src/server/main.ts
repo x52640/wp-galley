@@ -7,7 +7,7 @@ import { openDatabase } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadTemplateRegistry } from '../templates/registry.js';
 import { AgentRegistry } from '../agents/registry.js';
-import { loadPublishTargets, PublishTargetError } from '../wordpress/targets.js';
+import { loadPublishTargets, PublishTargetError, startupNotice } from '../wordpress/targets.js';
 import { TemplateLoadError } from '../templates/registry.js';
 
 // 測試時不讀 .env，避免把本機秘密帶進測試環境。
@@ -54,6 +54,10 @@ async function main(): Promise<void> {
     }
     throw error;
   }
+
+  // 本機站台設定檔不存在不是錯誤（新 clone 本來就沒有），照樣啟動，但要講清楚。
+  const notice = startupNotice(targets);
+  if (notice !== null) console.warn(`\n⚠ ${notice}\n`);
 
   const app = await buildApp({ config, db, templates, agents: new AgentRegistry(), targets });
 

@@ -94,6 +94,7 @@ import { sha256Of, uploadMedia } from '../media/upload.js';
 import { inspectImage, MediaUploadError } from '../media/validate.js';
 import type { WordPressClient } from '../wordpress/client.js';
 import { toBlockMarkup } from '../wordpress/blocks.js';
+import { BlockDefaultsSchema } from '../wordpress/block-types.js';
 import {
   assertUnchanged,
   createDraft,
@@ -105,7 +106,7 @@ import {
   type RemoteSnapshot,
 } from '../wordpress/posts.js';
 import { resolveTerms } from '../wordpress/terms.js';
-import type { PublishTarget, PublishTargetRegistry } from '../wordpress/targets.js';
+import { taxonomyRestBaseOf, type PublishTarget, type PublishTargetRegistry } from '../wordpress/targets.js';
 
 /**
  * CoreService：發布台的安全核心。
@@ -2197,8 +2198,15 @@ export class CoreService {
     });
 
     try {
-      const conversion = toBlockMarkup(revisionRow.rendered_html ?? '');
+      // 區塊預設值跟著模板走：作者站台的模板不寫（medium 字級、圖片置中），通用模板全部 null。
+      const template = this.templates.get(target.templateId);
+      const conversion = toBlockMarkup(
+        revisionRow.rendered_html ?? '',
+        BlockDefaultsSchema.parse(template.manifest.blockDefaults ?? {}),
+      );
       const terms = await this.resolveTargetTerms(client, target, payload.templateData);
+      // 文章 JSON 裡放 term id 的欄位＝分類法的 REST 名稱（核心 category 是 categories）。
+      const termsField = taxonomyRestBaseOf(target);
 
       const fields: PostFields = {
         title: this.titleOf(payload.templateData) ?? job.title ?? '未命名',
@@ -2207,7 +2215,7 @@ export class CoreService {
           ? { slug: payload.templateData['slug'] as string }
           : {}),
         ...(featured?.wordpress_media_id ? { featuredMediaId: featured.wordpress_media_id } : {}),
-        ...(target.taxonomy && terms.ids.length > 0 ? { terms: { [target.taxonomy]: terms.ids } } : {}),
+        ...(termsField !== null && terms.ids.length > 0 ? { terms: { [termsField]: terms.ids } } : {}),
       };
 
       let post = creating
@@ -2216,12 +2224,12 @@ export class CoreService {
 
       if (input.status === 'publish') {
         post = await setStatus(client, target, post.id, 'publish', {
-          expect: snapshotOf(post, target.taxonomy),
+          expect: snapshotOf(post, termsField),
         });
       }
 
       // 快照整包存下來，下一次更新才有東西可以比對（見 baselineFor）。
-      const snapshot = snapshotOf(post, target.taxonomy);
+      const snapshot = snapshotOf(post, termsField);
       this.repo.upsertWordPressObject({
         siteId: this.siteId,
         jobId: job.id,
@@ -2350,7 +2358,7 @@ export class CoreService {
         : null;
     if (stored !== null) return stored;
 
-    const snapshot = await fetchSnapshot(client, target, targetId, target.taxonomy);
+    const snapshot = await fetchSnapshot(client, target, targetId, taxonomyRestBaseOf(target));
     this.repo.upsertWordPressObject({
       siteId: this.siteId,
       jobId: plan.job.id,
@@ -2436,7 +2444,8 @@ export class CoreService {
     target: PublishTarget,
     templateData: Record<string, unknown>,
   ): Promise<{ ids: readonly number[]; unknown: readonly string[] }> {
-    if (target.taxonomy === null) return { ids: [], unknown: [] };
+    const restBase = taxonomyRestBaseOf(target);
+    if (restBase === null) return { ids: [], unknown: [] };
 
     const names: string[] = [];
     const tags = templateData['tags'];
@@ -2445,8 +2454,8 @@ export class CoreService {
     if (typeof category === 'string' && category.length > 0) names.push(category);
     if (names.length === 0) return { ids: [], unknown: [] };
 
-    // 分類法的 rest_base 在這個站台等於 slug（見 docs/specs/wordpress-site.md）。
-    const resolution = await resolveTerms(client, target.taxonomy, names, {
+    // 用 REST 名稱查：作者站台的分類法 slug＝rest_base，核心的 category 不是（見 docs/specs/wordpress-site.md）。
+    const resolution = await resolveTerms(client, restBase, names, {
       allowCreate: target.allowCreateTerms,
     });
     return { ids: resolution.ids, unknown: resolution.unknown };
@@ -2672,6 +2681,8 @@ export class CoreService {
   }
 
   private requireTarget(key: string): PublishTarget {
+    // 根本還沒設定站台（本機設定檔不存在）：講下一步，不要列一串空的「可用的是」。
+    if (this.targets.setupRequired !== undefined) throw new InvalidInputError(this.targets.setupRequired);
     if (!this.targets.has(key)) {
       throw new InvalidInputError(
         `找不到發布目標 ${key}；可用的是 ${this.targets.list().map((t) => t.key).join('、')}`,

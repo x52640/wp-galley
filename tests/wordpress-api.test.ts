@@ -42,7 +42,7 @@ async function buildWith(
     db: db.handle,
     templates: await loadTemplateRegistry(paths.templates),
     agents: new AgentRegistry({ adapters: [] }),
-    targets: targets ?? (await loadPublishTargets(join(paths.config, 'publish-targets.json'))),
+    targets: targets ?? (await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json'))),
     wordpress,
   });
   await app.ready();
@@ -116,7 +116,7 @@ describe('GET /api/wordpress', () => {
     const res = await instance.inject({ method: 'GET', url: '/api/wordpress', headers });
     const body = res.json();
 
-    expect(body).toMatchObject({ configured: true, reachable: true, authenticated: true, problems: [] });
+    expect(body).toMatchObject({ configured: true, reachable: true, authenticated: true, problems: [], targetIssues: [] });
     expect(body.identity.user.slug).toBe('ai_publisher');
     expect(body.targets.map((t: { postType: string }) => t.postType)).toEqual(['read-think', 'diary']);
   });

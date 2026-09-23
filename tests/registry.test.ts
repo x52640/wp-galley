@@ -9,8 +9,8 @@ beforeAll(async () => {
 });
 
 describe('模板 registry', () => {
-  it('載入專案內的兩套模板', () => {
-    expect(registry.list().map((t) => t.manifest.id).sort()).toEqual(['diary-v1', 'longform-v1']);
+  it('載入專案內的三套模板', () => {
+    expect(registry.list().map((t) => t.manifest.id).sort()).toEqual(['article-v1', 'diary-v1', 'longform-v1']);
   });
 
   it('每套模板都有 manifest、schema、template.html、rules.md、preview.css', () => {

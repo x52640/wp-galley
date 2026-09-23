@@ -38,7 +38,7 @@ async function build(options: Parameters<typeof createCoreFixture>[0] = {}): Pro
     db: fixture.db.handle,
     templates: await loadTemplateRegistry(paths.templates),
     agents: new AgentRegistry({ adapters: options.adapters ?? [] }),
-    targets: await loadPublishTargets(join(paths.config, 'publish-targets.json')),
+    targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),
     core: fixture.core,
     wordpress: null,
   });

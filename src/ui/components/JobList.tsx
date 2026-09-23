@@ -12,8 +12,12 @@ import { isFinished, isTerminal } from '../lib/steps.js';
  * 講目前的狀態（還有幾項建議、可以發了…），不列版本號與 hash——那些是工作區裡
  * 才需要的東西。
  *
- * 開新稿有兩條路：按「新長文／新日記」，或直接把文字檔拖進來、⌘V 貼上。類型一開始
- * 就決定，因為**類型決定發到哪裡**（長文 → read-think、日記 → diary），之後不必再選。
+ * 開新稿有兩條路：按「新長文／新日記」（通用站台是「新文章／新頁面」），或直接把文字檔
+ * 拖進來、⌘V 貼上。類型一開始就決定，因為**類型決定發到哪裡**（長文 → read-think、
+ * 日記 → diary、文章 → post、頁面 → page），之後不必再選。
+ *
+ * 篩選是**依發布目標**分，不是依 contentType：通用類型 article 同時發文章與頁面，
+ * 兩者 contentType 一樣，依 contentType 分就會把頁面混進文章裡。
  *
  * 介面上一律叫「稿件」。程式裡叫 job（型別、API、網址都是），但那是系統怎麼蓋的，
  * 不是使用者認得的東西。
@@ -25,11 +29,21 @@ type TypeFilter = 'all' | string;
 export const TYPE_LABEL: Record<string, string> = {
   longform: '長文',
   diary: '日記',
+  article: '文章',
 };
 
-export function typeLabel(contentType: string | undefined): string {
-  return contentType === undefined ? '稿件' : (TYPE_LABEL[contentType] ?? contentType);
+/**
+ * 介面上的類型名稱。通用類型 article 同一個模板發文章（post）與頁面（page），
+ * 只看 contentType 分不出來，所以有 postType 就一起看。
+ */
+export function typeLabel(contentType: string | undefined, postType?: string): string {
+  if (contentType === undefined) return '稿件';
+  if (contentType === 'article' && postType === 'page') return '頁面';
+  return TYPE_LABEL[contentType] ?? contentType;
 }
+
+/** 找不到本機站台設定時後端回空的發布目標清單；跟後端 SITE_CONFIG_MISSING_MESSAGE 同一句。 */
+export const NO_TARGETS_MESSAGE = '還沒有站台設定：先跑設定精靈，或複製 config/publish-targets.example.json';
 
 /** 拖放與貼上只收純文字：.docx 要多裝一個解析套件，先不收。 */
 const TEXT_TYPES = ['text/plain', 'text/markdown', ''];
@@ -46,6 +60,8 @@ export function JobList({
   const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   // JobSummary 只有 targetKey，沒有顯示名稱，所以另外拿一份發布目標來對照。
   const [targets, setTargets] = useState<PublishTargetSummary[]>([]);
+  // 拿到了清單才能說「是空的」；拿不到（後端沒開）不該誤報成沒有站台設定。
+  const [targetsLoaded, setTargetsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -60,6 +76,7 @@ export function JobList({
     }
     try {
       setTargets(await api.listTargets());
+      setTargetsLoaded(true);
     } catch {
       // 對照表拿不到就退回顯示 key，不值得為此擋住整個列表。
     }
@@ -106,16 +123,18 @@ export function JobList({
   const targetOf = (job: JobSummary): PublishTargetSummary | undefined =>
     targets.find((target) => target.key === job.targetKey);
 
-  const shown = (jobs ?? []).filter(
-    (job) => filter === 'all' || targetOf(job)?.contentType === filter,
-  );
+  const shown = (jobs ?? []).filter((job) => filter === 'all' || job.targetKey === filter);
   const open = shown.filter((job) => !isFinished(job.state) || job.state === 'FAILED');
   const sent = shown.filter((job) => job.state === 'PUBLISHED');
   const closed = shown.filter((job) => isTerminal(job.state) && job.state !== 'FAILED');
 
-  const contentTypes = [...new Set(targets.map((target) => target.contentType))];
-  const countOf = (type: TypeFilter): number =>
-    (jobs ?? []).filter((job) => type === 'all' || targetOf(job)?.contentType === type).length;
+  const countOf = (key: TypeFilter): number =>
+    (jobs ?? []).filter((job) => key === 'all' || job.targetKey === key).length;
+  const labelOf = (key: TypeFilter): string => {
+    const target = targets.find((item) => item.key === key);
+    return typeLabel(target?.contentType, target?.postType);
+  };
+  const typeNames = targets.map((target) => typeLabel(target.contentType, target.postType));
 
   return (
     <div className="b0">
@@ -130,9 +149,12 @@ export function JobList({
         <div className="inbox-head">
           <h1 className="inbox-title">稿件</h1>
           <div className="row">
-            {/* 長文放最後、用主色：寫長文才需要走完整套流程，日記多半貼了就發。 */}
+            {/*
+              長文放最後、用主色：寫長文才需要走完整套流程，日記多半貼了就發。
+              通用站台同理：文章（post）是主要的，頁面（page）偶爾才開。
+            */}
             {[...targets]
-              .sort((a, b) => (a.contentType === 'longform' ? 1 : 0) - (b.contentType === 'longform' ? 1 : 0))
+              .sort((a, b) => primaryRank(a) - primaryRank(b))
               .map((target, index, list) => (
                 <button
                   key={target.key}
@@ -141,7 +163,7 @@ export function JobList({
                   onClick={() => onNew(target.key)}
                 >
                   <Icon name="plus" size={16} />
-                  新{typeLabel(target.contentType)}
+                  新{typeLabel(target.contentType, target.postType)}
                 </button>
               ))}
             {targets.length === 0 && (
@@ -164,8 +186,17 @@ export function JobList({
           onDrop={onDrop}
         >
           <Icon name="upload" size={20} />
-          <span>把 .txt／.md 拖到這裡，或直接 ⌘V 貼上，會先問你是長文還是日記</span>
+          <span>
+            把 .txt／.md 拖到這裡，或直接 ⌘V 貼上
+            {typeNames.length > 1 ? `，會先問你是${typeNames.join('還是')}` : ''}
+          </span>
         </div>
+        {targetsLoaded && targets.length === 0 && (
+          <p className="note note-warn" role="alert">
+            <Icon name="alert" size={14} />
+            <span>{NO_TARGETS_MESSAGE}</span>
+          </p>
+        )}
         {dropError && (
           <p className="note note-warn" role="alert">
             <Icon name="alert" size={14} />
@@ -175,7 +206,7 @@ export function JobList({
 
         <div className="inbox-tools">
           <div className="pills" role="tablist" aria-label="依類型篩選">
-            {(['all', ...contentTypes] as TypeFilter[]).map((type) => (
+            {(['all', ...targets.map((target) => target.key)] as TypeFilter[]).map((type) => (
               <button
                 key={type}
                 type="button"
@@ -185,7 +216,7 @@ export function JobList({
                 data-active={filter === type ? 'yes' : 'no'}
                 onClick={() => setFilter(type)}
               >
-                {type === 'all' ? '全部' : typeLabel(type)} {countOf(type)}
+                {type === 'all' ? '全部' : labelOf(type)} {countOf(type)}
               </button>
             ))}
           </div>
@@ -235,7 +266,7 @@ export function JobList({
                 <li key={job.uuid}>
                   <button type="button" className="sent-row" onClick={() => onOpen(job.uuid)}>
                     <span className="type-tag" data-type={targetOf(job)?.contentType ?? 'unknown'}>
-                      {typeLabel(targetOf(job)?.contentType)}
+                      {typeLabel(targetOf(job)?.contentType, targetOf(job)?.postType)}
                     </span>
                     <span className="sent-title">{job.title ?? '未命名'}</span>
                     <span className="sent-meta">
@@ -257,7 +288,7 @@ export function JobList({
                 <li key={job.uuid}>
                   <button type="button" className="sent-row" onClick={() => onOpen(job.uuid)}>
                     <span className="type-tag" data-type={targetOf(job)?.contentType ?? 'unknown'}>
-                      {typeLabel(targetOf(job)?.contentType)}
+                      {typeLabel(targetOf(job)?.contentType, targetOf(job)?.postType)}
                     </span>
                     <span className="sent-title">{job.title ?? '未命名'}</span>
                     <span className="sent-meta">{job.state === 'CANCELLED' ? '已取消' : '已被取代'}</span>
@@ -270,6 +301,11 @@ export function JobList({
       </main>
     </div>
   );
+}
+
+/** 排在最後、用主色的那一顆「新 X」。 */
+function primaryRank(target: PublishTargetSummary): number {
+  return target.contentType === 'longform' || (target.contentType === 'article' && target.postType === 'post') ? 1 : 0;
 }
 
 /** 一句話講「這篇現在卡在哪」。顏色只是輔助，文字本身就要說得清楚。 */
@@ -295,7 +331,7 @@ function JobCard({
   return (
     <button type="button" className="job-card" onClick={() => onOpen(job.uuid)}>
       <span className="type-tag" data-type={target?.contentType ?? 'unknown'}>
-        {typeLabel(target?.contentType)}
+        {typeLabel(target?.contentType, target?.postType)}
       </span>
       <span className="job-card-main">
         <span className="job-card-title">{job.title ?? '未命名'}</span>

@@ -1,6 +1,11 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { createTestDatabase, type TestDatabase } from './helpers/test-db.js';
 import { runMigrations, listAppliedMigrations } from '../src/db/migrate.js';
+import { migrations } from '../src/db/migrations/index.js';
+import { openDatabase, type DatabaseSync } from '../src/db/index.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let db: TestDatabase;
 
@@ -90,5 +95,91 @@ describe('migrations', () => {
     const anchor = columns.find((column) => column.name === 'anchor');
     expect(anchor).toBeDefined();
     expect(anchor?.notnull).toBe(0);
+  });
+});
+
+describe('007：內容類型多一個 article（P8-T001）', () => {
+  /**
+   * 重建表最怕的是外鍵：DROP TABLE 會觸發子表的 ON DELETE SET NULL，jobs 與 revisions
+   * 會悄悄失去指向。這裡先停在 006 塞一份像真的資料，再套 007，逐列比對。
+   */
+  function seededAt006(): { handle: DatabaseSync; cleanup: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-publisher-m007-'));
+    const handle = openDatabase(join(dir, 'test.sqlite'));
+    runMigrations(handle, migrations.slice(0, 6));
+    handle.exec(`
+      INSERT INTO sites (id, key, display_name, base_url) VALUES (1, 'remusplus', 'R', 'https://example.test');
+      INSERT INTO publish_targets (id, site_id, key, display_name, content_type, endpoint, post_type, template_id, allow_create)
+        VALUES (5, 1, 'read-think', '長文', 'longform', 'read-think', 'read-think', 'longform-v1', 1),
+               (9, 1, 'diary', '日記', 'diary', 'diary', 'diary', 'diary-v1', 1);
+      INSERT INTO templates (id, template_id, version, content_type, strictness, manifest_json, schema_json, hash)
+        VALUES (3, 'longform-v1', 1, 'longform', 'hybrid', '{}', '{}', 'h-long'),
+               (4, 'diary-v1', 1, 'diary', 'flexible', '{}', '{}', 'h-diary');
+      INSERT INTO jobs (id, uuid, target_id, state) VALUES (1, 'j-long', 5, 'PUBLISHED'), (2, 'j-diary', 9, 'SOURCE'), (3, 'j-none', NULL, 'SOURCE');
+      INSERT INTO revisions (id, job_id, revision_number, template_row_id, origin, content_hash)
+        VALUES (1, 1, 1, 3, 'source', 'c1'), (2, 1, 2, 3, 'manual', 'c2'), (3, 2, 1, 4, 'source', 'c3'), (4, 3, 1, NULL, 'source', 'c4');
+    `);
+    return { handle, cleanup: () => { handle.close(); rmSync(dir, { recursive: true, force: true }); } };
+  }
+
+  function dump(handle: DatabaseSync, table: string): unknown[] {
+    return handle.prepare(`SELECT * FROM ${table} ORDER BY id`).all();
+  }
+
+  it('每一列原封不動：id、jobs.target_id、revisions.template_row_id 都還在', () => {
+    const { handle, cleanup } = seededAt006();
+    try {
+      const tables = ['sites', 'publish_targets', 'templates', 'jobs', 'revisions'];
+      const before = Object.fromEntries(tables.map((t) => [t, dump(handle, t)]));
+      runMigrations(handle);
+      for (const table of tables) expect(dump(handle, table)).toEqual(before[table]);
+      expect(handle.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(handle.prepare('SELECT name FROM sqlite_temp_master').all()).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('接受 article，不接受契約外的值；首頁仍要綁固定 ID', () => {
+    const { handle, cleanup } = seededAt006();
+    try {
+      runMigrations(handle);
+      const target = handle.prepare(
+        'INSERT INTO publish_targets (key, display_name, content_type, endpoint, post_type, template_id, fixed_object_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      );
+      expect(() => target.run('post', '文章', 'article', 'posts', 'post', 'article-v1', null)).not.toThrow();
+      expect(() => target.run('x', 'X', 'whatever', 'x', 'x', 'x', null)).toThrow();
+      expect(() => target.run('home', '首頁', 'homepage', 'pages', 'page', 'x', null)).toThrow();
+
+      const template = handle.prepare(
+        'INSERT INTO templates (template_id, version, content_type, strictness, manifest_json, schema_json, hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      );
+      expect(() => template.run('article-v1', 1, 'article', 'hybrid', '{}', '{}', 'h-a')).not.toThrow();
+      expect(() => template.run('bad-v1', 1, 'whatever', 'hybrid', '{}', '{}', 'h-b')).toThrow();
+      // UNIQUE 還在。
+      expect(() => template.run('article-v1', 1, 'article', 'hybrid', '{}', '{}', 'h-a')).toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('外鍵接回新表：參照不存在的 target 會被擋，刪 target 仍會 SET NULL', () => {
+    const { handle, cleanup } = seededAt006();
+    try {
+      runMigrations(handle);
+      expect(() =>
+        handle.prepare('INSERT INTO jobs (uuid, state, target_id) VALUES (?, ?, ?)').run('j-bad', 'SOURCE', 999),
+      ).toThrow();
+      expect(() =>
+        handle
+          .prepare('INSERT INTO revisions (job_id, revision_number, template_row_id, origin, content_hash) VALUES (?, ?, ?, ?, ?)')
+          .run(3, 2, 999, 'manual', 'c5'),
+      ).toThrow();
+      handle.prepare('DELETE FROM publish_targets WHERE id = 9').run();
+      expect(handle.prepare('SELECT target_id FROM jobs WHERE id = 2').get()).toEqual({ target_id: null });
+      expect(handle.prepare('SELECT target_id FROM jobs WHERE id = 1').get()).toEqual({ target_id: 5 });
+    } finally {
+      cleanup();
+    }
   });
 });

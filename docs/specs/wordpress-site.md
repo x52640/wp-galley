@@ -1,9 +1,35 @@
-# 目標網站實況（www.remusplus.com）
+# WordPress 站台：通用說明與作者站台實況
 
 > 擁有範圍：站台組成、內容類型對應、正文 HTML 詞彙、區塊格式、分類法、外部副作用。
-> 這是**實測事實**；據此做的範圍決定在 [ADR-0003](../adr/0003-homepage-out-of-mvp.md)
+> 前半是**任何 WordPress 站**共通的部分（D-016）；後半「作者站台實況」是 www.remusplus.com 的
+> **實測事實**，據此做的範圍決定在 [ADR-0003](../adr/0003-homepage-out-of-mvp.md)
 > （首頁移出 MVP）與 [ADR-0004](../adr/0004-body-slot-only.md)（只送正文）。
-> 程式：`src/wordpress/`、`config/publish-targets.json`。
+> 程式：`src/wordpress/`、`config/publish-targets.json`（本機檔，範例見 [templates.md](templates.md)「站台設定檔」）。
+
+## 通用站台（任何 WordPress）
+
+一次連一個站。第一版只支援核心內建的兩種內容類型，不支援 CPT（D-016：別人的 CPT
+多半靠自訂欄位排版，只送正文會是空版面）。
+
+| 內容類型 | post type | rest_base | 分類法（slug → REST 名稱） | 模板 |
+| --- | --- | --- | --- | --- |
+| 文章 | `post` | `posts` | `category` → `categories`（另有 `post_tag` → `tags`，第一版不用） | `article-v1` |
+| 頁面 | `page` | `pages` | 無 | `article-v1` |
+
+- 正文一律用**核心區塊的預設屬性**：不知道對方的佈景主題，就不帶任何字級、顏色、版面 class
+  （規則見 [templates.md](templates.md)「通用模板 article-v1」）。
+- ⚠️ **核心分類法的 slug 不等於 REST 名稱**：`category` 的端點與文章 JSON 欄位都叫 `categories`
+  （`/wp/v2/types` 回的 `taxonomies` 是 slug）。所以 target 分兩個欄位：`taxonomy` 放 slug
+  （跟站台比對、畫面上用），`taxonomyRestBase` 放 REST 名稱（查項目、寫分類、遠端快照用）。
+  作者站台的兩個分類法 slug＝rest_base，不用寫 `taxonomyRestBase`。
+- ⚠️ 通用站的區塊輸出**沒有拿真實站台逐字比對過**（作者手上只有 remusplus）。
+- 連線診斷（`GET /api/wordpress`）檢查的內容類型來自設定檔裡的 target，不寫死；也會拿
+  `/wp/v2/taxonomies` 的 `rest_base` 比對 target 的分類法 REST 名稱，對不上就直接講要設什麼。
+- 「改成公開可能寄出電子報、自動分享」這條對任何站都成立（見文末），不只作者站台。
+
+---
+
+# 作者站台實況（www.remusplus.com）
 
 探查日期：2026-08-27。全部以**匿名 REST API 與前台 HTML** 取得，未使用任何憑證。
 這份文件記錄「原始計畫的假設」與「網站實況」的差異。
@@ -203,8 +229,8 @@ Application Password 實測）。
 
 據此決定預設不自動建立分類項目，見 `plan.md` D-004。
 
-兩個分類法的 `rest_base` 都等於 slug（`read-think-tag`、`diary-category`），
-`src/core/service.ts` 依此組 REST 路徑。
+兩個分類法的 `rest_base` 都等於 slug（`read-think-tag`、`diary-category`），所以設定檔不用寫
+`taxonomyRestBase`（通用站的 `category` 就要寫，見上方「通用站台」）。
 
 ### 媒體類型
 

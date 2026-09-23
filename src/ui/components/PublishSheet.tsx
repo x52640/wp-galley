@@ -130,7 +130,7 @@ export function PublishSheet({
           <span className="p-dest-main">
             <b>{job.target.displayName}</b>
             <span>
-              因為這篇是「{typeLabel(job.target.contentType)}」・WordPress 裡的{' '}
+              因為這篇是「{typeLabel(job.target.contentType, job.target.postType)}」・WordPress 裡的{' '}
               <span className="mono">{job.target.postType}</span>
             </span>
           </span>
@@ -184,7 +184,7 @@ export function PublishSheet({
         <section className="p-section">
           <h3 className="p-label">
             <span className="p-num">3</span>
-            {job.target.contentType === 'diary' ? '分類' : '標籤'}
+            {job.target.contentType === 'longform' ? '標籤' : '分類'}
           </h3>
           <TaxonomyPanel job={job} refresh={refresh} />
         </section>

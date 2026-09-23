@@ -59,6 +59,10 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   `{ error: { code, message, details?, requestId } }`；5xx 對外只給通用訊息。
 - migration 只能往 `src/db/migrations/` 加新檔並註冊到 `index.ts`；改動已套用的
   migration 會因 checksum 不符而啟動失敗。
+- 要改 CHECK 之類只能重建表的 migration，照 `007-article-content-type.ts` 的做法：migration 在交易裡跑，
+  `PRAGMA foreign_keys = OFF` 無效，`DROP TABLE` 會觸發子表的 `ON DELETE SET NULL`——先把子表欄位抄到
+  暫存表、重建後寫回去。先在記憶體 DB 與 `data/publisher.sqlite` 的**副本**上驗過再註冊：
+  dev server 一重載就會套到真的 DB。
 - Agent 各家怪癖的放置規則見 [agent-cli.md](agent-cli.md)。
 
 ## 本機資料
@@ -69,5 +73,6 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `drafts/` | 原稿與測試素材 | 否 |
 | `generated-images/` | 本機圖片：上傳過的副本（`<job>/<sha256>.<ext>`）、Codex 生圖候選圖（`<job>/candidates/`） | 否 |
 | `backups/` | 發布前快照 | 否 |
-| `config/publish-targets.json` | 發布目標 | 是 |
+| `config/publish-targets.json` | 本機站台設定（發布目標），一次一個站（D-016） | 否 |
+| `config/publish-targets.example.json`、`config/examples/` | 站台設定範例（通用、作者站台）；測試用 `config/examples/remusplus.json`，不讀本機檔 | 是 |
 | `templates/` | 模板 | 是 |

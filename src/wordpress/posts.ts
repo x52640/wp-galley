@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { WordPressClient } from './client.js';
 import { WordPressError, wordpressErrorCodes } from './errors.js';
 import { PostSchema, type Post } from './schemas.js';
-import type { PublishTarget } from './targets.js';
+import { taxonomyRestBaseOf, type PublishTarget } from './targets.js';
 
 /**
  * 文章的建立與更新。
@@ -83,7 +83,8 @@ function hashContent(post: Post): string {
 
 /**
  * 分類項目不在 `PostSchema` 的固定欄位裡——分類法的名字是站台設定，不是協定的一部分。
- * 所以由呼叫端把 target 的分類法傳進來，只讀那一個鍵，其他外掛塞的東西一概不碰
+ * 所以由呼叫端把 target 的分類法**REST 名稱**（`taxonomyRestBaseOf`，核心的 category 是
+ * `categories`）傳進來，只讀那一個鍵，其他外掛塞的東西一概不碰
  * （否則某個外掛回一組會變動的數字陣列，就會變成永遠對不上的假衝突）。
  */
 function termsOf(post: Post, taxonomy: string | null): readonly number[] | null {
@@ -131,12 +132,14 @@ function buildPayload(target: PublishTarget, fields: PostFields): Record<string,
   if (fields.excerpt !== undefined) payload.excerpt = fields.excerpt;
   if (fields.featuredMediaId !== undefined) payload.featured_media = fields.featuredMediaId;
 
+  const restBase = taxonomyRestBaseOf(target);
   for (const [taxonomy, ids] of Object.entries(fields.terms ?? {})) {
     // 只送這個 target 認得的分類法，避免打錯字時把值送到別的地方。
-    if (taxonomy !== target.taxonomy) {
+    // 鍵是 REST 名稱（文章 JSON 的欄位名），不是分類法 slug。
+    if (taxonomy !== restBase) {
       throw new WordPressError(
         wordpressErrorCodes.INVALID_REQUEST,
-        `${target.key} 只接受分類法 ${target.taxonomy}，收到 ${taxonomy}`,
+        `${target.key} 只接受分類法 ${restBase ?? '（無）'}，收到 ${taxonomy}`,
         { retryable: false },
       );
     }
@@ -162,7 +165,7 @@ export async function fetchSnapshot(
   client: WordPressClient,
   target: PublishTarget,
   id: number,
-  taxonomy: string | null = target.taxonomy,
+  taxonomy: string | null = taxonomyRestBaseOf(target),
 ): Promise<RemoteSnapshot> {
   return snapshotOf(await fetchPost(client, target, id), taxonomy);
 }
@@ -247,7 +250,7 @@ export async function assertUnchanged(
   id: number,
   expected: RemoteSnapshot,
 ): Promise<RemoteSnapshot> {
-  const actual = await fetchSnapshot(client, target, id, target.taxonomy);
+  const actual = await fetchSnapshot(client, target, id, taxonomyRestBaseOf(target));
   const changed = diffSnapshots(expected, actual);
 
   if (changed.length > 0) {
