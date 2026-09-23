@@ -103,6 +103,11 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
   （賣點是用既有訂閱），不支援 CPT（別人的 CPT 多半靠自訂欄位排版，只送正文會是空版面）。
   排在 P5-T001 實測之後。未查證：各家 CLI 條款是否允許第三方工具呼叫，公開前要查。
 
+- **D-017 用 Codex 訂閱生圖（2026-09-23 Remus 裁定，P5-T013 執行）**：Q-6 實測通過，不接生圖 API。
+  配圖卡片加「用 Codex 生圖」，生完先給使用者看，按「用這張」才上傳（上傳會進 WordPress 媒體庫）；
+  封面卡片上傳後自動設成精選（手動上傳也一樣）。只有 Codex 能生圖，其他 Agent 不提供這顆按鈕。
+  實作交給 subagent（使用者指定）。
+
 ## 待裁定
 
 | 編號 | 問題 | 現況 |
@@ -112,6 +117,6 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 | Q-3 | 預設勾選 `meaningChanged: false` 的改動，還是全部不勾？ | B1：不改意思的錯字收成一張卡片，一鍵全收；其他逐項 |
 | Q-4 | 要不要讓 Agent 寫 SVG 再轉 PNG 做「一鍵生圖」？只能做概念圖，做不到照片 | **沒做**（使用者曾誤以為已做好）。管線已在 `src/ui/lib/svg-to-png.ts`，不用金鑰；要做需改三處：output contract 加 svg 欄位、新的 agent task、配圖卡片多一顆按鈕 |
 | Q-5 | 要不要補「修改已發布文章」？ | 沒有這條路，只能去後台改 |
-| Q-6 | 怎麼真的產生圖片？ | **Codex 訂閱就能生圖，已實測（2026-09-23）**：`codex exec --json` 一次約 54 秒，產出 1672×941 PNG（約 16:9，1.7 MB），不用 API 金鑰。圖一定落在 `~/.codex/generated_images/<thread_id>/`，`thread_id` 就在第一個 JSON 事件 `thread.started` 裡，對得回是哪一次執行。細節見 `docs/specs/agent-cli.md`。待使用者決定是否開 Task 做「用 Codex 生圖」按鈕 |
+| Q-6 | 怎麼真的產生圖片？ | **已裁定 → D-017**（Codex 訂閱生圖，已實測） |
 | Q-7 | B 版要不要內建 A 版的「一次看一項」模式？ | Claude 建議，使用者未表態 |
 | Q-8 | 日記標題是否固定 `YYYYMMDD` 由發布台自動產生？ | 目前有一鍵填入，未強制 |
