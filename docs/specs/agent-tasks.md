@@ -1,9 +1,9 @@
 # Agent 工作類型：一鍵動作、配圖需求、執行中回饋
 
 > 擁有範圍：`AgentTask`（review / images）、三顆一鍵按鈕、`image_briefs`、用 Codex 生圖（D-017）、
-> 執行中的回饋。
+> 內文圖的錨點與自動放位置（D-020）、執行中的回饋。
 > 程式：`src/agents/output-contract.ts`（`buildSystemPrompt`、`TASK_BRIEF`）、
-> migration 004／005、`src/core/image-generation.ts`、`src/ui/components/AgentProgress.tsx`、
+> migration 004／005／006、`src/core/image-generation.ts`、`src/ui/components/AgentProgress.tsx`、
 > `AgentButton.tsx`、`panels/MediaPanel.tsx`（`BriefCard`）。
 
 三件事都來自實際用起來的問題（2026-08-28，D-010）。
@@ -69,6 +69,43 @@
 設精選是內容改動，照 [state-machine.md](state-machine.md) 撤銷核准；封面卡片上（生圖與手動上傳兩條路）
 在目前有有效核准時會先提醒「換封面會讓目前的核准失效」。
 
+### 內文圖的錨點：自動放位置（D-020，P5-T016）
+
+內文圖的配圖需求帶 `anchor`：這張圖要跟在後面的那一段裡，**一字不差**引用的一小段原文
+（`TASK_BRIEF.images` 要 Agent 挑整篇只出現一次的 10–30 字、不要寫段落編號）。封面那條留空。
+`placement`（「第 3 段之後」）照舊保留，只給人看，不拿來定位。
+
+- **輸出契約**：`imageBriefs[].anchor` 是選填字串（`maxLength` 200）。Codex strict schema 照
+  [agent-cli.md](agent-cli.md) 的規則轉成 required＋nullable、拿掉長度約束；回來的 null 先 `stripNulls`，
+  後端再用原始 schema 驗（長度約束沒少）。
+- **存**：`image_briefs.anchor`（migration 006），`ImageBrief.anchor`；封面與 006 之前的舊資料是 null。
+  **不存段落編號**：內容一改編號就指到別段。
+- **放**：對上內文圖那條的圖上傳成功後（「用這張」與手動「上傳這張」都一樣），`addMediaWithOutcome`
+  的 `autoPlace` 拿錨點在**目前這一版**的頂層區塊裡找（`findBlocksContaining`，忽略空白，規則同
+  [review-proposals.md](review-proposals.md)「`blockIndex` 每次讀取時重算」）：
+
+依序判斷：
+
+| 情況 | 結果（`AutoPlaceResult.outcome`） |
+| --- | --- |
+| 校稿或一鍵配圖正在跑（生圖不算） | `agent-running`：不放，講「AI 還在跑，等它跑完再放（圖已經上傳了）」——放了會建新版本，那一趟跑完時 `assertAgentResultStillApplies` 會把結果整份丟掉 |
+| 這條需求之前的圖還在正文裡（「換一張」） | `replaced`：新圖接替舊圖的位置，舊圖在同一個新版本裡拿出正文（留在媒體庫與圖片清單），`afterBlockIndex` 是新位置 |
+| 剛好一段對得上（同一段裡出現兩次也算一段） | `placed`：`placeMedia` 到那一段之後，`afterBlockIndex` 是那一段 |
+| 一段都對不上，或這條需求沒有錨點 | `not-found`：不放 |
+| 兩段以上對得上 | `ambiguous`：不猜、不放 |
+| 任何一步丟例外 | `failed`：圖照樣在媒體庫，另記一筆 `auto_placed` 失敗事件 |
+
+  上傳之後的自動設精選與自動放位置都包在 `afterUpload` 裡：任何例外（包括動作一開頭就丟的）都收成 `failed`，
+  不往外丟——否則「用這張」會把其實已經上傳的候選圖放回去，再按就重複上傳。封面的自動設精選在校稿或
+  一鍵配圖正在跑時同樣先不做（`AutoFeatureResult.outcome = 'agent-running'`）。卡片上的「上傳這張／換一張」
+  在另一個 Agent 動作跑的時候不給按，跟「用這張」一樣。
+  沒放的訊息（`not-found`／`ambiguous`）都以「找不到建議的位置，請自己放」開頭，接著講為什麼、怎麼自己放（「在這裡插圖」或「插入位置」）。
+  封面、沒帶 briefKey 的上傳、對不上任何需求的上傳，`autoPlace` 都是 null。
+- 放進正文（含「換一張」）是內容改動：建新版本、照規則撤銷核准。卡片上在目前有有效核准時先提醒核准會失效，
+  放完講「已放進正文第 N 段之後」／「已換掉正文裡原本那張」，原本有核准的再加一句核准已失效。
+- 判斷「這張圖在不在正文、在哪」一律用 `src/contract/media-marker.ts` 的 `hasWpImageClass`（class 整個對上，
+  `wp-image-51` 不會認成 `wp-image-512`），`placeMedia`、`replaceMedia`、`removeMedia`、`toMedia` 與示範資料共用。
+
 ## 用 Codex 生圖（D-017，P5-T013）
 
 **只有 Codex 能生圖**（實測見 [agent-cli.md](agent-cli.md)「Codex 生圖」）。能不能生由 adapter
@@ -86,7 +123,7 @@
 4. 候選圖顯示在卡片上（`GET /api/jobs/:uuid/candidates/:id`，本機送出，**沒有上傳**）。
    按鈕：「用這張」、「再生一張」；不滿意不用也沒關係，它只留在本機。
 5. 「用這張」→ `POST /api/jobs/:uuid/candidates/:id/use` → 走 `addMediaWithOutcome`（帶 briefKey、alt、
-   圖說）上傳到 WordPress 媒體庫；封面那條照上表自動設精選。第一個 await 之前就同步搶下這張候選圖
+   圖說）上傳到 WordPress 媒體庫；封面那條照上表自動設精選，內文圖照錨點自動放（上一節）。第一個 await 之前就同步搶下這張候選圖
    （`UPDATE … WHERE used_at IS NULL`），兩個同時送來的請求只有一個會上傳；上傳失敗就放回去。
    需求被標成不要了、或候選圖已經過時（見下），都不能用。
 

@@ -36,8 +36,8 @@
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
 | `GET` | `/api/jobs/:uuid/candidates/:id` | 候選圖本體（`image/*`，`no-store`），只在本機 | → 圖檔 |
-| `POST` | `/api/jobs/:uuid/candidates/:id/use` | 「用這張」：上傳到 WordPress 媒體庫 | → `MediaResponse`（201，含 `autoFeature`） |
-| `POST` | `/api/jobs/:uuid/media` | 上傳圖片（base64 JSON） | `MediaUploadRequest` → `MediaResponse`（201，含 `autoFeature`） |
+| `POST` | `/api/jobs/:uuid/candidates/:id/use` | 「用這張」：上傳到 WordPress 媒體庫 | → `MediaResponse`（201，含 `autoFeature`、`autoPlace`） |
+| `POST` | `/api/jobs/:uuid/media` | 上傳圖片（base64 JSON） | `MediaUploadRequest` → `MediaResponse`（201，含 `autoFeature`、`autoPlace`） |
 | `PUT` | `/api/jobs/:uuid/media/:id` | 換圖 | `MediaUploadRequest` → `MediaResponse` |
 | `DELETE` | `/api/jobs/:uuid/media/:id` | 移除 | → `RemovedResponse` |
 | `POST` | `/api/jobs/:uuid/media/:id/place` | 插進正文 | `PlaceMediaRequest` → `RevisionResponse` |
@@ -74,6 +74,11 @@
   候選圖的檔案路徑只由資料庫決定，路由只收編號。`use` 與 `POST /media` 對上封面那條時回
   `autoFeature`（`set`／`kept-existing`／`failed`，沒對上是 null）：已經有使用者選的封面就不覆蓋。
   細節見 [agent-tasks.md](agent-tasks.md)「用 Codex 生圖」。
+- 內文圖自動放位置（P5-T016）：`ImageBrief.anchor`（錨點原文，封面是 null）；`use` 與 `POST /media` 對上內文圖
+  那條時回 `autoPlace`（`placed`／`replaced`＋`afterBlockIndex`、`not-found`、`ambiguous`、`agent-running`、`failed`，
+  沒對上或是封面是 null）。`placed` 時回應裡的 `media` 已經是放好之後的樣子（`placed`、`placedAfterBlockIndex`）。
+  `autoFeature` 另多一個 `agent-running`（校稿或一鍵配圖正在跑時先不設精選）。
+  規則見 [agent-tasks.md](agent-tasks.md)「內文圖的錨點」。都是新增欄位，舊前端不受影響。
 - `compare`（D-019）：`rows` 是正文逐段差異，每列的 `segments` 是單欄畫面用的完整序列；
   `fieldChanges` 是正文以外的改動（標題、網址片段、分類／標籤等 templateData 欄位，跟上一版比時另有精選圖片），
   名稱與顯示值由後端決定，畫面照抄。跟提案比時不比精選圖片（提案不動它）。畫面見

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { stageDisplay } from '../src/ui/lib/stage-view.js';
+import { canInsertImages, stageDisplay } from '../src/ui/lib/stage-view.js';
 
 /** 主區顯示什麼（D-018）：拿掉三段切換後，成品只在發布面板打開時出現。 */
 describe('stageDisplay', () => {
@@ -23,5 +23,31 @@ describe('stageDisplay', () => {
   it('關掉發布面板就回到原本那一種', () => {
     expect(stageDisplay('compare', false).compare).toBe(true);
     expect(stageDisplay('article', false).compare).toBe(false);
+  });
+});
+
+/** 「在這裡插圖」什麼時候出現（P5-T016）：只在看文章的時候，而且不是正在改字。 */
+describe('canInsertImages', () => {
+  const idle = { editing: false, finished: false, working: false };
+
+  it('看文章時出現', () => {
+    expect(canInsertImages(stageDisplay('article', false), idle)).toBe(true);
+  });
+
+  it('對照蓋在上面時不出現', () => {
+    expect(canInsertImages(stageDisplay('compare', false), idle)).toBe(false);
+  });
+
+  it('發布面板的成品上不出現', () => {
+    expect(canInsertImages(stageDisplay('article', true), idle)).toBe(false);
+  });
+
+  it('直接在文章上改的時候不出現', () => {
+    expect(canInsertImages(stageDisplay('article', false), { ...idle, editing: true })).toBe(false);
+  });
+
+  it('AI 還在跑、或稿件已經結束時不出現', () => {
+    expect(canInsertImages(stageDisplay('article', false), { ...idle, working: true })).toBe(false);
+    expect(canInsertImages(stageDisplay('article', false), { ...idle, finished: true })).toBe(false);
   });
 });

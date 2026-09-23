@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
 import { api, describeError } from '../../service/client.js';
 import type {
   AutoFeatureResult,
+  AutoPlaceResult,
   ImageBrief,
   ImageGenerationStatus,
   LoadedJob,
@@ -30,7 +31,8 @@ import { ErrorNote, Field, Spinner, useAction } from './shared.js';
  * **配圖需求（imageBriefs）**：「一鍵配圖」給的是一份採買清單——該配什麼圖、prompt
  * 長怎樣。每張卡片可以直接「用 Codex 生圖」（D-017，用訂閱，只有 Codex 做得到），
  * 生好的圖先放在卡片上給使用者看，按「用這張」才上傳；也可以自己上傳，靠 briefKey
- * 把圖跟需求接起來。封面那張上傳後自動設成精選。
+ * 把圖跟需求接起來。封面那張上傳後自動設成精選；內文圖照 AI 引用的原文（錨點）自動放進
+ * 正文那一段之後，找不到就講「請自己放」（P5-T016）。
  */
 const sessionThumbs = new Map<number, string>();
 
@@ -263,6 +265,8 @@ function BriefCard({
   const confirm = useConfirm();
   /** 封面自動設精選的結果（沒設成的時候要講出來）。 */
   const [featureNote, setFeatureNote] = useState<AutoFeatureResult | null>(null);
+  /** 內文圖照錨點自動放進正文的結果（P5-T016）；`approvalLost`＝放之前有有效的核准，現在失效了。 */
+  const [placeNote, setPlaceNote] = useState<{ result: AutoPlaceResult; approvalLost: boolean } | null>(null);
   /** 使用者按了停止：那一趟的 POST 會以錯誤結束，但那不是錯誤。 */
   const [stopped, setStopped] = useState(false);
 
@@ -297,7 +301,9 @@ function BriefCard({
     void action.run(async () => {
       const prepared = await prepareForUpload(file);
       setFeatureNote(null);
-      const { media: asset, autoFeature } = await api.addMedia(job.uuid, {
+      setPlaceNote(null);
+      const approved = job.approval?.valid === true;
+      const { media: asset, autoFeature, autoPlace } = await api.addMedia(job.uuid, {
         file: prepared.blob,
         filename: prepared.filename,
         mimeType: prepared.blob.type || 'image/png',
@@ -307,6 +313,7 @@ function BriefCard({
       });
       sessionThumbs.set(asset.id, URL.createObjectURL(prepared.blob));
       setFeatureNote(autoFeature);
+      if (autoPlace) setPlaceNote({ result: autoPlace, approvalLost: approved && changedBody(autoPlace) });
       await refresh();
     });
   };
@@ -359,6 +366,12 @@ function BriefCard({
       </div>
 
       <p className="brief-purpose">{brief.purpose}</p>
+      {!brief.isFeatured && brief.anchor !== null && (
+        <p className="brief-anchor">
+          <span className="brief-alt-tag">放在</span>
+          <span>「{brief.anchor}」那段之後</span>
+        </p>
+      )}
       <p className="brief-prompt">{brief.prompt}</p>
       <p className="brief-alt">
         <span className="brief-alt-tag">alt</span>
@@ -409,8 +422,13 @@ function BriefCard({
           <p className="field-hint">
             {brief.isFeatured
               ? '按「用這張」會上傳到 WordPress 媒體庫；還沒有別的封面時會自動設成精選圖片。'
-              : '按「用這張」會上傳到 WordPress 媒體庫。不滿意就再生一張，不用它也沒關係。'}
+              : brief.fulfilled
+                ? '按「用這張」會上傳到 WordPress 媒體庫；原本那張在正文裡的話，新圖放到它的位置。'
+                : brief.anchor !== null
+                ? '按「用這張」會上傳到 WordPress 媒體庫，並自動放進正文上面那段之後（找不到那段就不放）。'
+                : '按「用這張」會上傳到 WordPress 媒體庫，位置要自己選。不滿意就再生一張，不用它也沒關係。'}
             {brief.isFeatured && job.approval?.valid === true && ' 換封面會讓目前的核准失效。'}
+            {!brief.isFeatured && (brief.anchor !== null || brief.fulfilled) && job.approval?.valid === true && ' 放進正文會讓目前的核准失效。'}
           </p>
           <div className="brief-actions">
             <button
@@ -420,8 +438,13 @@ function BriefCard({
               onClick={() =>
                 void use.run(async () => {
                   setFeatureNote(null);
-                  const { autoFeature } = await api.useImageCandidate(job.uuid, candidate.id);
+                  setPlaceNote(null);
+                  const approved = job.approval?.valid === true;
+                  const { autoFeature, autoPlace } = await api.useImageCandidate(job.uuid, candidate.id);
                   setFeatureNote(autoFeature);
+                  if (autoPlace) {
+                    setPlaceNote({ result: autoPlace, approvalLost: approved && changedBody(autoPlace) });
+                  }
                   await refresh();
                 })
               }
@@ -446,6 +469,16 @@ function BriefCard({
         </p>
       )}
 
+      {placeNote !== null && (
+        <p className={changedBody(placeNote.result) ? 'note note-good' : 'note note-warn'} role="status">
+          <Icon name={changedBody(placeNote.result) ? 'check' : 'alert'} size={14} />
+          <span>
+            {placeNote.result.message}
+            {placeNote.approvalLost && ' 內容改了，原本的核准已失效，要重新核准。'}
+          </span>
+        </p>
+      )}
+
       {unavailableReason !== null && !brief.fulfilled && (
         <p className="field-hint brief-unavailable">
           <Icon name="alert" size={13} />
@@ -458,8 +491,20 @@ function BriefCard({
           {job.approval?.valid === true && ' 換封面會讓目前的核准失效。'}
         </p>
       )}
+      {!brief.isFeatured && brief.anchor !== null && !brief.fulfilled && candidate === null && !generating && (
+        <p className="field-hint">
+          上傳（或生圖後「用這張」）的圖會自動放進正文上面那段之後。
+          {job.approval?.valid === true && ' 放進正文會讓目前的核准失效。'}
+        </p>
+      )}
+      {!brief.isFeatured && brief.fulfilled && candidate === null && !generating && (
+        <p className="field-hint">
+          「換一張」：原本那張在正文裡的話，新圖會放到它的位置，舊圖拿出正文（留在媒體庫）。
+          {job.approval?.valid === true && ' 換進正文會讓目前的核准失效。'}
+        </p>
+      )}
       {runningElsewhere && !generating && (
-        <p className="field-hint">另一個 Agent 動作還在跑，跑完才能生圖（同一篇一次只跑一個）。</p>
+        <p className="field-hint">另一個 Agent 動作還在跑，跑完才能生圖或上傳（同一篇一次只跑一個）。</p>
       )}
 
       <div className="brief-actions">
@@ -498,7 +543,9 @@ function BriefCard({
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
             onChange={upload}
-            disabled={busy}
+            // 另一個 Agent 動作在跑時不給上傳：上傳完會自動放進正文或設精選，那會讓跑到一半的結果作廢
+            // （後端也會擋下自動放，這裡先不讓人按，跟「用這張」一樣）。
+            disabled={busy || runningElsewhere}
           />
         </label>
 
@@ -531,7 +578,12 @@ function BriefCard({
   );
 }
 
-function assetLabel(asset: MediaAsset): string {
+/** 這次自動放位置有沒有動到正文（放進去或換掉舊圖）。 */
+function changedBody(result: AutoPlaceResult): boolean {
+  return result.outcome === 'placed' || result.outcome === 'replaced';
+}
+
+export function assetLabel(asset: MediaAsset): string {
   if (asset.briefKey) return asset.briefKey;
   if (asset.altText) return asset.altText;
   return `圖片 #${asset.id}`;
@@ -559,6 +611,11 @@ function MediaRow({
    * 東西——這段期間不能讓人送出索引，寧可先鎖住。
    */
   const measured = blocks.length > 0;
+  /**
+   * 校稿／一鍵配圖跑的時候，任何會產生新版本的動作都要鎖住：Agent 跑完發現內容變了，
+   * 整趟結果會被丟掉（後端 assertAgentResultStillApplies）。生圖那一趟不檢查內容，不擋。
+   */
+  const contentRunActive = job.agentRun?.status === 'running' && job.agentRun.task !== 'generate-image';
   const placedInBody =
     asset.placedAfterBlockIndex !== null && asset.placedAfterBlockIndex >= 0;
 
@@ -588,7 +645,7 @@ function MediaRow({
               <select
                 className="input select"
                 value={asset.placedAfterBlockIndex ?? ''}
-                disabled={action.busy || !measured}
+                disabled={action.busy || !measured || contentRunActive}
                 onChange={(event) => {
                   const value = event.target.value;
                   if (value === '') return;
@@ -629,7 +686,7 @@ function MediaRow({
             <button
               type="button"
               className="btn btn-quiet btn-tiny"
-              disabled={action.busy}
+              disabled={action.busy || contentRunActive}
               onClick={() =>
                 void action.run(async () => {
                   await api.setFeaturedMedia(job.uuid, asset.id);
@@ -646,7 +703,7 @@ function MediaRow({
             <button
               type="button"
               className="btn btn-quiet btn-tiny"
-              disabled={action.busy}
+              disabled={action.busy || contentRunActive}
               onClick={() =>
                 void action.run(async () => {
                   await api.setFeaturedMedia(job.uuid, null);
@@ -665,7 +722,7 @@ function MediaRow({
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
-              disabled={action.busy}
+              disabled={action.busy || contentRunActive}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
@@ -688,7 +745,7 @@ function MediaRow({
           <button
             type="button"
             className="btn btn-quiet btn-tiny btn-danger-text"
-            disabled={action.busy}
+            disabled={action.busy || contentRunActive}
             onClick={() =>
               confirm({
                 title: '移除這張圖片？',

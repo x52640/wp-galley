@@ -116,6 +116,16 @@ export function findBlockContaining(blocks: readonly TopLevelBlock[], needle: st
   return index < 0 ? null : index;
 }
 
+/**
+ * 所有裝著這段文字的頂層區塊（比對規則同 `findBlockContaining`）。
+ *
+ * 要「確定是哪一段」才動手的地方用這個（例如 AI 配圖照錨點自動放進正文，P5-T016）：
+ * 只有一段對得上才算數，兩段以上就是有歧義，不猜。
+ */
+export function findBlocksContaining(blocks: readonly TopLevelBlock[], needle: string): number[] {
+  return blocks.flatMap((block, index) => (findIgnoringSpaces(block.text, needle) === null ? [] : [index]));
+}
+
 export function wrapBareTopLevelText(html: string): string {
   const fragment = parseFragment(html) as unknown as Node;
   const children = childrenOf(fragment);

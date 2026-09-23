@@ -258,7 +258,7 @@ const httpApi: PublisherApi = {
 
   async useImageCandidate(uuid: string, candidateId: number) {
     const body = await sendJson<MediaResponse>(`/api/jobs/${uuid}/candidates/${candidateId}/use`, 'POST');
-    return { media: body.media, autoFeature: body.autoFeature ?? null };
+    return { media: body.media, autoFeature: body.autoFeature ?? null, autoPlace: body.autoPlace ?? null };
   },
 
   async addMedia(uuid: string, input: AddMediaInput) {
@@ -267,7 +267,7 @@ const httpApi: PublisherApi = {
       'POST',
       await mediaBody(input),
     );
-    return { media: body.media, autoFeature: body.autoFeature ?? null };
+    return { media: body.media, autoFeature: body.autoFeature ?? null, autoPlace: body.autoPlace ?? null };
   },
 
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput) {

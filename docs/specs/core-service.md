@@ -38,17 +38,20 @@ interface CoreService {
   generateBriefImage(uuid: string, briefId: number, input?: { timeoutMs?: number }): Promise<ImageCandidate>;
   imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string };
   /** 「用這張」：先同步搶下候選圖，再走 addMediaWithOutcome 上傳。 */
-  useImageCandidate(uuid: string, candidateId: number): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }>;
+  useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadOutcome>;
 
   // --- 媒體 ---
   /** 帶的 briefKey 對上封面那條、且沒有別的封面時，上傳後自動 setFeaturedMedia（D-017）。 */
   addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset>;
-  /** 同上，另外回報自動設精選的結果（見 agent-tasks.md「封面那一條」）。 */
-  addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }>;
+  /**
+   * 同上，另外回報自動設精選（見 agent-tasks.md「封面那一條」）與內文圖照錨點自動放進正文
+   * （`autoPlace`，見「內文圖的錨點」，P5-T016）的結果。MediaUploadOutcome = { media, autoFeature, autoPlace }。
+   */
+  addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome>;
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
   removeMedia(uuid: string, assetId: number): void;
   setFeaturedMedia(uuid: string, assetId: number | null): Revision;
-  /** 把圖片插進正文的第 n 個頂層區塊後面。 */
+  /** 把圖片插進正文的第 n 個頂層區塊後面（-1＝最前面）。右欄下拉、「在這裡插圖」、自動放位置都走這裡。 */
   placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Revision;
 
   // --- 核准（只有 UI 能呼叫） ---

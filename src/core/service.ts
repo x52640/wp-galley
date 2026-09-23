@@ -10,6 +10,7 @@ import type {
   AgentTask,
   Approval as ApprovalView,
   AutoFeatureResult,
+  AutoPlaceResult,
   Comparison as ComparisonView,
   ImageBrief as ImageBriefView,
   ImageCandidate,
@@ -42,6 +43,7 @@ import {
 import {
   escapeHtml,
   findBlockContaining,
+  findBlocksContaining,
   normalizeEditedBody,
   insertBlockAfter,
   removeBlocksWhere,
@@ -67,6 +69,7 @@ import {
   type WordPressObjectRow,
 } from './repository.js';
 import { buildImagePrompt, isFeaturedBrief } from './image-generation.js';
+import { hasWpImageClass } from '../contract/media-marker.js';
 import { buildTemplateDataFromSource } from './source-text.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
@@ -176,6 +179,13 @@ export interface AddMediaInput {
   readonly altText?: string | undefined;
   readonly caption?: string | undefined;
   readonly briefKey?: string | undefined;
+}
+
+/** 上傳的結果：圖，加上封面有沒有自動設精選、內文圖有沒有照錨點自動放進正文。 */
+export interface MediaUploadOutcome {
+  readonly media: MediaAsset;
+  readonly autoFeature: AutoFeatureResult | null;
+  readonly autoPlace: AutoPlaceResult | null;
 }
 
 export interface ResolveReviewInput {
@@ -1150,6 +1160,7 @@ export class CoreService {
         altText: brief.altText,
         caption: brief.caption ?? null,
         placement: brief.placement ?? null,
+        anchor: brief.anchor ?? null,
       });
     }
     if (briefs.length > 0) {
@@ -1194,6 +1205,7 @@ export class CoreService {
       altText: row.alt_text,
       caption: row.caption,
       placement: row.placement,
+      anchor: row.anchor,
       fulfilled: filled.has(row.brief_key),
       dismissed: row.dismissed_at !== null,
       createdAt: row.created_at,
@@ -1354,15 +1366,12 @@ export class CoreService {
 
   /**
    * 「用這張」：把候選圖上傳到 WordPress 媒體庫。走 `addMediaWithOutcome`，所以 briefKey、
-   * alt、圖說、封面自動設精選、核准會不會失效，全部照上傳的既有規則。
+   * alt、圖說、封面自動設精選、內文圖照錨點自動放（P5-T016）、核准會不會失效，全部照上傳的既有規則。
    *
    * 第一個 await 之前就先**同步**搶下這張（`claimImageCandidate`）：兩個同時送來的請求
    * 只有一個會上傳。上傳失敗就放回去，候選圖回到卡片上。
    */
-  async useImageCandidate(
-    uuid: string,
-    candidateId: number,
-  ): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }> {
+  async useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadOutcome> {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const row = this.requireCandidate(job, candidateId);
@@ -1414,6 +1423,141 @@ export class CoreService {
   }
 
   /**
+   * 上傳成功之後的附帶動作（自動設精選、自動放位置）。任何例外——包括動作本身一開頭就丟的——
+   * 都收成 `failed` 結果並記一筆失敗事件，不往外丟：圖已經在媒體庫了，呼叫端要知道「上傳成功」。
+   */
+  private afterUpload<T>(
+    job: JobRow,
+    assetId: number,
+    eventType: string,
+    action: () => T | null,
+    failed: (reason: string) => T,
+  ): T | null {
+    try {
+      return action();
+    } catch (error) {
+      const reason = this.scrub(error instanceof Error ? error.message : String(error));
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'ui',
+        eventType,
+        status: 'failed',
+        detail: { assetId, message: reason },
+      });
+      return failed(reason);
+    }
+  }
+
+  /**
+   * 這篇稿件有沒有正在跑、而且結果要對著目前內容套用的 Agent 動作（校稿、一鍵配圖）。
+   *
+   * 那種動作跑完會檢查「派工時的那一版還是不是目前這一版」（`assertAgentResultStillApplies`），
+   * 不是就整份丟掉。所以它跑的期間，上傳的附帶動作不能建新版本，否則使用者等了一分鐘的結果會作廢。
+   * 生圖不在此列：候選圖不是對著某一版文字做的。
+   */
+  private contentRunActive(job: JobRow): boolean {
+    const active = this.activeRuns.get(job.uuid);
+    if (!active) return false;
+    return this.repo.agentRunById(active.rowId)?.purpose !== GENERATE_IMAGE_PURPOSE;
+  }
+
+  /**
+   * 對上內文圖那條配圖需求的圖，上傳後自動放進正文（D-020，P5-T016）。手動上傳與「用這張」都走這裡。
+   *
+   * 1. AI 還在跑（`contentRunActive`）：不放，講「等它跑完再放」——放了會讓那一趟的結果作廢。
+   * 2. 「換一張」：這條需求之前的圖還在正文裡，新圖接替它的位置（同一個新版本裡把舊圖拿出正文，
+   *    舊圖留在媒體庫）。
+   * 3. 否則照錨點：對著**目前這一版**找（忽略空白），剛好一段對得上才放在那一段之後；
+   *    找不到、不只一段、沒有錨點，都不放，結果講給使用者聽。不用 Agent 當時看到的段落編號。
+   *
+   * 放進正文照既有規則建新版本、撤銷核准。沒對上配圖需求（或對上的是封面，那條由 `autoFeature`
+   * 處理）就回 null。例外由呼叫端（`afterUpload`）收成 `failed`。
+   */
+  private autoPlace(job: JobRow, assetId: number, briefKey: string | undefined): AutoPlaceResult | null {
+    if (briefKey === undefined) return null;
+    const brief = this.repo
+      .listImageBriefs(job.id)
+      .find((row) => row.brief_key === briefKey && row.dismissed_at === null);
+    if (!brief) return null;
+    const latest = this.repo.latestRevision(job.id);
+    const featuredKey = latest ? this.payloadOf(latest).templateData['featuredImageBriefKey'] : undefined;
+    if (isFeaturedBrief({ key: brief.brief_key, placement: brief.placement }, featuredKey)) return null;
+
+    if (this.contentRunActive(job)) {
+      return {
+        outcome: 'agent-running',
+        message:
+          'AI 還在跑，等它跑完再放（圖已經上傳了）：跑完之後在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。',
+        afterBlockIndex: null,
+      };
+    }
+
+    const html = latest?.rendered_html ?? '';
+    const blocks = splitTopLevelBlocks(html);
+
+    // 「換一張」：同一條需求較新的舊圖優先（一般只會有一張在正文裡）。
+    const previous = this.repo
+      .listMedia(job.id)
+      .filter((row) => row.id !== assetId && row.brief_key === brief.brief_key && row.wordpress_media_id !== null)
+      .reverse()
+      .find((row) => blocks.some((block) => hasWpImageClass(block.html, row.wordpress_media_id!)));
+    if (previous) return this.replaceInBody(job, assetId, previous);
+
+    const notPlaced = (outcome: AutoPlaceResult['outcome'], why: string): AutoPlaceResult => ({
+      outcome,
+      message: `找不到建議的位置，請自己放：${why}在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。`,
+      afterBlockIndex: null,
+    });
+
+    const anchor = brief.anchor?.trim() ?? '';
+    if (anchor === '') return notPlaced('not-found', 'AI 沒有指定要放在哪一段。');
+    const hits = findBlocksContaining(blocks, anchor);
+    if (hits.length === 0) return notPlaced('not-found', `AI 引用的「${anchor}」在目前的文章裡找不到（可能改過了）。`);
+    if (hits.length > 1) {
+      return notPlaced('ambiguous', `AI 引用的「${anchor}」在文章裡出現在 ${hits.length} 段，不確定是哪一段。`);
+    }
+
+    const afterBlockIndex = hits[0]!;
+    this.placeMedia(job.uuid, assetId, afterBlockIndex);
+    return { outcome: 'placed', message: `已放進正文第 ${afterBlockIndex + 1} 段之後。`, afterBlockIndex };
+  }
+
+  /**
+   * 「換一張」：新圖放到舊圖在正文裡的位置，舊圖在同一個新版本裡拿出正文（它留在媒體庫與這篇稿件的
+   * 圖片清單裡，要不要移除由使用者決定）。舊圖在正文裡出現不只一次時每一處都換成新圖。
+   */
+  private replaceInBody(job: JobRow, assetId: number, previous: MediaAssetRow): AutoPlaceResult {
+    const template = this.requireTemplate(job);
+    const revisionRow = this.requireRevision(job);
+    const asset = this.requireMedia(job, assetId);
+    const url = this.mediaUrl(asset);
+    if (asset.wordpress_media_id === null || url === null) {
+      throw new MediaError('這張圖還沒上傳到 WordPress，無法插進正文');
+    }
+    const oldId = previous.wordpress_media_id!;
+    const payload = this.payloadOf(revisionRow);
+    const body = String(payload.templateData[template.manifest.publishSlot] ?? '');
+    const figure = buildFigureHtml(url, asset.alt_text ?? '', asset.caption, asset.wordpress_media_id);
+    const swapped = replaceBlocksWhere(body, (block) => hasWpImageClass(block.html, oldId), () => figure);
+    const revision = this.createRevision(job.uuid, {
+      origin: 'media',
+      templateData: { ...payload.templateData, [template.manifest.publishSlot]: swapped.html },
+      reason: '換一張配圖',
+    });
+    const at = splitTopLevelBlocks(revision.publishHtml).findIndex((block) =>
+      hasWpImageClass(block.html, asset.wordpress_media_id!),
+    );
+    const afterBlockIndex = at - 1;
+    return {
+      outcome: 'replaced',
+      message: `已換掉正文裡原本那張（${afterBlockIndex < 0 ? '文章最前面' : `第 ${afterBlockIndex + 1} 段之後`}）。舊圖拿出正文了，還留在媒體庫。`,
+      afterBlockIndex,
+    };
+  }
+
+  /**
    * 對上封面那條配圖需求的圖，上傳後自動設成精選（D-017）。手動上傳與「用這張」都走這裡。
    *
    * **不覆蓋使用者選的封面**：只有目前沒有精選圖片、或目前的精選就是這條需求的圖（「換一張」）
@@ -1430,6 +1574,14 @@ export class CoreService {
     const payload = latest ? this.payloadOf(latest) : null;
     const featuredKey = payload?.templateData['featuredImageBriefKey'];
     if (!isFeaturedBrief({ key: brief.brief_key, placement: brief.placement }, featuredKey)) return null;
+
+    // 設精選會建新版本；校稿或配圖正在跑的時候建，那一趟跑完的結果就會作廢（見 contentRunActive）。
+    if (this.contentRunActive(job)) {
+      return {
+        outcome: 'agent-running',
+        message: 'AI 還在跑，等它跑完再設成精選（圖已經上傳了）：跑完之後按圖片上的「設為精選」。',
+      };
+    }
 
     const currentId = payload?.featuredMediaAssetId ?? null;
     if (currentId !== null && currentId !== assetId) {
@@ -1631,11 +1783,11 @@ export class CoreService {
     return (await this.addMediaWithOutcome(uuid, input)).media;
   }
 
-  /** 同 `addMedia`，另外回報封面有沒有自動設成精選（沒對上封面是 null）。 */
-  async addMediaWithOutcome(
-    uuid: string,
-    input: AddMediaInput,
-  ): Promise<{ media: MediaAsset; autoFeature: AutoFeatureResult | null }> {
+  /**
+   * 同 `addMedia`，另外回報封面有沒有自動設成精選（沒對上封面是 null），以及內文圖有沒有
+   * 照錨點自動放進正文（沒對上內文圖是 null，P5-T016）。
+   */
+  async addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const client = this.requireWordPress();
@@ -1684,10 +1836,23 @@ export class CoreService {
       detail: this.scrub({ mediaId: uploaded.media.id, bytes: input.bytes.byteLength }),
     });
 
-    const autoFeature = this.autoFeature(job, row.id, input.briefKey);
+    // 走到這裡圖已經在 WordPress 媒體庫了。接下來的自動設精選／自動放位置出任何錯都只能是
+    // 「上傳成功、但沒設好」：往外丟的話，「用這張」會把一張其實已經上傳的候選圖放回去，再按就重複上傳。
+    const autoFeature = this.afterUpload(job, row.id, 'auto_featured', () => this.autoFeature(job, row.id, input.briefKey), (reason) => ({
+      outcome: 'failed' as const,
+      message: `圖已經上傳，但沒能設成精選圖片：${reason}`,
+    }));
+    const autoPlace =
+      autoFeature === null
+        ? this.afterUpload(job, row.id, 'auto_placed', () => this.autoPlace(job, row.id, input.briefKey), (reason) => ({
+            outcome: 'failed' as const,
+            message: `圖已經上傳，但沒能放進正文：${reason}`,
+            afterBlockIndex: null,
+          }))
+        : null;
 
     const latest = this.repo.latestRevision(job.id);
-    return { media: this.toMedia(row, latest ? this.toRevision(latest) : null), autoFeature };
+    return { media: this.toMedia(row, latest ? this.toRevision(latest) : null), autoFeature, autoPlace };
   }
 
   /**
@@ -1738,7 +1903,7 @@ export class CoreService {
     if (revisionRow) {
       const payload = this.payloadOf(revisionRow);
       const body = String(payload.templateData[this.requireTemplate(job).manifest.publishSlot] ?? '');
-      const oldMarker = old.wordpress_media_id === null ? null : `wp-image-${old.wordpress_media_id}`;
+      const oldId = old.wordpress_media_id;
       const figure = buildFigureHtml(
         uploaded.media.source_url,
         row.alt_text ?? '',
@@ -1746,9 +1911,9 @@ export class CoreService {
         uploaded.media.id,
       );
       const swapped =
-        oldMarker === null
+        oldId === null
           ? { html: body, replaced: 0 }
-          : replaceBlocksWhere(body, (block) => block.html.includes(oldMarker), () => figure);
+          : replaceBlocksWhere(body, (block) => hasWpImageClass(block.html, oldId), () => figure);
 
       if (swapped.replaced > 0 || payload.featuredMediaAssetId === assetId) {
         this.createRevision(job.uuid, {
@@ -1790,9 +1955,9 @@ export class CoreService {
     if (revisionRow) {
       const payload = this.payloadOf(revisionRow);
       const body = String(payload.templateData[template.manifest.publishSlot] ?? '');
-      const marker = asset.wordpress_media_id === null ? null : `wp-image-${asset.wordpress_media_id}`;
+      const wpId = asset.wordpress_media_id;
       const stripped =
-        marker === null ? { html: body, removed: 0 } : removeBlocksWhere(body, (block) => block.html.includes(marker));
+        wpId === null ? { html: body, removed: 0 } : removeBlocksWhere(body, (block) => hasWpImageClass(block.html, wpId));
 
       const wasFeatured = payload.featuredMediaAssetId === assetId;
       if (stripped.removed > 0 || wasFeatured) {
@@ -1864,9 +2029,9 @@ export class CoreService {
 
     // 這張圖已經在正文裡就是「搬家」，不是「再放一張」。先把舊的拿掉再插，
     // 否則同一張圖會出現兩次，而 toMedia() 只回報第一個，畫面上完全看不出來。
-    const marker = `wp-image-${asset.wordpress_media_id}`;
+    const wpId = asset.wordpress_media_id;
     const existingIndexes = blocks
-      .map((block, index) => (block.html.includes(marker) ? index : -1))
+      .map((block, index) => (hasWpImageClass(block.html, wpId) ? index : -1))
       .filter((index) => index >= 0);
 
     // 被移除的區塊如果排在目標位置前面，目標位置就要往前挪同樣的格數——
@@ -1875,7 +2040,7 @@ export class CoreService {
     const baseHtml =
       existingIndexes.length === 0
         ? currentHtml
-        : removeBlocksWhere(currentHtml, (block) => block.html.includes(marker)).html;
+        : removeBlocksWhere(currentHtml, (block) => hasWpImageClass(block.html, wpId)).html;
     const targetIndex = afterBlockIndex - removedBefore;
 
     const figure = buildFigureHtml(url, asset.alt_text ?? '', asset.caption, asset.wordpress_media_id);
@@ -2351,11 +2516,11 @@ export class CoreService {
   }
 
   private toMedia(row: MediaAssetRow, revision: Revision | null): MediaAsset {
-    const marker = row.wordpress_media_id === null ? null : `wp-image-${row.wordpress_media_id}`;
+    const wpId = row.wordpress_media_id;
     const placedAt =
-      marker === null || revision === null
+      wpId === null || revision === null
         ? -1
-        : splitTopLevelBlocks(revision.publishHtml).findIndex((block) => block.html.includes(marker));
+        : splitTopLevelBlocks(revision.publishHtml).findIndex((block) => hasWpImageClass(block.html, wpId));
 
     return {
       id: row.id,
@@ -2644,8 +2809,11 @@ const TASK_BRIEF: Record<AgentTask, string> = {
     '兩者都要，不要把不確定的事寫成 changes 假裝自己知道答案。',
   images:
     '這一趟的重點：**只做配圖需求**。讀完文章之後，把「哪一段該放什麼圖」寫進 imageBriefs：' +
-    'prompt 要具體到可以直接貼進生圖工具，placement 講清楚放在第幾段之後，altText 要能替代圖片本身。' +
-    '精選圖片（封面）那一則的 key 用 featured 開頭、placement 寫「精選圖片」——發布台靠這個認出封面。' +
+    'prompt 要具體到可以直接貼進生圖工具，placement 講清楚放在第幾段之後（給人看的），altText 要能替代圖片本身。' +
+    '內文圖一定要填 anchor：從這張圖要跟在後面的那一段裡，一字不差地引用一小段原文（10 到 30 字，' +
+    '挑整篇只出現一次的句子，不要改字、不要加引號、不要寫段落編號）——發布台靠它把圖自動放到那一段後面，' +
+    '引用對不上原文就放不進去。' +
+    '精選圖片（封面）那一則的 key 用 featured 開頭、placement 寫「精選圖片」、anchor 留空——發布台靠這個認出封面，封面不放進正文。' +
     'changes 與 observations 一律給空陣列，templateData 原樣帶回不要改。',
 };
 

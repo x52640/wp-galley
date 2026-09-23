@@ -23,3 +23,17 @@ export function stageDisplay(view: StageView, publishing: boolean): StageDisplay
   if (publishing) return { proof: 'final', compare: false };
   return { proof: 'edit', compare: view === 'compare' };
 }
+
+/**
+ * 文章段落之間要不要出現「在這裡插圖」（P5-T016）。
+ *
+ * 只在**看文章**的時候：對照蓋在上面時看不到文章、發布面板的成品是給人核准前看的（不該再動它）、
+ * 直接在文章上改的時候位置會隨打字跑掉。AI 還在跑（跑完會產生新版本、位置作廢）或稿件已經結束
+ * （不能再改內容）也不給。
+ */
+export function canInsertImages(
+  display: StageDisplay,
+  state: { editing: boolean; finished: boolean; working: boolean },
+): boolean {
+  return display.proof === 'edit' && !display.compare && !state.editing && !state.finished && !state.working;
+}

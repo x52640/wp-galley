@@ -25,6 +25,7 @@ import type {
   JobTarget,
   JobTemplate,
   AutoFeatureResult,
+  AutoPlaceResult,
   ImageCandidate,
   ImageGenerationStatus,
   MediaAsset,
@@ -46,6 +47,7 @@ export type {
   AgentTask,
   Approval,
   AutoFeatureResult,
+  AutoPlaceResult,
   CompareRow,
   Comparison,
   DiffSegment,
@@ -110,10 +112,14 @@ export interface AddMediaInput {
   briefKey?: string;
 }
 
-/** 上傳的結果：圖，加上封面有沒有自動設成精選（沒對上封面是 null）。 */
+/**
+ * 上傳的結果：圖，加上封面有沒有自動設成精選（沒對上封面是 null），以及內文圖有沒有照錨點
+ * 自動放進正文（沒對上內文圖是 null，P5-T016）。
+ */
 export interface MediaUploadResult {
   media: MediaAsset;
   autoFeature: AutoFeatureResult | null;
+  autoPlace: AutoPlaceResult | null;
 }
 
 // --- 前端才有的衍生型別 --------------------------------------------------------

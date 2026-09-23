@@ -263,6 +263,9 @@ h1, h2, h3 { font-weight: 600; }
   cursor: pointer;
   font-size: 0;
 }
+/* 檔案按鈕的 input 是透明蓋在上面的，停用時要讓外框也看得出按不了。 */
+.btn-file:has(input:disabled) { opacity: .5; }
+.btn-file input[type='file']:disabled { cursor: not-allowed; }
 
 .input {
   width: 100%;
@@ -1150,8 +1153,8 @@ h1, h2, h3 { font-weight: 600; }
   background: var(--shell-bg);
   font-size: .82rem;
 }
-/* 已經有圖的安靜下去，眼睛停在還沒做的那幾張上。 */
-.brief[data-fulfilled='yes'] { opacity: .6; }
+/* 已經有圖的安靜下去，眼睛停在還沒做的那幾張上。剛上傳完的結果（放進正文了沒）不能跟著變淡。 */
+.brief[data-fulfilled='yes'] > :not(.note) { opacity: .6; }
 
 .brief-head { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .3rem; }
 .brief-key { font-size: .74rem; color: var(--shell-text); }
@@ -1184,6 +1187,9 @@ h1, h2, h3 { font-weight: 600; }
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
+
+/* AI 引用的錨點：圖要跟在哪段後面（P5-T016）。 */
+.brief-anchor { display: flex; gap: .35rem; margin: 0 0 .35rem; font-size: .76rem; color: var(--shell-text); }
 
 .brief-alt { display: flex; gap: .35rem; margin: 0; font-size: .76rem; color: var(--shell-text-dim); }
 .brief-alt-tag {
@@ -1628,3 +1634,110 @@ h1, h2, h3 { font-weight: 600; }
   .margin { border-left: 0; border-top: 1px solid var(--shell-line); max-height: 45vh; }
 }
 
+
+/* --- 在這裡插圖（P5-T016） ----------------------------------------------
+   跟頁邊符號一樣畫在 iframe 外層，用同一份量到的區塊座標。平常看不到，
+   滑鼠移到兩段之間（或用 Tab 走到）才出現一條線和一顆按鈕。 */
+
+.proof-inserts {
+  position: absolute;
+  left: var(--gutter);
+  right: 0;
+  top: 0;
+  bottom: 0;
+  /* 框是 2、頁邊符號是 4：插圖在兩者之間，符號的說明框蓋得過它。 */
+  z-index: 3;
+  pointer-events: none;
+}
+
+.insert-slot {
+  position: absolute;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+.insert-slot::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1.5px dashed var(--accent);
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.insert-slot-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .1rem .6rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--proof-bg);
+  color: #2D5A4A;
+  font-family: var(--font-ui);
+  font-size: .76rem;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--fast);
+}
+.insert-slot:hover::before,
+.insert-slot:focus-within::before,
+.insert-slot[data-open='yes']::before,
+.insert-slot:hover .insert-slot-btn,
+.insert-slot:focus-within .insert-slot-btn,
+.insert-slot[data-open='yes'] .insert-slot-btn { opacity: 1; }
+.insert-slot[data-open='yes'] .insert-slot-btn { background: #E4EDE8; }
+
+.insert-pop {
+  position: absolute;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.insert-panel {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  padding: .7rem .8rem .8rem;
+  border: 1px solid var(--shell-line);
+  border-top: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
+  font-size: .82rem;
+}
+.insert-panel-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.insert-panel-title { margin: 0; display: flex; align-items: center; gap: .35rem; font-weight: 700; }
+.insert-panel-where { margin: 0; font-size: .76rem; color: var(--shell-text-dim); overflow-wrap: anywhere; }
+.insert-panel-section { display: flex; flex-direction: column; gap: .35rem; }
+.insert-panel-section + .insert-panel-section { padding-top: .55rem; border-top: 1px solid var(--shell-line); }
+.insert-panel-label { margin: 0; font-size: .76rem; font-weight: 600; color: var(--shell-text-dim); }
+.insert-choices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; max-height: 14rem; overflow-y: auto; }
+.insert-choice {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .3rem .4rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 6px;
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.insert-choice:hover:not(:disabled) { border-color: var(--accent); }
+.insert-choice .media-thumb { width: 3rem; height: 2rem; }
+.insert-choice-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.insert-choice-go { flex: none; color: var(--accent); font-size: .76rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .insert-slot::before, .insert-slot-btn { transition: none; }
+}

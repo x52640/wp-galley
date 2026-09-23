@@ -165,8 +165,13 @@ export interface ImageBriefDraft {
   readonly aspectRatio: string;
   readonly altText: string;
   readonly caption?: string;
-  /** 建議插入的位置描述，例如「第三段之後」。 */
+  /** 建議插入的位置描述，例如「第三段之後」。給人看的，不拿來定位。 */
   readonly placement?: string;
+  /**
+   * 錨點：這張圖要跟在後面的那一段裡的一小段**原文**（P5-T016）。後端拿它在目前這一版裡
+   * 定位，不存段落編號。封面沒有錨點。
+   */
+  readonly anchor?: string;
 }
 
 // --- 待處理清單 --------------------------------------------------------------
@@ -236,6 +241,11 @@ export interface ImageBrief {
   readonly caption: string | null;
   /** Agent 講的位置描述（「第三段之後」）。**不是**區塊索引。 */
   readonly placement: string | null;
+  /**
+   * 錨點：圖要跟在後面的那一段的原文片段（P5-T016）。上傳後後端用它自動放進正文。
+   * 封面、舊的配圖需求是 null。
+   */
+  readonly anchor: string | null;
   /** 已經有圖對上這條需求了。 */
   readonly fulfilled: boolean;
   readonly dismissed: boolean;
@@ -580,6 +590,28 @@ export interface MediaResponse {
    * 換圖（PUT）不給。
    */
   readonly autoFeature?: AutoFeatureResult | null;
+  /**
+   * 上傳對上內文圖的配圖需求時，照錨點自動放進正文的結果（P5-T016）。沒對上配圖需求、
+   * 或對上的是封面就是 null；換圖（PUT）不給。
+   */
+  readonly autoPlace?: AutoPlaceResult | null;
+}
+
+/**
+ * 內文圖上傳之後，有沒有照錨點自動放進正文（P5-T016）。
+ *
+ * - `placed`：放在 `afterBlockIndex` 那一段之後了（建了新版本，核准照規則失效）。
+ * - `not-found`：錨點在目前這一版裡找不到（或這條需求根本沒有錨點）。沒有放。
+ * - `ambiguous`：不只一段對得上，不猜。沒有放。
+ * - `replaced`：「換一張」——這條需求之前的圖在正文裡，新圖接替它的位置（舊圖拿出正文，留在媒體庫）。
+ * - `agent-running`：校稿或一鍵配圖正在跑，先不放（放了那一趟的結果會作廢）。
+ * - `failed`：想放但失敗了，`message` 講原因；圖已經在媒體庫。
+ */
+export interface AutoPlaceResult {
+  readonly outcome: 'placed' | 'replaced' | 'not-found' | 'ambiguous' | 'agent-running' | 'failed';
+  readonly message: string;
+  /** `placed`／`replaced` 時是放在第幾個頂層區塊之後（跟 `placeMedia` 同一套索引），其他是 null。 */
+  readonly afterBlockIndex: number | null;
 }
 
 /**
@@ -588,9 +620,10 @@ export interface MediaResponse {
  * - `set`：設好了（核准照規則失效）。
  * - `kept-existing`：已經有使用者選的別張封面，**不覆蓋**。
  * - `failed`：想設但失敗了，`message` 講原因；圖已經在媒體庫。
+ * - `agent-running`：校稿或一鍵配圖正在跑，先不設（設精選會建新版本，那一趟的結果會作廢，P5-T016）。
  */
 export interface AutoFeatureResult {
-  readonly outcome: 'set' | 'kept-existing' | 'failed';
+  readonly outcome: 'set' | 'kept-existing' | 'failed' | 'agent-running';
   readonly message: string;
 }
 export interface ImageCandidateResponse {

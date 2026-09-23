@@ -154,6 +154,47 @@ describe('生圖 API', () => {
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().autoFeature).toMatchObject({ outcome: 'set' });
+    // 封面不放進正文（P5-T016）。
+    expect(res.json().autoPlace).toBeNull();
+  });
+
+  it('POST /media 對上內文圖：回報自動放到錨點的結果（P5-T016）', async () => {
+    const inline = { ...COVER, key: 'inline_one', placement: '第 1 段之後', anchor: '今天' };
+    const instance = await build([
+      new FakeAdapter('codex', 'Codex', {
+        result: {
+          ok: true,
+          data: {
+            title: '20260828',
+            summary: '配圖',
+            correctedSource: '',
+            changes: [],
+            observations: [],
+            templateData: {},
+            imageBriefs: [inline],
+          },
+          meta: { runId: 'x', agentId: 'codex', model: null, durationMs: 1, stderrTail: '' },
+        },
+        image: {},
+      }),
+    ]);
+    const { uuid } = await jobWithBrief(instance);
+    const res = await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/media`,
+      headers,
+      payload: {
+        filename: 'inline',
+        mimeType: 'image/png',
+        dataBase64: Buffer.from(TINY_PNG).toString('base64'),
+        briefKey: 'inline_one',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().autoPlace).toMatchObject({ outcome: 'placed', afterBlockIndex: 0 });
+    expect(res.json().media).toMatchObject({ placed: true, placedAfterBlockIndex: 0 });
+    const detail = (await instance.inject({ method: 'GET', url: `/api/jobs/${uuid}`, headers })).json();
+    expect(detail.imageBriefs[0].anchor).toBe('今天');
   });
 
   it('候選圖編號不合法或不屬於這篇稿件：不給', async () => {

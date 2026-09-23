@@ -83,4 +83,12 @@ describe('migrations', () => {
     insert.run(jobId, 1, 'h1', 'source');
     expect(() => insert.run(jobId, 1, 'h2', 'agent_review')).toThrow();
   });
+
+  it('006：配圖需求多一欄錨點，舊資料是 NULL（P5-T016）', () => {
+    expect(listAppliedMigrations(db.handle).map((row) => row.id)).toContain('006');
+    const columns = db.handle.prepare('PRAGMA table_info(image_briefs)').all() as { name: string; notnull: number }[];
+    const anchor = columns.find((column) => column.name === 'anchor');
+    expect(anchor).toBeDefined();
+    expect(anchor?.notnull).toBe(0);
+  });
 });

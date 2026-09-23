@@ -163,6 +163,8 @@ export interface ImageBriefRow {
   readonly alt_text: string;
   readonly caption: string | null;
   readonly placement: string | null;
+  /** 這張圖要跟在後面的那一段的原文（migration 006）。封面與舊資料是 null。 */
+  readonly anchor: string | null;
   readonly created_at: string;
   readonly dismissed_at: string | null;
 }
@@ -789,12 +791,13 @@ export class Repository {
     altText: string;
     caption: string | null;
     placement: string | null;
+    anchor: string | null;
   }): void {
     this.db
       .prepare(`
         INSERT INTO image_briefs
-          (job_id, agent_run_id, brief_key, purpose, prompt, aspect_ratio, alt_text, caption, placement)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (job_id, agent_run_id, brief_key, purpose, prompt, aspect_ratio, alt_text, caption, placement, anchor)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (job_id, brief_key) DO UPDATE SET
           agent_run_id = excluded.agent_run_id,
           purpose      = excluded.purpose,
@@ -803,6 +806,7 @@ export class Repository {
           alt_text     = excluded.alt_text,
           caption      = excluded.caption,
           placement    = excluded.placement,
+          anchor       = excluded.anchor,
           created_at   = datetime('now'),
           dismissed_at = NULL
       `)
@@ -816,6 +820,7 @@ export class Repository {
         input.altText,
         input.caption,
         input.placement,
+        input.anchor,
       );
   }
 

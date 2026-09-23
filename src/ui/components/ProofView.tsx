@@ -35,6 +35,11 @@ import type { SuggestionKind } from '../lib/review-kinds.js';
  * 編輯時把 `.preview-body` 設成 contenteditable：使用者看到的是排好版的文章，不是標籤。
  * 這不需要 iframe 跑任何 script——打字是瀏覽器本身的行為，貼上的攔截與游標定位都由外層做。
  * 編輯中暫停字上標記與頁邊符號（位置會隨打字跑掉）。存檔送的是正文 HTML，後端整理後照常渲染。
+ *
+ * **五、在這裡插圖（P5-T016）。**
+ * 段落之間（含最前面與最後面）滑鼠移過去出現「在這裡插圖」。跟頁邊符號一樣畫在 iframe 外層，
+ * 位置用同一份量到的區塊座標算（上一段的底與下一段的頂的中間），iframe 裡什麼都不加。
+ * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
@@ -118,6 +123,7 @@ export function ProofView({
   editing = null,
   onSaveEdit,
   onEndEdit,
+  insertImage = null,
 }: {
   job: LoadedJob;
   /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
@@ -157,6 +163,11 @@ export function ProofView({
   onSaveEdit?: (html: string) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
+  /**
+   * 「在這裡插圖」按下去之後的面板內容（P5-T016）。null＝不給插（對照中、成品、稿件結束…）。
+   * `afterBlockIndex` 跟 `placeMedia` 同一套索引，-1＝最前面。
+   */
+  insertImage?: ((afterBlockIndex: number, close: () => void) => ReactNode) | null;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,6 +176,10 @@ export function ProofView({
   const [blocks, setBlocks] = useState<BlockBox[]>([]);
   const [height, setHeight] = useState(600);
   const [pinned, setPinned] = useState<string | null>(null);
+  /** 正文欄在 iframe 裡的水平位置：插圖的線只畫在文字那一欄，不橫跨整張紙。 */
+  const [column, setColumn] = useState<{ left: number; width: number } | null>(null);
+  /** 打開了哪一個「在這裡插圖」（插在第幾塊之後）；null＝沒打開。 */
+  const [inserting, setInserting] = useState<number | null>(null);
   const [showMarks, setShowMarks] = useState(true);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -266,6 +281,7 @@ export function ProofView({
     setBodyMissing(false);
     setBlocks([]);
     setPinned(null);
+    setInserting(null);
     onBlocksRef.current?.([]);
     onPreviewHashRef.current?.(null);
   }, [revisionKey]);
@@ -310,6 +326,14 @@ export function ProofView({
 
     const body = doc.querySelector('.preview-body');
     const children = body ? Array.from(body.children) : [];
+    if (body) {
+      const box = body.getBoundingClientRect();
+      setColumn((current) =>
+        current !== null && current.left === box.left && current.width === box.width
+          ? current
+          : { left: box.left, width: box.width },
+      );
+    }
     const measured = children.map((element, index) => {
       const box = element.getBoundingClientRect();
       return {
@@ -492,6 +516,32 @@ export function ProofView({
 
   const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
 
+  // 不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
+  const canInsert = insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0;
+  useEffect(() => {
+    if (!canInsert) setInserting(null);
+  }, [canInsert]);
+  const slots = canInsert ? insertSlots(blocks) : [];
+  const openSlot = inserting === null ? undefined : slots.find((slot) => slot.after === inserting);
+  /** 關掉插圖面板，焦點回到打開它的那顆「在這裡插圖」（放好之後版本換了、按鈕不在了就算了）。 */
+  const closeInsert = useCallback(() => {
+    const after = inserting;
+    setInserting(null);
+    if (after === null) return;
+    window.requestAnimationFrame(() => {
+      scrollRef.current?.querySelector<HTMLElement>(`.insert-slot-btn[data-after='${after}']`)?.focus({ preventScroll: true });
+    });
+  }, [inserting]);
+  // 面板打開在段落下面，靠近視窗底時會被切掉；捲到看得見整個面板為止。
+  const popRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (inserting === null) return;
+    popRef.current?.scrollIntoView({
+      block: 'nearest',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
+  }, [inserting]);
+
   return (
     <section className="proof" aria-label="校樣">
       <header className="proof-bar">
@@ -580,6 +630,42 @@ export function ProofView({
                       />
                     );
                   }),
+                )}
+              </div>
+            )}
+
+            {slots.length > 0 && column !== null && (
+              <div className="proof-inserts" aria-label="插入圖片的位置">
+                {slots.map((slot) => (
+                  <div
+                    key={slot.after}
+                    className="insert-slot"
+                    data-open={inserting === slot.after ? 'yes' : 'no'}
+                    style={{ top: `${slot.y - 12}px`, left: `${column.left}px`, width: `${column.width}px` }}
+                  >
+                    <button
+                      type="button"
+                      className="insert-slot-btn"
+                      data-after={slot.after}
+                      aria-expanded={inserting === slot.after}
+                      onClick={() => setInserting((current) => (current === slot.after ? null : slot.after))}
+                    >
+                      <Icon name="image-plus" size={13} />
+                      在這裡插圖
+                      <span className="sr-only">
+                        {slot.after < 0 ? '（文章最前面）' : `（第 ${slot.after + 1} 段之後）`}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+                {openSlot !== undefined && insertImage !== null && (
+                  <div
+                    ref={popRef}
+                    className="insert-pop"
+                    style={{ top: `${openSlot.y + 16}px`, left: `${column.left}px`, width: `${Math.min(column.width, 416)}px` }}
+                  >
+                    {insertImage(openSlot.after, closeInsert)}
+                  </div>
                 )}
               </div>
             )}
@@ -733,6 +819,23 @@ function MarkPin({
       </div>
     </div>
   );
+}
+
+/**
+ * 段落之間可以插圖的位置：最前面（-1）、每一段之後。`y` 是兩段之間空白的中間
+ * （最前面是第一段頂上一點，最後面是最後一段底下一點），座標跟頁邊符號同一套。
+ */
+function insertSlots(blocks: readonly BlockBox[]): { after: number; y: number }[] {
+  const sorted = [...blocks].sort((a, b) => a.index - b.index);
+  const first = sorted[0];
+  if (first === undefined) return [];
+  const slots = [{ after: -1, y: first.top - 18 }];
+  sorted.forEach((block, i) => {
+    const bottom = block.top + block.height;
+    const next = sorted[i + 1];
+    slots.push({ after: block.index, y: next === undefined ? bottom + 18 : (bottom + next.top) / 2 });
+  });
+  return slots;
 }
 
 function groupMarks(marks: ProofMark[]): { blockIndex: number; marks: ProofMark[] }[] {

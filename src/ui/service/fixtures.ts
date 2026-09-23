@@ -1,5 +1,8 @@
+import { findIgnoringSpaces } from '../../contract/text-match.js';
+import { hasWpImageClass } from '../../contract/media-marker.js';
 import type {
   AddMediaInput,
+  AutoPlaceResult,
   AgentReviewInput,
   AgentRunResult,
   Approval,
@@ -312,6 +315,7 @@ function diaryBriefs(): ImageBrief[] {
       altText: '雨天路口積水處反射著紅色招牌的燈光',
       caption: null,
       placement: '第 2 段之後',
+      anchor: '路口的紅燈前積了一小攤水',
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T09:41:00Z',
@@ -329,6 +333,8 @@ function diaryBriefs(): ImageBrief[] {
       altText: '木桌上攤開一本泛黃的舊筆記本',
       caption: '去年的筆記',
       placement: '第 3 段之後',
+      // 故意對不上：AI 引用時把「筆記」寫成「日記」。練「找不到建議的位置」那條路（P5-T016）。
+      anchor: '把去年的日記翻出來對照',
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T09:41:00Z',
@@ -355,6 +361,7 @@ function longformBriefs(): ImageBrief[] {
       altText: '霧中亮著的紅色警示燈，遠處有人影走近',
       caption: null,
       placement: '精選圖片',
+      anchor: null,
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T10:05:00Z',
@@ -370,6 +377,7 @@ function longformBriefs(): ImageBrief[] {
       altText: '三個步驟首尾相連形成循環的示意圖',
       caption: '回報的循環',
       placement: '第 4 段之後',
+      anchor: '修正必須看得到結果',
       fulfilled: false,
       dismissed: false,
       createdAt: '2026-08-28T10:05:00Z',
@@ -686,6 +694,116 @@ function invalidateApproval(job: FixtureJob, _reason: string): void {
   }
 }
 
+/**
+ * 正文的頂層區塊（HTML）。示範資料跑在瀏覽器裡，直接借 DOMParser 拆；規則跟後端的
+ * splitTopLevelBlocks 一樣只看頂層元素（示範資料的正文沒有裸文字）。
+ */
+function bodyBlocks(html: string): string[] {
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html');
+  return Array.from(doc.body.firstElementChild?.children ?? []).map((element) => element.outerHTML);
+}
+
+function blockText(html: string): string {
+  return new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
+}
+
+/** 圖片在不在正文、在第幾段之後，跟後端一樣從正文算，不另外記。 */
+function syncPlacement(job: FixtureJob): void {
+  const blocks = bodyBlocks(readBody(job));
+  job.media = job.media.map((asset) => {
+    const at =
+      asset.wordpressMediaId === null ? -1 : blocks.findIndex((html) => hasWpImageClass(html, asset.wordpressMediaId!));
+    return { ...asset, placed: at >= 0, placedAfterBlockIndex: at >= 0 ? at - 1 : null };
+  });
+}
+
+/** 換一版正文：版本 +1、換 hash、撕核准。跟後端 createRevision 的效果一樣。 */
+function replaceBody(job: FixtureJob, body: string, reason: string): void {
+  if (!job.currentRevision) return;
+  invalidateApproval(job, reason);
+  job.currentRevision = {
+    ...job.currentRevision,
+    number: job.currentRevision.number + 1,
+    origin: 'media',
+    contentHash: nextHash().padEnd(64, '0'),
+    templateData: { ...job.currentRevision.templateData, body },
+    publishHtml: body,
+  };
+  job.revisionCount += 1;
+  syncPlacement(job);
+}
+
+/** 正文裡的圖片區塊，跟後端 buildFigureHtml 同樣的形狀。 */
+function figureHtml(asset: MediaAsset): string {
+  const caption = asset.caption ? `<figcaption class="wp-element-caption">${asset.caption}</figcaption>` : '';
+  return (
+    `<figure class="wp-block-image size-large aligncenter"><img src="${asset.url ?? ''}" alt="${asset.altText ?? ''}" ` +
+    `class="wp-image-${asset.wordpressMediaId}" />${caption}</figure>`
+  );
+}
+
+/** 照錨點自動放（跟後端 autoPlace 同一套規則：忽略空白、剛好一段才放）。 */
+/** 校稿或一鍵配圖正在跑（生圖不算）：這時建新版本會讓那一趟的結果作廢，跟後端 contentRunActive 一樣。 */
+function contentRunActive(job: FixtureJob): boolean {
+  return job.agentRun?.status === 'running' && job.agentRun.task !== 'generate-image';
+}
+
+async function fixtureAutoPlace(job: FixtureJob, asset: MediaAsset, brief: ImageBrief): Promise<AutoPlaceResult> {
+  if (contentRunActive(job)) {
+    return {
+      outcome: 'agent-running',
+      message:
+        'AI 還在跑，等它跑完再放（圖已經上傳了）：跑完之後在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。',
+      afterBlockIndex: null,
+    };
+  }
+  // 「換一張」：同一條需求較新的舊圖還在正文裡，新圖接替它的位置。
+  const blocks = bodyBlocks(readBody(job));
+  const previous = [...job.media]
+    .reverse()
+    .find(
+      (row) =>
+        row.id !== asset.id &&
+        row.briefKey === brief.key &&
+        row.wordpressMediaId !== null &&
+        blocks.some((html) => hasWpImageClass(html, row.wordpressMediaId!)),
+    );
+  if (previous) {
+    const figure = figureHtml(asset);
+    const next = blocks.map((html) => (hasWpImageClass(html, previous.wordpressMediaId!) ? figure : html));
+    replaceBody(job, next.join('\n'), '換一張配圖');
+    const at = next.findIndex((html) => html === figure) - 1;
+    return {
+      outcome: 'replaced',
+      message: `已換掉正文裡原本那張（${at < 0 ? '文章最前面' : `第 ${at + 1} 段之後`}）。舊圖拿出正文了，還留在媒體庫。`,
+      afterBlockIndex: at,
+    };
+  }
+  const why = (text: string): string =>
+    `找不到建議的位置，請自己放：${text}在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。`;
+  const anchor = brief.anchor?.trim() ?? '';
+  if (anchor === '') return { outcome: 'not-found', message: why('AI 沒有指定要放在哪一段。'), afterBlockIndex: null };
+  const hits = bodyBlocks(readBody(job)).flatMap((html, index) =>
+    findIgnoringSpaces(blockText(html), anchor) === null ? [] : [index],
+  );
+  if (hits.length === 0) {
+    return {
+      outcome: 'not-found',
+      message: why(`AI 引用的「${anchor}」在目前的文章裡找不到（可能改過了）。`),
+      afterBlockIndex: null,
+    };
+  }
+  if (hits.length > 1) {
+    return {
+      outcome: 'ambiguous',
+      message: why(`AI 引用的「${anchor}」在文章裡出現在 ${hits.length} 段，不確定是哪一段。`),
+      afterBlockIndex: null,
+    };
+  }
+  await fixtureApi.placeMedia(job.uuid, asset.id, hits[0]!);
+  return { outcome: 'placed', message: `已放進正文第 ${hits[0]! + 1} 段之後。`, afterBlockIndex: hits[0]! };
+}
+
 const delay = (ms = 220): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const fixtureApi: PublisherApi = {
@@ -739,7 +857,9 @@ export const fixtureApi: PublisherApi = {
 
   async getJob(uuid: string) {
     await delay(90);
-    return clone(mustGet(uuid));
+    const job = mustGet(uuid);
+    syncPlacement(job);
+    return clone(job);
   },
 
   async cancelJob(uuid: string) {
@@ -866,6 +986,7 @@ export const fixtureApi: PublisherApi = {
           altText: brief.altText,
           ...(brief.caption === null ? {} : { caption: brief.caption }),
           ...(brief.placement === null ? {} : { placement: brief.placement }),
+          ...(brief.anchor === null ? {} : { anchor: brief.anchor }),
         })),
         task,
         review: clone(job.review),
@@ -1052,10 +1173,10 @@ export const fixtureApi: PublisherApi = {
   async addMedia(uuid: string, input: AddMediaInput): Promise<MediaUploadResult> {
     await delay(500);
     const job = mustGet(uuid);
-    invalidateApproval(job, '加了新的圖片');
+    // 上傳本身不改正文，核准不失效（跟後端一樣）；自動放進正文或設精選時才失效。
     const asset: MediaAsset = {
-      // 剛加進來還沒上傳到 WordPress，所以 url 是 null——這正是要練到的狀態。
-      ...media(Math.floor(Math.random() * 900) + 100, input.altText ?? '', false),
+      // 跟後端一樣：上傳成功就有 WordPress 的媒體編號與網址，才放得進正文（P5-T016）。
+      ...media(Math.floor(Math.random() * 900) + 100, input.altText ?? '', true),
       byteSize: input.file.size,
       mimeType: input.mimeType,
       briefKey: input.briefKey ?? null,
@@ -1066,10 +1187,24 @@ export const fixtureApi: PublisherApi = {
     // 對上配圖需求就算完成；封面那條在沒有別的封面時自動設成精選（跟後端的 autoFeature 一樣，
     // 不覆蓋使用者選的封面）。
     const brief = input.briefKey === undefined ? undefined : job.imageBriefs.find((row) => row.key === input.briefKey);
-    if (!brief) return { media: clone(asset), autoFeature: null };
+    if (!brief) return { media: clone(asset), autoFeature: null, autoPlace: null };
     job.imageBriefs = job.imageBriefs.map((row) => (row.id === brief.id ? { ...row, fulfilled: true } : row));
-    if (!brief.isFeatured) return { media: clone(asset), autoFeature: null };
+    if (!brief.isFeatured) {
+      const autoPlace = await fixtureAutoPlace(job, asset, brief);
+      const placed = job.media.find((row) => row.id === asset.id) ?? asset;
+      return { media: clone(placed), autoFeature: null, autoPlace };
+    }
 
+    if (contentRunActive(job)) {
+      return {
+        media: clone(asset),
+        autoFeature: {
+          outcome: 'agent-running',
+          message: 'AI 還在跑，等它跑完再設成精選（圖已經上傳了）：跑完之後按圖片上的「設為精選」。',
+        },
+        autoPlace: null,
+      };
+    }
     const current = job.media.find((row) => row.id === job.featuredMediaId);
     if (current && current.briefKey !== brief.key) {
       return {
@@ -1078,12 +1213,14 @@ export const fixtureApi: PublisherApi = {
           outcome: 'kept-existing',
           message: '已經有封面了，沒有換掉。要換成這張，按圖片上的「設為精選」。',
         },
+        autoPlace: null,
       };
     }
     await fixtureApi.setFeaturedMedia(uuid, asset.id);
     return {
       media: clone({ ...asset, featured: true }),
       autoFeature: { outcome: 'set', message: '已設成精選圖片。' },
+      autoPlace: null,
     };
   },
 
@@ -1104,17 +1241,37 @@ export const fixtureApi: PublisherApi = {
     await delay();
     const job = mustGet(uuid);
     invalidateApproval(job, '移除了一張圖片');
+    const removed = job.media.find((asset) => asset.id === assetId);
+    if (removed?.wordpressMediaId != null) {
+      const wpId = removed.wordpressMediaId;
+      const blocks = bodyBlocks(readBody(job));
+      if (blocks.some((html) => hasWpImageClass(html, wpId))) {
+        replaceBody(job, blocks.filter((html) => !hasWpImageClass(html, wpId)).join('\n'), '移除了一張圖片');
+      }
+    }
     job.media = job.media.filter((asset) => asset.id !== assetId);
     if (job.featuredMediaId === assetId) job.featuredMediaId = null;
   },
 
+  /** 真的把圖插進正文（校樣上看得到），跟後端一樣：已經在正文裡就是搬家。 */
   async placeMedia(uuid: string, assetId: number, afterBlockIndex: number) {
     await delay();
     const job = mustGet(uuid);
-    invalidateApproval(job, '移動了圖片的位置');
-    job.media = job.media.map((asset) =>
-      asset.id === assetId ? { ...asset, placed: true, placedAfterBlockIndex: afterBlockIndex } : asset,
-    );
+    const asset = job.media.find((row) => row.id === assetId);
+    if (!asset || asset.wordpressMediaId === null || asset.url === null) {
+      throw new Error('這張圖還沒上傳到 WordPress，無法插進正文');
+    }
+    const wpId = asset.wordpressMediaId;
+    const blocks = bodyBlocks(readBody(job));
+    if (afterBlockIndex < -1 || afterBlockIndex > blocks.length - 1) {
+      throw new Error(`插入位置 ${afterBlockIndex} 超出範圍`);
+    }
+    const removedBefore = blocks.filter((html, index) => hasWpImageClass(html, wpId) && index <= afterBlockIndex).length;
+    const kept = blocks.filter((html) => !hasWpImageClass(html, wpId));
+    const target = afterBlockIndex - removedBefore;
+    const figure = figureHtml(asset);
+    kept.splice(target + 1, 0, figure);
+    replaceBody(job, kept.join('\n'), '移動了圖片的位置');
   },
 
   async setFeaturedMedia(uuid: string, assetId: number | null) {

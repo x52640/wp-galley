@@ -131,6 +131,14 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
           altText: { type: 'string', maxLength: 300 },
           caption: { type: 'string', maxLength: 500 },
           placement: { type: 'string', maxLength: 200 },
+          // 選填（不列 required）：Codex 的 strict schema 會把它轉成 nullable，回來的 null 在驗證前被拿掉。
+          anchor: {
+            type: 'string',
+            maxLength: 200,
+            description:
+              '內文圖要跟在哪一段後面：從那一段裡一字不差地引用一小段原文（10 到 30 字，挑整篇只出現一次的句子）。' +
+              '不要寫段落編號。封面（精選圖片）不放進正文，這一欄留空。',
+          },
         },
       },
     },

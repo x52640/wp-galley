@@ -4,12 +4,13 @@ import { isLoaded, type JobDetail, type ReviewItem } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
-import { stageDisplay, type StageView } from '../lib/stage-view.js';
+import { canInsertImages, stageDisplay, type StageView } from '../lib/stage-view.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
 import { useConfirm } from './ConfirmDialog.js';
 import { CompareView } from './CompareView.js';
 import { typeLabel } from './JobList.js';
+import { InsertImagePanel } from './InsertImagePanel.js';
 import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn } from './SuggestionColumn.js';
@@ -232,6 +233,12 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     (job.target.requireFeaturedImage && job.featuredMediaId === null);
   const showImages = imagesOpen ?? imagesAttention;
   const display = stageDisplay(view, sheet === 'publish');
+  // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
+  const insertable = canInsertImages(display, {
+    editing: editing !== null,
+    finished: isFinished(job.state),
+    working: working === true,
+  });
   // 編輯中工具列整條換成「取消／儲存」，這顆按鈕本來就看不到；這裡再擋一次，不讓編輯中進對照。
   // 字跟著畫面上實際顯示的走：從對照打開發布面板時，成品上方不能還寫著「回到文章」。
   const compareToggle = (
@@ -341,6 +348,23 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             onPreviewHash={onPreviewHash}
             editing={editing}
             onEndEdit={endEdit}
+            insertImage={
+              insertable
+                ? (afterBlockIndex, close) => (
+                    <InsertImagePanel
+                      job={job}
+                      afterBlockIndex={afterBlockIndex}
+                      blockText={blocks.find((block) => block.index === afterBlockIndex)?.text ?? null}
+                      onRefresh={refresh}
+                      onPlaced={async () => {
+                        close();
+                        await refresh();
+                      }}
+                      onClose={close}
+                    />
+                  )
+                : null
+            }
             onSaveEdit={async (html) => {
               const base = job.currentRevision?.contentHash;
               const saved = await api.createRevision(job.uuid, {
