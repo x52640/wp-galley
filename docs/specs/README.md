@@ -14,7 +14,7 @@
 | [agent-cli.md](agent-cli.md) | 三個 CLI 的參數與怪癖、adapter 介面與執行規則 | 現行 |
 | [templates.md](templates.md) | 模板結構、manifest、嚴格度、內容類型與發布目標對應 | 現行 |
 | [wordpress-site.md](wordpress-site.md) | 目標站台實測事實 | 現行 |
-| [design-system.md](design-system.md) | 顏色、字體、版面、品質底線、文案 | 「版面」一節已被 D-013 取代 |
+| [design-system.md](design-system.md) | 顏色、字體、版面、品質底線、文案 | 現行（B 版） |
 | [testing.md](testing.md) | 測試守則 | 現行 |
 | [factcheck.md](factcheck.md) | 階段 6 AI 查證 | 草案 |
 | [mcp.md](mcp.md) | MCP 工具與 MCP 專屬安全規則 | 草案 |

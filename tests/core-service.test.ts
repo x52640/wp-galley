@@ -88,6 +88,8 @@ describe('建立與讀取', () => {
     expect(detail.marks).toEqual([]);
     // 分類面板靠這個決定能不能建新項目；以前後端沒送，畫面永遠當成「關閉」。
     expect(detail.target?.allowCreateTerms).toBe(false);
+    // 發布面板靠它講清楚「發到 WordPress 的哪個內容類型」。
+    expect(detail.target?.postType).toBe('diary');
   });
 
   it('空白原稿不給建立', async () => {

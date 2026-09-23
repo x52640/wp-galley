@@ -238,6 +238,8 @@ export interface JobTarget {
   readonly key: string;
   readonly displayName: string;
   readonly contentType: string;
+  /** WordPress 裡的內容類型（read-think、diary）。發布面板用它講清楚「發到哪裡」。 */
+  readonly postType: string;
   readonly taxonomy: string | null;
   readonly requireFeaturedImage: boolean;
   /** 設定檔有沒有允許從發布台建立新的分類項目（D-004：預設不允許）。 */
@@ -395,7 +397,6 @@ export interface Term {
 
 /** `GET /api/wordpress` 列出的發布目標。設定檔沒有秘密，但只給 UI 需要的欄位。 */
 export interface PublishTargetSummary extends JobTarget {
-  readonly postType: string;
   readonly templateId: string;
 }
 

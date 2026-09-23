@@ -142,6 +142,8 @@ export function ProofView({
    * PREVIEWED（人一定看過才准核准）。所以每次進入 RENDERED 就換一個網址重載一次。
    */
   const [renderEpoch, setRenderEpoch] = useState(0);
+  /** 示範資料上一次拿到的校樣原始碼。 */
+  const lastSrcDoc = useRef<string | null>(null);
   useEffect(() => {
     if (job.state === 'RENDERED') setRenderEpoch((epoch) => epoch + 1);
   }, [job.state]);
@@ -161,7 +163,16 @@ export function ProofView({
     api
       .fetchPreview(job.uuid)
       .then((text) => {
-        if (!cancelled) setSrcDoc(text);
+        if (cancelled) return;
+        // 內容一模一樣時 iframe 不會重載、也就不會觸發 onLoad。抓這一次本身就等於
+        // 「看過了」，所以直接收尾，不然畫面會一直停在「載入校樣…」。
+        if (text === lastSrcDoc.current) {
+          setLoading(false);
+          onPreviewedRef.current?.();
+          return;
+        }
+        lastSrcDoc.current = text;
+        setSrcDoc(text);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(describeError(cause));
@@ -169,7 +180,8 @@ export function ProofView({
     return () => {
       cancelled = true;
     };
-  }, [job.uuid, revisionKey, hasRevision, fixtures]);
+    // renderEpoch：渲染之後要重抓一次，示範資料才會跟真的後端一樣推進 PREVIEWED。
+  }, [job.uuid, revisionKey, hasRevision, fixtures, renderEpoch]);
 
   /**
    * 換版本＝上一版量到的東西全部作廢。

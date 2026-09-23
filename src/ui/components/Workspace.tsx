@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
-import { isLoaded, type JobDetail, type LoadedJob, type ReviewItem } from '../service/types.js';
+import { isLoaded, type JobDetail, type ReviewItem } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
@@ -13,11 +13,9 @@ import { ProofView, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn } from './SuggestionColumn.js';
 import { ViewSwitch, type StageMode } from './ViewSwitch.js';
-import { ApprovePanel } from './panels/ApprovePanel.js';
 import { MediaPanel } from './panels/MediaPanel.js';
-import { PublishPanel } from './panels/PublishPanel.js';
+import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
-import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
 
 /**
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
@@ -353,42 +351,21 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
 
       {sheet === 'publish' && (
         <Sheet title="發布" onClose={closeSheet}>
-          <PublishSheetBody job={job} refresh={refresh} previewHash={previewHash} />
+          <PublishSheet
+            job={job}
+            refresh={refresh}
+            previewHash={previewHash}
+            onGoTo={(where) => {
+              setSheet(null);
+              setMode('edit');
+              if (where === 'images') setImagesOpen(true);
+            }}
+          />
           <div className="sheet-foot">
             <CancelButton job={job} refresh={refresh} confirm={confirm} />
           </div>
         </Sheet>
       )}
-    </div>
-  );
-}
-
-/** P5-T007 之前的發布抽屜：沿用分類、核准、發布三張卡片的內容。 */
-function PublishSheetBody({
-  job,
-  refresh,
-  previewHash,
-}: {
-  job: LoadedJob;
-  refresh: () => Promise<void>;
-  previewHash: string | null;
-}): JSX.Element {
-  return (
-    <div className="stack">
-      {job.target.taxonomy !== null && (
-        <section className="sheet-section">
-          <h3 className="sheet-section-title">分類</h3>
-          <TaxonomyPanel job={job} refresh={refresh} />
-        </section>
-      )}
-      <section className="sheet-section">
-        <h3 className="sheet-section-title">核准</h3>
-        <ApprovePanel job={job} refresh={refresh} previewHash={previewHash} />
-      </section>
-      <section className="sheet-section">
-        <h3 className="sheet-section-title">發布</h3>
-        <PublishPanel job={job} refresh={refresh} />
-      </section>
     </div>
   );
 }

@@ -384,6 +384,7 @@ export class CoreService {
             key: target.key,
             displayName: target.displayName,
             contentType: target.contentType,
+            postType: target.postType,
             taxonomy: target.taxonomy,
             requireFeaturedImage: target.requireFeaturedImage,
             allowCreateTerms: target.allowCreateTerms,

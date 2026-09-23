@@ -10,7 +10,7 @@
 
 ## 進行中
 
-- **P5-T007** B2 發布面板 → [tasks/P5-T007-ui-b2-publish.md](tasks/P5-T007-ui-b2-publish.md)
+無。B 版三個畫面（P5-T003／T006／T007）已完成。下一個建議：P5-T001（陪使用者實測，需要使用者在場）。
 
 ## Ready
 
@@ -37,7 +37,8 @@
 - `core-service.md` 的方法清單是節錄 → P5-T004。
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。
-- `design-system.md` 的「版面」一節已被 D-013 取代，P5-T003 改寫。
+- 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。
+- 「改原文」抽屜的正文是原始 HTML，對寫作者不友善，尚未開 Task。
 - 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
   `docs/specs/review-proposals.md` 的逐項套用定位規則。
 

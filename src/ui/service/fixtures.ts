@@ -472,7 +472,7 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
 
 function buildStore(): Map<string, FixtureJob> {
   const jobs: FixtureJob[] = [
-    baseDiary('f-source', { state: 'SOURCE', blockers: ['尚未渲染'] }),
+    baseDiary('f-source', { state: 'SOURCE', blockers: ['還沒渲染，先按「渲染」產生校樣'] }),
     baseDiary('f-reviewed', {
       state: 'REVIEWED',
       marks: DIARY_MARKS,
@@ -487,15 +487,15 @@ function buildStore(): Map<string, FixtureJob> {
       },
       review: diaryReview(),
       imageBriefs: diaryBriefs(),
-      blockers: ['還有 4 項校稿建議沒處理', '尚未渲染'],
+      blockers: ['還有 4 項校稿建議沒處理', '還沒渲染，先按「渲染」產生校樣'],
     }),
     baseLongform('f-media', {
       state: 'MEDIA_READY',
       media: [media(41, '雨天的路口'), media(42, '回報流程圖', false)],
       featuredMediaId: null,
-      blockers: ['這個發布目標必須設定精選圖片', '尚未渲染'],
+      blockers: ['這個發布目標必須設定精選圖片', '還沒渲染，先按「渲染」產生校樣'],
     }),
-    baseLongform('f-rendered', { state: 'RENDERED', blockers: ['尚未核准'] }),
+    baseLongform('f-rendered', { state: 'RENDERED', blockers: ['還沒核准'] }),
     baseDiary('f-previewed', {
       state: 'PREVIEWED',
       marks: DIARY_MARKS,
@@ -508,7 +508,7 @@ function buildStore(): Map<string, FixtureJob> {
         finishedAt: '2026-08-28T09:39:02Z',
         errorMessage: null,
       },
-      blockers: ['尚未核准'],
+      blockers: ['還沒核准'],
     }),
     baseLongform('f-approved', {
       state: 'APPROVED',
@@ -529,7 +529,7 @@ function buildStore(): Map<string, FixtureJob> {
         createdAt: '2026-08-28T10:20:00Z',
         valid: false,
       },
-      blockers: ['核准已失效，請重新核准'],
+      blockers: ['內容改過了，核准已失效，請重新預覽並核准'],
     }),
     baseLongform('f-publishing', {
       state: 'PUBLISHING',
@@ -586,7 +586,7 @@ function invalidateApproval(job: FixtureJob, _reason: string): void {
   if (job.approval && job.approval.valid) {
     job.approval = { ...job.approval, valid: false };
     if (job.state === 'APPROVED') job.state = 'RENDERED';
-    job.blockers = ['核准已失效，請重新核准'];
+    job.blockers = ['內容改過了，核准已失效，請重新預覽並核准'];
   }
 }
 
@@ -628,7 +628,7 @@ export const fixtureApi: PublisherApi = {
       approval: null,
       published: null,
       agentRun: null,
-      blockers: ['尚未渲染'],
+      blockers: ['還沒渲染，先按「渲染」產生校樣'],
       sourceText: input.sourceText,
       currentRevision: revision(
         1,
@@ -677,7 +677,7 @@ export const fixtureApi: PublisherApi = {
     await delay(420);
     const job = mustGet(uuid);
     job.state = 'RENDERED';
-    job.blockers = ['尚未核准'];
+    job.blockers = ['還沒核准'];
     const current = job.currentRevision;
     return {
       revisionId: current?.id ?? 0,
@@ -690,9 +690,15 @@ export const fixtureApi: PublisherApi = {
     };
   },
 
+  // 跟真的後端一樣：載入校樣＝使用者看過了，RENDERED 推進 PREVIEWED（核准只能從那裡出發）。
   async fetchPreview(uuid: string) {
     await delay(160);
-    return previewDocument(mustGet(uuid));
+    const job = mustGet(uuid);
+    if (job.state === 'RENDERED') {
+      job.state = 'PREVIEWED';
+      job.blockers = job.blockers.filter((blocker) => blocker !== '還沒渲染，先按「渲染」產生校樣');
+    }
+    return previewDocument(job);
   },
 
   // 示範資料沒有真的 HTTP 回應，校樣一定是照目前這一版畫的，所以直接回它的 hash。
@@ -935,7 +941,7 @@ export const fixtureApi: PublisherApi = {
     const job = mustGet(uuid);
     if (job.approval) job.approval = { ...job.approval, valid: false };
     job.state = 'RENDERED';
-    job.blockers = ['尚未核准'];
+    job.blockers = ['還沒核准'];
   },
 
   async publish(uuid: string, input: PublishInput): Promise<PublishResult> {

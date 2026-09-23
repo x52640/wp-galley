@@ -328,10 +328,6 @@ h1, h2, h3 { font-weight: 600; }
 .segmented-item + .segmented-item { border-left: 1px solid var(--shell-line); }
 .segmented-item[data-active='yes'] { background: var(--shell-panel); color: var(--shell-text); font-weight: 600; }
 
-.radios { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
-.radio { display: flex; gap: .55rem; align-items: flex-start; cursor: pointer; }
-.radio span { display: flex; flex-direction: column; }
-.radio-hint { font-size: .78rem; color: var(--shell-text-dim); }
 
 .note {
   display: flex;
@@ -532,8 +528,6 @@ h1, h2, h3 { font-weight: 600; }
 
 /* --- 抽屜裡沿用的面板內容 ------------------------------------------------ */
 
-.approve-copy { margin: 0; font-size: .84rem; line-height: 1.75; color: var(--shell-text-dim); }
-.approve-hash { color: var(--shell-text); padding: 0 .25rem; }
 
 .disclosure { border-top: 1px solid var(--shell-line); padding-top: .6rem; }
 .disclosure-toggle {
@@ -1425,6 +1419,100 @@ h1, h2, h3 { font-weight: 600; }
 .sheet-section + .sheet-section { padding-top: 1.1rem; border-top: 1px solid var(--shell-line); }
 .sheet-section-title { margin: 0; font-size: .95rem; }
 .sheet-foot { padding: 1.5rem 0 0; }
+
+/* --- B2 發布面板 -------------------------------------------------------- */
+
+.publish { display: flex; flex-direction: column; gap: 1.2rem; }
+.p-section { display: flex; flex-direction: column; gap: .55rem; }
+.p-section + .p-section { padding-top: 1.1rem; border-top: 1px solid var(--shell-line); }
+.p-label { display: flex; align-items: center; gap: .5rem; margin: 0; font-size: .9rem; color: var(--shell-text-dim); }
+.p-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: var(--shell-sunken);
+  color: var(--shell-text);
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.p-dest {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .8rem .95rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+}
+.p-dest svg { color: var(--accent); flex: none; }
+.p-dest-main { display: flex; flex-direction: column; gap: .1rem; }
+.p-dest-main b { font-size: 1rem; }
+.p-dest-main span { font-size: .82rem; color: var(--shell-text-dim); }
+
+.p-todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.p-todo li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .6rem .8rem;
+  border-radius: 10px;
+  background: var(--shell-sunken);
+  font-size: .88rem;
+}
+.p-todo li[data-tone='warn'] { background: color-mix(in srgb, var(--warn-on-shell) 12%, var(--shell-panel)); color: var(--warn-on-shell); }
+.p-todo li[data-tone='bad'] { background: color-mix(in srgb, var(--danger-on-shell) 10%, var(--shell-panel)); color: var(--danger-on-shell); }
+
+.p-cover { display: flex; align-items: center; gap: .75rem; }
+.p-cover-thumb { width: 5.5rem; height: 3.6rem; flex: none; border-radius: 8px; object-fit: cover; background: var(--shell-sunken); }
+.p-cover-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--shell-text-dim); }
+.p-cover-text { flex: 1; min-width: 0; font-size: .88rem; }
+
+.p-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.p-way {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  padding: .75rem .85rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.p-way span { font-size: .78rem; color: var(--shell-text-dim); line-height: 1.5; }
+.p-way[data-active='yes'] { border: 2px solid var(--accent); background: var(--accent-soft); padding: calc(.75rem - 1px) calc(.85rem - 1px); }
+.p-way[data-active='yes'][data-danger='yes'] {
+  border-color: var(--danger-on-shell);
+  background: color-mix(in srgb, var(--danger-on-shell) 8%, var(--shell-panel));
+}
+
+.p-warn {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  padding: .8rem .9rem;
+  border: 1px solid color-mix(in srgb, var(--danger-on-shell) 35%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger-on-shell) 6%, var(--shell-panel));
+  color: var(--danger-on-shell);
+  font-size: .88rem;
+  line-height: 1.7;
+}
+.p-warn p { display: flex; gap: .5rem; margin: 0; }
+.p-warn svg { flex: none; margin-top: .25rem; }
+.p-check { display: flex; align-items: center; gap: .5rem; font-weight: 700; cursor: pointer; }
+.p-check input { width: 1.1rem; height: 1.1rem; accent-color: var(--danger-on-shell); }
+
+.p-go { display: flex; flex-direction: column; gap: .45rem; padding-top: .3rem; }
+.p-go-btn { justify-content: center; width: 100%; }
+.p-go-btn[data-danger='yes']:not(:disabled) { background: var(--danger-on-shell); border-color: var(--danger-on-shell); }
+.p-why { margin: 0; font-size: .8rem; color: var(--shell-text-dim); line-height: 1.6; text-align: center; }
 
 /* --- 尺寸 ---------------------------------------------------------------
    桌面優先（這是本機工具），但 1024px 不能爆版。
