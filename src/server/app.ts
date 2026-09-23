@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AppConfig } from '../config/env.js';
 import { collectSecrets } from '../config/env.js';
-import { createSecretScrubber } from '../config/secrets.js';
+import { createMutableScrubber, type MutableScrubber } from '../config/secrets.js';
 import { paths } from '../config/paths.js';
 import { buildLoggerOptions } from './logger.js';
 import { applyLocalOnlyGuard } from './plugins/local-only.js';
@@ -14,20 +14,42 @@ import { templateRoutes } from './routes/templates.js';
 import { agentRoutes } from './routes/agents.js';
 import { wordpressRoutes } from './routes/wordpress.js';
 import { jobRoutes } from './routes/jobs.js';
+import { createWordPressClient, siteOf } from './reconfigure.js';
+import { setupRoutes } from './routes/setup.js';
 import { CoreService } from '../core/service.js';
-import { WordPressClient } from '../wordpress/client.js';
+import type { WordPressClient } from '../wordpress/client.js';
 import type { PublishTargetRegistry } from '../wordpress/targets.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TemplateRegistry } from '../templates/registry.js';
 
+/**
+ * 設定精靈（P8-T002）要寫的檔案。**沒給就不能寫**：寫入路由回 503，絕不退回專案裡真的 `.env`
+ * ——測試因此不可能碰到作者本機的設定。正式啟動由 main.ts 給真的路徑。
+ */
+export interface SetupFiles {
+  readonly envFile: string;
+  readonly envExampleFile: string;
+  readonly siteConfigFile: string;
+  readonly backupsDir: string;
+  /** 回應裡的備份路徑相對這裡。 */
+  readonly rootDir: string;
+}
+
 export interface AppContext {
-  readonly config: AppConfig;
+  // config／wordpress／targets 不是 readonly：設定精靈存檔後就地換掉（applyWordPressConfig、applyTargets），
+  // 路由每次請求都從 ctx 讀，不要在註冊時把它們抓進區域變數。
+  config: AppConfig;
   readonly db: DatabaseSync;
   readonly templates: TemplateRegistry;
   readonly agents: AgentRegistry;
   /** .env 沒設定 WordPress 時是 null；路由要自己處理這個情況。 */
-  readonly wordpress: WordPressClient | null;
-  readonly targets: PublishTargetRegistry;
+  wordpress: WordPressClient | null;
+  targets: PublishTargetRegistry;
+  /** log、錯誤回應、CoreService 共用的遮蔽器；設定精靈存了新密碼就當場加進去。 */
+  readonly secrets: MutableScrubber;
+  readonly setupFiles: SetupFiles | null;
+  /** 設定精靈測試連線用的 fetch；測試換成假的。 */
+  readonly setupFetch: typeof fetch | undefined;
   /**
    * 發布台的安全核心。**Web UI 與階段 6 的 MCP Server 必須共用這一個實例**——
    * 所有核准、驗證與稽核只實作一次，路由層不得自己再寫一套。
@@ -51,14 +73,21 @@ export interface BuildAppOptions {
    */
   readonly core?: CoreService;
   readonly version?: string;
+  /** 設定精靈寫檔的位置。不給＝精靈只能讀、不能寫（見 SetupFiles）。 */
+  readonly setupFiles?: SetupFiles;
+  /** 測試用：精靈測試連線時的 fetch。 */
+  readonly setupFetch?: typeof fetch;
+  /** 測試用：log 的去處（驗證 log 裡沒有秘密）。 */
+  readonly logStream?: { write(line: string): void };
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const { config, db } = options;
-  const scrub = createSecretScrubber(collectSecrets(config));
+  const secrets = createMutableScrubber(collectSecrets(config));
+  const scrub = secrets.scrub;
 
   const app = Fastify({
-    logger: buildLoggerOptions(config),
+    logger: buildLoggerOptions(config, scrub, options.logStream),
     // 本機工具不需要信任 proxy header。
     trustProxy: false,
     bodyLimit: 8 * 1024 * 1024,
@@ -81,16 +110,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         targets: options.targets,
         agents: options.agents,
         wordpress,
-        site: config.wordpress
-          ? {
-              key: config.wordpress.url,
-              displayName: config.wordpress.url,
-              baseUrl: config.wordpress.url,
-              username: config.wordpress.username,
-            }
-          : null,
+        site: config.wordpress ? siteOf(config.wordpress) : null,
         scrub,
       }),
+    secrets,
+    setupFiles: options.setupFiles ?? null,
+    setupFetch: options.setupFetch,
     version: options.version ?? '0.1.0',
     startedAt: new Date().toISOString(),
   };
@@ -123,6 +148,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(agentRoutes);
   await app.register(wordpressRoutes);
   await app.register(jobRoutes);
+  await app.register(setupRoutes);
 
   // 正式啟動時提供已建置的 UI；開發時用 Vite dev server，這裡不存在也不報錯。
   if (existsSync(paths.uiDist)) {
@@ -130,20 +156,6 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   return app;
-}
-
-/**
- * 設定齊全才建立 client。重試會寫進 server log，方便使用者看到「正在重試」
- * 而不是以為卡住了——RetryInfo 已經在 client 內部過了 scrubber。
- */
-function createWordPressClient(config: AppConfig, app: FastifyInstance): WordPressClient | null {
-  if (!config.wordpress) return null;
-  return new WordPressClient({
-    baseUrl: config.wordpress.url,
-    username: config.wordpress.username,
-    appPassword: config.wordpress.appPassword,
-    onRetry: (info) => app.log.warn(info, 'WordPress 請求重試中'),
-  });
 }
 
 declare module 'fastify' {

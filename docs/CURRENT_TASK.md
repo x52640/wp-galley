@@ -4,14 +4,15 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **46 檔 / 726 測試**全綠（2026-09-24，P8-T001 審查補強後）
+- `npm run verify`：typecheck 通過；Vitest **50 檔 / 835 測試**全綠（2026-09-24，P8-T002 安全審查修正後）
 - migration head：`007-article-content-type`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-[P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016），交給 subagent。P8-T001 已完成（2026-09-24）。
+無主 Task。[P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016）已完成（2026-09-24，subagent），
+安全審查的十項已修（見 Task 完成結果）。**還沒用真實站台跑過**：等使用者用自己的站走一次（故意填錯密碼、填 http 各一次）。
 
 P5-T001 實測已結案（2026-09-23，使用者實測並發布）；實測中當場修的是 P5-T008～P5-T016，見該 Task 的完成結果。
 
@@ -37,15 +38,16 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 
 ## Blocked
 
-| Task | 等什麼 |
-| --- | --- |
-| [P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016） | P8-T001 已完成，待改成 ready |
+無。
 
 ## 待專案擁有者
 
 `plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
 
 ## 已知殘餘（記錄，不擋進度）
+
+- 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
+  `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
 
 - 前端以為建立 revision 有 `expectedContentHash` 保護，後端其實沒做 → P5-T005。
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。

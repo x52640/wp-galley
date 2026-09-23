@@ -32,7 +32,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | 目錄 | 負責 | 規格 |
 | --- | --- | --- |
 | `src/contract` | 前後端共用的 HTTP 型別，以及兩邊必須同一套規則的純函式（`text-match.ts`、`media-marker.ts`）；**不 import 任何東西** | [http-api.md](http-api.md) |
-| `src/config` | 環境變數、路徑、秘密遮蔽 | [security.md](security.md) |
+| `src/config` | 環境變數、路徑、秘密遮蔽、`.env` 改寫（設定精靈） | [security.md](security.md) |
 | `src/db` | SQLite 與 migration | 本檔 |
 | `src/core` | CoreService、狀態機、revision、diff、提案套用 | [core-service.md](core-service.md)、[state-machine.md](state-machine.md)、[review-proposals.md](review-proposals.md) |
 | `src/templates` | 模板 registry、渲染、sanitize、結構驗證 | [templates.md](templates.md) |
@@ -40,7 +40,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `src/agents` | CLI 適配器、輸出契約與解析 | [agent-cli.md](agent-cli.md)、[agent-tasks.md](agent-tasks.md) |
 | `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
 | `src/media` | 圖片驗證（`validate.ts`，上傳與生圖候選圖共用）與上傳 | [agent-tasks.md](agent-tasks.md) |
-| `src/server` | Fastify、路由、守門 | [http-api.md](http-api.md)、[security.md](security.md) |
+| `src/server` | Fastify、路由、守門；設定換掉後就地生效（`reconfigure.ts`） | [http-api.md](http-api.md)、[security.md](security.md) |
 | `src/ui` | React 發布台 | [design-system.md](design-system.md) |
 | `src/mcp` | 空（MCP 尚未實作） | [mcp.md](mcp.md) |
 
@@ -72,7 +72,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `data/` | SQLite | 否 |
 | `drafts/` | 原稿與測試素材 | 否 |
 | `generated-images/` | 本機圖片：上傳過的副本（`<job>/<sha256>.<ext>`）、Codex 生圖候選圖（`<job>/candidates/`） | 否 |
-| `backups/` | 發布前快照 | 否 |
+| `backups/` | 發布前快照；設定精靈覆寫站台設定檔前的備份（`publish-targets-<時間到毫秒>-<亂數>.json`） | 否 |
+| `.env` | WordPress 連線（手動填或設定精靈寫入，權限 0600） | 否 |
 | `config/publish-targets.json` | 本機站台設定（發布目標），一次一個站（D-016） | 否 |
 | `config/publish-targets.example.json`、`config/examples/` | 站台設定範例（通用、作者站台）；測試用 `config/examples/remusplus.json`，不讀本機檔 | 是 |
 | `templates/` | 模板 | 是 |

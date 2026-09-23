@@ -281,3 +281,45 @@ describe('秘密不外流', () => {
     expect(error.message).not.toContain(APP_PASSWORD);
   });
 });
+
+describe('回應本體（P8-T002 審查）', () => {
+  it('標頭到了、本體一直不來：逾時涵蓋到本體讀完', async () => {
+    const client = new WordPressClient({
+      baseUrl: 'https://example.test',
+      username: 'u',
+      appPassword: 'abcd efgh ijkl mnop qrst uvwx',
+      maxRetries: 0,
+      timeoutMs: 100,
+      fetchImpl: (async (_url: string, init: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"id":'));
+            init.signal?.addEventListener('abort', () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+          },
+        });
+        return new Response(body, { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    const error = await client.request('/wp/v2/users/me').catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(WordPressError);
+    expect((error as WordPressError).code).toBe(wordpressErrorCodes.NETWORK);
+  });
+
+  it('本體超過上限：中止，回 BAD_RESPONSE，不重試', async () => {
+    let calls = 0;
+    const client = new WordPressClient({
+      baseUrl: 'https://example.test',
+      username: 'u',
+      appPassword: 'abcd efgh ijkl mnop qrst uvwx',
+      maxRetries: 2,
+      sleepImpl: async () => undefined,
+      fetchImpl: (async () => {
+        calls += 1;
+        return new Response('x', { status: 200, headers: { 'content-length': String(64 * 1024 * 1024) } });
+      }) as unknown as typeof fetch,
+    });
+    const error = await client.request('/wp/v2/posts').catch((cause: unknown) => cause);
+    expect((error as WordPressError).code).toBe(wordpressErrorCodes.BAD_RESPONSE);
+    expect(calls).toBe(1);
+  });
+});

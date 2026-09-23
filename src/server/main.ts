@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     config = loadConfig(process.env);
   } catch (error) {
     if (error instanceof ConfigError) {
-      console.error(`\n啟動失敗：${error.message}\n\n請參考 .env.example 修正 .env。\n`);
+      console.error(`\n啟動失敗：${error.message}\n\n請參考 .env.example 修正 .env（或把 .env 裡 WORDPRESS_ 開頭的三行清空，啟動後用設定精靈重填）。\n`);
       process.exit(1);
     }
     throw error;
@@ -59,7 +59,21 @@ async function main(): Promise<void> {
   const notice = startupNotice(targets);
   if (notice !== null) console.warn(`\n⚠ ${notice}\n`);
 
-  const app = await buildApp({ config, db, templates, agents: new AgentRegistry(), targets });
+  const app = await buildApp({
+    config,
+    db,
+    templates,
+    agents: new AgentRegistry(),
+    targets,
+    // 設定精靈（P8-T002）寫這幾個檔。只有正式啟動才給；測試一律注入暫存路徑。
+    setupFiles: {
+      envFile: join(paths.root, '.env'),
+      envExampleFile: join(paths.root, '.env.example'),
+      siteConfigFile: join(paths.config, 'publish-targets.json'),
+      backupsDir: paths.backups,
+      rootDir: paths.root,
+    },
+  });
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, '收到關閉訊號，正在停止服務');

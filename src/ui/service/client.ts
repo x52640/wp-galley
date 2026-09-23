@@ -10,6 +10,11 @@ import type {
   PublishTargetSummary,
   RevisionResponse,
   RevisionsResponse,
+  SetupAgentsResponse,
+  SetupConnectionResult,
+  SetupDestinationsResponse,
+  SetupSaveResponse,
+  SetupStatus,
   TermsResponse,
 } from '../../contract/api.js';
 import type {
@@ -333,6 +338,27 @@ const httpApi: PublisherApi = {
     const body = await getJson<{ publishTargets?: PublishTargetSummary[] }>('/api/wordpress');
     return body.publishTargets ?? [];
   },
+
+  getSetupStatus: () => getJson<SetupStatus>('/api/setup'),
+
+  testWordPressConnection: (input) =>
+    sendJson<SetupConnectionResult>('/api/setup/wordpress/test', 'POST', input),
+
+  saveWordPressConnection: (testId, confirmSiteChange) =>
+    sendJson<SetupSaveResponse>('/api/setup/wordpress', 'POST', {
+      testId,
+      ...(confirmSiteChange === undefined ? {} : { confirmSiteChange }),
+    }),
+
+  // 下面兩個是「讀取」，但會打真的站、會跑 CLI：走 POST＋JSON，吃跟寫入一樣的同源守門。
+  async getSetupAgents() {
+    const body = await sendJson<SetupAgentsResponse>('/api/setup/agents', 'POST', {});
+    return body.agents;
+  },
+
+  getSetupDestinations: () => sendJson<SetupDestinationsResponse>('/api/setup/destinations/check', 'POST', {}),
+
+  saveSetupDestinations: (input) => sendJson<SetupSaveResponse>('/api/setup/destinations', 'POST', input),
 };
 
 /** 畫面只認這個。示範資料模式在這裡分流，元件完全不用知道。 */

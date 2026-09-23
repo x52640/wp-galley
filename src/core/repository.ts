@@ -554,9 +554,15 @@ export class Repository {
     /** 完整快照的 JSON。沒有就寫 null，代表「沒有比對基準」。 */
     remoteSnapshotJson?: string | null;
   }): WordPressObjectRow {
+    // 同一個 WordPress id 在不同站是不同的東西（P8-T002：設定精靈可以換站），所以找既有列要連站一起比。
+    // site_id 是 NULL 的舊列（沒有站台紀錄時寫的）視為同一站，照舊更新它，不另建一列。
     const existing = this.db
-      .prepare('SELECT * FROM wordpress_objects WHERE object_type = ? AND wordpress_id = ?')
-      .get(input.objectType, input.wordpressId) as unknown as WordPressObjectRow | undefined;
+      .prepare(
+        `SELECT * FROM wordpress_objects
+         WHERE object_type = ? AND wordpress_id = ? AND (site_id IS ? OR site_id IS NULL)
+         ORDER BY site_id IS NULL LIMIT 1`,
+      )
+      .get(input.objectType, input.wordpressId, input.siteId) as unknown as WordPressObjectRow | undefined;
 
     if (existing) {
       this.db
@@ -606,22 +612,81 @@ export class Repository {
     );
   }
 
-  /** 這個 job 發布出去的文章（不含媒體）。 */
-  publishedObject(jobId: number): WordPressObjectRow | null {
+  /**
+   * 這個 job 發布出去的文章（不含媒體）。
+   *
+   * 給 siteId 就只看那個站（site_id 是 NULL 的舊列算在內）：發布要更新的只能是**目前連的站**上的那篇。
+   * 不給是畫面上的歷史紀錄（「發到哪、網址是什麼」），哪個站都算。
+   */
+  publishedObject(jobId: number, siteId?: number | null): WordPressObjectRow | null {
+    if (siteId === undefined) {
+      return (
+        (this.db
+          .prepare(
+            "SELECT * FROM wordpress_objects WHERE job_id = ? AND object_type <> 'media' ORDER BY id DESC LIMIT 1",
+          )
+          .get(jobId) as unknown as WordPressObjectRow) ?? null
+      );
+    }
     return (
       (this.db
         .prepare(
-          "SELECT * FROM wordpress_objects WHERE job_id = ? AND object_type <> 'media' ORDER BY id DESC LIMIT 1",
+          `SELECT * FROM wordpress_objects
+           WHERE job_id = ? AND object_type <> 'media' AND (site_id IS ? OR site_id IS NULL)
+           ORDER BY id DESC LIMIT 1`,
         )
-        .get(jobId) as unknown as WordPressObjectRow) ?? null
+        .get(jobId, siteId) as unknown as WordPressObjectRow) ?? null
     );
   }
 
-  mediaObject(wordpressId: number): WordPressObjectRow | null {
+  /** 這個 job 發到**別的站**的文章（最新一筆）；連同那個站的網址，錯誤訊息要講。 */
+  publishedObjectOnOtherSite(jobId: number, siteId: number | null): (WordPressObjectRow & { base_url: string }) | null {
     return (
       (this.db
-        .prepare("SELECT * FROM wordpress_objects WHERE object_type = 'media' AND wordpress_id = ?")
-        .get(wordpressId) as unknown as WordPressObjectRow) ?? null
+        .prepare(
+          `SELECT o.*, s.base_url AS base_url FROM wordpress_objects o JOIN sites s ON s.id = o.site_id
+           WHERE o.job_id = ? AND o.object_type <> 'media' AND o.site_id IS NOT ? 
+           ORDER BY o.id DESC LIMIT 1`,
+        )
+        .get(jobId, siteId) as unknown as (WordPressObjectRow & { base_url: string }) | undefined) ?? null
+    );
+  }
+
+  /**
+   * 這個 job 上傳的這張圖記在哪些站。沒有站台紀錄（NULL）的不列。
+   * 用 job 一起查：不同站的媒體庫編號會撞號。
+   */
+  mediaSiteIds(jobId: number, wordpressId: number): number[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT DISTINCT site_id FROM wordpress_objects WHERE object_type = 'media' AND wordpress_id = ? AND job_id = ? AND site_id IS NOT NULL",
+        )
+        .all(wordpressId, jobId) as unknown as { site_id: number }[]
+    ).map((row) => row.site_id);
+  }
+
+  /** 目前這個站的發布與上傳用量，設定精靈換站前要講「哪些不會跟過去」。 */
+  siteUsage(siteId: number): { publishedJobs: number; uploadedMedia: number } {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COUNT(DISTINCT CASE WHEN object_type <> 'media' THEN job_id END) AS published_jobs,
+           COUNT(CASE WHEN object_type = 'media' THEN 1 END) AS uploaded_media
+         FROM wordpress_objects WHERE site_id = ?`,
+      )
+      .get(siteId) as unknown as { published_jobs: number; uploaded_media: number };
+    return { publishedJobs: row.published_jobs, uploadedMedia: row.uploaded_media };
+  }
+
+  /** 媒體的紀錄。給 siteId 時優先回那個站的（不同站的編號會撞號）。 */
+  mediaObject(wordpressId: number, siteId?: number | null): WordPressObjectRow | null {
+    return (
+      (this.db
+        .prepare(
+          "SELECT * FROM wordpress_objects WHERE object_type = 'media' AND wordpress_id = ? ORDER BY site_id IS ? DESC, id DESC LIMIT 1",
+        )
+        .get(wordpressId, siteId ?? null) as unknown as WordPressObjectRow) ?? null
     );
   }
 

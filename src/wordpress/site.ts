@@ -156,6 +156,6 @@ export function unconfiguredProbe(): SiteProbe {
     authenticated: false,
     identity: null,
     targets: [],
-    problems: ['尚未設定 WordPress 連線。請在 .env 填入 WORDPRESS_URL、WORDPRESS_USERNAME 與 WORDPRESS_APP_PASSWORD'],
+    problems: ['尚未設定 WordPress 連線。到「設定」跑一次設定精靈，或在 .env 填入 WORDPRESS_URL、WORDPRESS_USERNAME 與 WORDPRESS_APP_PASSWORD'],
   };
 }

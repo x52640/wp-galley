@@ -39,6 +39,19 @@ interface AgentAdapter {
 adapter 自己要做的：stdout 與 stderr 分開處理，log 前先過秘密遮蔽；Agent 只回傳結構化內容，
 所有發布動作由後端執行。
 
+## 設定精靈給的指令（P8-T002）
+
+精靈第二步把安裝與登入指令印給使用者自己執行（`src/agents/setup-hints.ts`），發布台不代為執行。
+偵測沿用各 adapter 的 `detect()`（`GET /api/setup/agents` 帶 `refresh`，不吃 30 秒快取）。
+
+| CLI | 安裝 | 登入 | 驗證狀態 |
+| --- | --- | --- | --- |
+| Codex | `npm install -g @openai/codex`（或 `brew install codex`） | `codex login` | 套件名與登入指令跟官方文件一致；作者機器是 Homebrew 裝的 |
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | `claude auth login` | 登入指令跟 adapter 的 unavailableReason 同一條 |
+| Antigravity | 從 https://antigravity.google 下載安裝 | 第一次執行 `agy` 時登入；`agy models` 列得出模型就代表好了 | ⚠️ **未查證**：沒找到官方的 CLI 安裝指令，寫的是「裝桌面版、終端機要找得到 agy」 |
+
+CLI 改版或官方換了安裝方式，改這一個檔就好（README 的表格要一起改）。
+
 ## 探查結果
 
 探查日期：2026-08-27。全部為唯讀檢查（`--help`、`--version`、登入狀態），

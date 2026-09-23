@@ -35,6 +35,13 @@ import type {
   RenderOutcome,
   Revision,
   ReviewResolveResult,
+  SetupAgent,
+  SetupConnectionRequest,
+  SetupConnectionResult,
+  SetupDestinationsRequest,
+  SetupDestinationsResponse,
+  SetupSaveResponse,
+  SetupStatus,
   Term,
 } from '../../contract/api.js';
 
@@ -80,6 +87,16 @@ export type {
   ReviewProposal,
   ReviewResolveResult,
   SegmentOp,
+  SetupAgent,
+  SetupCheck,
+  SetupConnectionResult,
+  SetupDestinationKey,
+  SetupDestinationOption,
+  SetupDestinationsResponse,
+  SetupProblem,
+  SetupProblemKind,
+  SetupSaveResponse,
+  SetupStatus,
   Term,
 } from '../../contract/api.js';
 
@@ -207,4 +224,16 @@ export interface PublisherApi {
   createTerm(taxonomy: string, name: string): Promise<Term>;
 
   listTargets(): Promise<PublishTargetSummary[]>;
+
+  // --- 首次設定精靈（P8-T002）---------------------------------------------
+  /** 要不要跑精靈、目前設定了什麼。不含密碼。 */
+  getSetupStatus(): Promise<SetupStatus>;
+  /** 測試連線（只讀）。密碼只在這一次送出；通過才有 testId。 */
+  testWordPressConnection(input: SetupConnectionRequest): Promise<SetupConnectionResult>;
+  /** 存進 .env 並當場套用。只送 testId；測試結果帶 siteChange 時要帶 confirmSiteChange: true。 */
+  saveWordPressConnection(testId: string, confirmSiteChange?: boolean): Promise<SetupSaveResponse>;
+  /** 重新偵測三個 CLI，附安裝與登入指令。 */
+  getSetupAgents(): Promise<SetupAgent[]>;
+  getSetupDestinations(): Promise<SetupDestinationsResponse>;
+  saveSetupDestinations(input: SetupDestinationsRequest): Promise<SetupSaveResponse>;
 }

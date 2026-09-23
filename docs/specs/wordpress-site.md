@@ -27,6 +27,89 @@
   `/wp/v2/taxonomies` 的 `rest_base` 比對 target 的分類法 REST 名稱，對不上就直接講要設什麼。
 - 「改成公開可能寄出電子報、自動分享」這條對任何站都成立（見文末），不只作者站台。
 
+## 設定精靈（P8-T002，D-016）
+
+程式：`src/wordpress/setup.ts`、`src/server/routes/setup.ts`、`src/ui/components/SetupWizard.tsx`。
+秘密怎麼存、怎麼防其他網頁：[security.md](security.md)「設定精靈寫入的秘密」。路由：[http-api.md](http-api.md)。
+
+### 測試連線（只讀）
+
+依序：網址 → https → 密碼格式 → 匿名 `GET /wp-json/` → `GET /wp/v2/users/me?context=edit` →
+`GET /wp/v2/types`、`/wp/v2/taxonomies`（都帶 `context=edit`）。任何一關失敗就停，後面標「還沒測」。
+不重試；逾時 15 秒。網址沒寫 scheme 補 https，結尾的 `/wp-admin…`、`/wp-login.php`、`/wp-json…` 去掉；
+http 只准 loopback（本機測試站）。能不能發看 `users/me` 的 `capabilities`（`publish_posts`、`publish_pages`、
+`upload_files`），沒有就退回角色推斷。
+
+| 失敗（`SetupProblemKind`） | 怎麼認 | 畫面講的下一步 |
+| --- | --- | --- |
+| `invalid-url` | 網址解析不了 | 填首頁網址，例如 https://example.com |
+| `not-https` | http 且不是 loopback；**一個請求都不發** | 改成 https；沒憑證先請主機商開 |
+| `password-format` | 去掉空白後不是 24 個英數字；不連線 | 到「使用者 → 個人資料 → 應用程式密碼」產生一組整串貼上 |
+| `unreachable` | 網路錯誤：DNS（ENOTFOUND）、拒絕連線、逾時、TLS 憑證（CERT_*） | 各自一句：確認拼字／DNS 生效、網站在不在、稍後再試、重新簽發憑證 |
+| `redirect` | `/wp-json/` 或 `users/me` 回 3xx | 改填轉址後的網址（有 Location 而且看得懂就直接寫出來；寫壞了就叫人用瀏覽器看最後停在哪） |
+| `not-wordpress` | `/wp-json/` 404、200 但不是 JSON、或大於 8 MB | 確認是首頁網址；永久連結改成「文章名稱」 |
+| `rest-blocked` | `/wp-json/` 401／403 回網頁（防火牆）；`wp/v2` 不在 namespaces；`users/me` 401／403 帶其他代碼（安全外掛） | 放行 /wp-json/；到外掛設定允許 REST 或把 /wp/v2/users 從封鎖清單拿掉 |
+| `app-passwords-disabled` | `application_passwords_disabled(_for_user)`；或首頁沒宣告 `application-passwords` 而 `users/me` 說沒登入 | 到安全外掛打開應用程式密碼 |
+| `auth-header-stripped` | 首頁有宣告應用程式密碼，`users/me` 卻回 `rest_not_logged_in` | 請主機商放行 Authorization；或 .htaccess 加 `SetEnvIf Authorization …` |
+| `wrong-username` | `invalid_username`／`invalid_email`（或帳號空白） | 填登入用的使用者名稱或 email |
+| `wrong-password` | `incorrect_password`／`invalid_application_password` | 重新產生一組；提醒重設登入密碼會讓應用程式密碼全部失效 |
+| `no-permission` | 既不能 `publish_posts` 也不能 `publish_pages`（投稿者會多講一句「只能送審」） | 把帳號改成「編輯」 |
+| `types-missing` | `/wp/v2/types` 沒有 post 也沒有 page | 檢查擋 REST 的外掛 |
+| `server-error` | 其他 5xx、回應格式不對 | 稍後再試；看「工具 → 網站健康狀態」 |
+
+- 匿名 `/wp-json/` 回 401／403 **JSON**（安全外掛「只給登入的人用 REST」）不算失敗：繼續用帳號測，
+  「REST API 開著」那一關標黃、另給一句「不影響」。
+- 不擋存檔的提醒：管理員權限過大、作者（只能發文章不能發頁面）、不能上傳圖片。
+- 每一種失敗都有測試（`tests/setup-diagnose.test.ts`），對著本機假站台或假 fetch 跑。
+
+### 發到哪裡
+
+只有核心的 `post`（文章）與 `page`（頁面），都用 `article-v1`。站上實際有什麼由後端自己再問一次
+（`/wp/v2/types`、`/wp/v2/taxonomies`、`users/me`），不信任畫面送來的東西：
+
+- 站上沒有那個類型（沒開 REST）或帳號不能發 → 那一項選不了，理由寫在卡片上。
+- post 的分類法：`types.post.taxonomies` 有 `category`、`/wp/v2/taxonomies` 也有它時才掛，
+  `taxonomyRestBase` 用站上回報的 `rest_base`（通常是 `categories`）。D-004 不變：`allowCreateTerms: false`。
+- 寫出來的 target 欄位與順序跟 `config/publish-targets.example.json` 一字不差（有測試守著）。
+
+**已經有 `config/publish-targets.json` 時（例如作者的 read-think／diary）**：
+
+- 既有的 target **原樣保留**（寫回的是檔案裡的原文，不補預設值、不改順序），精靈不刪任何東西。
+- 精靈只加 `post`／`page`。同 key 已經存在時，畫面上要**明確勾「取代」**才換；沒勾就整個請求 409、檔案不動。
+- 有既有檔時預設什麼都不勾，按鈕是「不改，下一步」。
+- 真的要寫之前，先把原本的檔複製到 `backups/publish-targets-<時間到毫秒>-<亂數>.json`（不覆蓋既有檔，同一秒存兩次也各有一份），完成頁講出備份路徑。
+- 磁碟上的檔壞了（不是 JSON、格式不對）就不覆寫，請使用者先處理。
+- 換了站（例如從 remusplus 換到別的站）不會自動移除舊站的 target；那些 target 的連線診斷會報錯，
+  要刪請手動改檔。
+
+### 換站（網址換成另一個）
+
+同一個 WordPress 編號在不同站是不同的東西，所以發布與媒體一律**以目前連的站為準**（`sites` 以網址為 key；
+`wordpress_objects.site_id`）。不用新 migration：媒體屬於哪個站看它在 `wordpress_objects` 那一列（`media_assets`
+本身沒有 site_id），查的時候連 job 一起比，避免兩站的編號撞號。沒有站台紀錄（site_id NULL）的舊資料當成目前這個站，
+不因為缺紀錄就擋住原本能用的東西。
+
+| 情況 | 行為 |
+| --- | --- |
+| 稿件發到過舊站、新站上沒有 | 發布擋下：「這篇之前發到另一個站（網址，第 N 號）…不會改發到新站，也不會去動舊站」。不送任何寫入 |
+| 封面是舊站媒體庫的圖 | 設封面拒絕；發布前檢查擋下：「封面圖是傳到另一個站的…請在現在這個站重新上傳」 |
+| 正文裡放了舊站的圖 | 放圖拒絕；發布前檢查擋下：「正文裡有 N 張圖是傳到另一個站的…」 |
+| 換回舊站 | 一切照舊（舊站那篇照常更新） |
+
+**精靈在存檔前先講**：測試的是另一個站、而目前的站上發過文或傳過圖時，測試結果帶 `siteChange`，畫面列出
+「已發到舊站的 N 篇不能再從這裡更新、M 張圖不會跟過去（發布前會擋）、原稿與版本都留著、舊站上的東西不動」，
+要勾「我知道了，要換到新站」才能存；後端也要求 `confirmSiteChange: true`。
+
+### 不用重新啟動
+
+存檔前先 `tryBeginReconfigure()` 立旗子（有發布或上傳在跑就 409；旗子立著時會碰 WordPress 的動作一律拒絕，
+見 [security.md](security.md)）。存 WordPress 連線：先把新密碼加進遮蔽器，再換掉 `AppContext.config`／`wordpress`，`CoreService.reconfigure`
+換 client 並重新同步 `sites`／`publish_targets`（`src/server/reconfigure.ts`）。存站台設定：重新讀檔建 registry，
+一樣 `reconfigure`。目前**沒有**任何部分需要重新啟動；回應帶
+`restartRequired` 讓畫面照後端講的做。
+
+注意：shell 裡 export 的 `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（見 [security.md](security.md)）。
+
 ---
 
 # 作者站台實況（www.remusplus.com）

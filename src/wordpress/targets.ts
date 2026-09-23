@@ -98,7 +98,7 @@ export function taxonomyRestBaseOf(target: PublishTarget): string | null {
   return target.taxonomyRestBase ?? target.taxonomy;
 }
 
-const PublishTargetsFileSchema = z
+export const PublishTargetsFileSchema = z
   .object({ targets: z.array(PublishTargetSchema).min(1) })
   .strict()
   .superRefine((file, ctx) => {

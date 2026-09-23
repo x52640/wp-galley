@@ -71,6 +71,40 @@ export interface RequestOptions<T> {
   readonly signal?: AbortSignal;
 }
 
+/** 回應本體的上限。WordPress 的 JSON 再大也到不了這裡；超過就是有東西不對，不要把記憶體吃光。 */
+export const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+
+export class ResponseTooLargeError extends Error {
+  override readonly name = 'ResponseTooLargeError';
+}
+
+/**
+ * 讀回應本體，超過 maxBytes 就中止並丟 ResponseTooLargeError。
+ * 呼叫端的逾時（AbortSignal）要在讀完之前一直有效——標頭到了、本體慢慢滴的伺服器也要能被切斷。
+ */
+export async function readBodyCapped(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new ResponseTooLargeError(`回應超過 ${Math.round(maxBytes / 1024 / 1024)} MB`);
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ResponseTooLargeError(`回應超過 ${Math.round(maxBytes / 1024 / 1024)} MB`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export interface WordPressResponse<T> {
   readonly data: T;
   readonly status: number;
@@ -184,6 +218,7 @@ export class WordPressClient {
     options.signal?.addEventListener('abort', onExternalAbort, { once: true });
 
     let response: Response;
+    let text: string;
     try {
       response = await this.fetchImpl(url, {
         method,
@@ -203,7 +238,14 @@ export class WordPressClient {
         // 寧可明確報錯，讓使用者去修 WORDPRESS_URL。
         redirect: 'manual',
       });
+      // 逾時要涵蓋到本體讀完為止：標頭先到、本體一直不來的伺服器不能把請求卡住。
+      text = response.status >= 300 && response.status < 400 ? '' : await readBodyCapped(response, MAX_RESPONSE_BYTES);
     } catch (error) {
+      if (error instanceof ResponseTooLargeError) {
+        throw new WordPressError(wordpressErrorCodes.BAD_RESPONSE, `WordPress 的${error.message}，不像正常的 REST 回應`, {
+          retryable: false,
+        });
+      }
       throw this.wrapUnknown(error);
     } finally {
       clearTimeout(timer);
@@ -219,7 +261,6 @@ export class WordPressClient {
       );
     }
 
-    const text = await response.text();
     const body = this.parseJson(text);
 
     if (!response.ok) {

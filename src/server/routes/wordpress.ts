@@ -129,7 +129,7 @@ function requireClient(app: FastifyInstance): WordPressClient {
   if (!client) {
     throw new AppError(
       errorCodes.WORDPRESS_UNAVAILABLE,
-      'WordPress 尚未設定。請在 .env 填好連線資訊後重新啟動',
+      'WordPress 尚未設定。到「設定」跑一次設定精靈（或在 .env 填好連線資訊後重新啟動）',
       503,
     );
   }
@@ -169,7 +169,7 @@ function requireKnownTaxonomy(app: FastifyInstance, taxonomy: string | undefined
 }
 
 /** 只回報 UI 需要的欄位。設定檔沒有秘密，但也沒必要整包吐出去。 */
-function summarize(targets: readonly PublishTarget[]): PublishTargetSummary[] {
+export function summarize(targets: readonly PublishTarget[]): PublishTargetSummary[] {
   return targets.map((target) => ({
     key: target.key,
     displayName: target.displayName,

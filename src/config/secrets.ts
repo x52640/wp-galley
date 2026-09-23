@@ -46,3 +46,29 @@ export function createSecretScrubber(secrets: readonly (string | null | undefine
 
   return (<T,>(value: T): T => (active.length === 0 ? value : (walk(value, 0) as T))) as Scrubber;
 }
+
+export interface MutableScrubber {
+  /** 永遠是同一個函式，可以放心交給 logger、CoreService、錯誤處理；內容會跟著 add 更新。 */
+  readonly scrub: Scrubber;
+  /** 加入新的秘密（設定精靈存了新的 Application Password 時）。舊的不移除。 */
+  add(secrets: readonly (string | null | undefined)[]): void;
+}
+
+/**
+ * 可以在執行中加入秘密的遮蔽器（P8-T002）。
+ *
+ * 設定精靈不重新啟動就換掉 WordPress 連線，所以 log、錯誤回應、CoreService 手上那一個
+ * 遮蔽器必須當場認得新密碼——各自建一個不可變的遮蔽器的話，新密碼要等重啟才會被抹掉。
+ * 舊密碼留著：多抹一個不再使用的字串沒有壞處，少抹一個就是外流。
+ */
+export function createMutableScrubber(initial: readonly (string | null | undefined)[] = []): MutableScrubber {
+  const known: (string | null | undefined)[] = [...initial];
+  let current = createSecretScrubber(known);
+  return {
+    scrub: (<T,>(value: T): T => current(value)) as Scrubber,
+    add(secrets) {
+      known.push(...secrets);
+      current = createSecretScrubber(known);
+    },
+  };
+}

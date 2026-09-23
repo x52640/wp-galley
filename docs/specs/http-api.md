@@ -51,7 +51,16 @@
 | `POST` | `/api/wordpress/terms` | 建立分類項目（target 須 `allowCreateTerms`） | `CreateTermRequest` → `Term` |
 | `GET` | `/api/image-generation` | 能不能生圖（只有 Codex 能） | → `ImageGenerationStatus` |
 
+| `GET` | `/api/setup` | 設定精靈：要不要跑、目前設定了什麼（不含密碼） | → `SetupStatus` |
+| `POST` | `/api/setup/wordpress/test` | 測試連線（只讀）；通過回 `testId` | `SetupConnectionRequest` → `SetupConnectionResult` |
+| `POST` | `/api/setup/wordpress` | 把通過測試的那組存進 `.env` 並當場套用 | `SetupSaveWordPressRequest` → `SetupSaveResponse` |
+| `POST` | `/api/setup/agents` | 重新偵測三個 CLI（會啟動子行程），附安裝／登入指令；body `{}` | → `SetupAgentsResponse` |
+| `POST` | `/api/setup/destinations/check` | 文章／頁面能不能選（會打真的站）、設定檔裡已有什麼；body `{}` | → `SetupDestinationsResponse` |
+| `POST` | `/api/setup/destinations` | 寫站台設定檔並當場套用 | `SetupDestinationsRequest` → `SetupSaveResponse` |
+
 `/api/health`、`/api/agents`、`/api/templates` 只給診斷頁用，形狀尚未納入契約。
+`GET /api/agents` 只回快取（30 秒內不重跑偵測）；原本的 `?refresh=1` 拿掉了（P8-T002：會啟動 CLI 的讀取
+改走 `POST /api/setup/agents`）。
 
 ## 語意備註
 
@@ -85,3 +94,21 @@
   [review-proposals.md](review-proposals.md)「對照畫面長什麼樣」。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
   [review-proposals.md](review-proposals.md)。`blockIndex` 的語意見 review-proposals.md。
+- 設定精靈（P8-T002）：規則在 [security.md](security.md)「設定精靈寫入的秘密」與
+  [wordpress-site.md](wordpress-site.md)「設定精靈」。
+  - **任何回應都不含密碼**。密碼只出現在 `wordpress/test` 的請求裡；`wordpress` 只收 `testId`
+    （10 分鐘、只留最新一組、用過就失效、重啟就沒了），對不上回 409 請使用者重測。
+  - 連線失敗不是 HTTP 錯誤：`wordpress/test` 一律 200，`ok: false` 加 `problem`（`kind`／`title`／`detail`／`next`，
+    文字由後端給，畫面照抄）與逐關的 `checks`。
+  - 所有 `POST /api/setup/*` 要 `Content-Type: application/json`（否則 415）。全域守門對所有修改請求：
+    `Sec-Fetch-Site` 有的話只能是 `same-origin`／`none`、`Origin` 不能是 `null`、有 Origin 時要跟 Host
+    同源（否則 403 `CROSS_ORIGIN_BLOCKED`）。兩個有副作用的讀取（agents、destinations/check）也是 POST，
+    吃同一套。
+  - 換站：`wordpress/test` 通過、測的是另一個站、而目前的站上發過文或傳過圖時，回應帶 `siteChange`
+    （from／to／publishedJobs／uploadedMedia）；這時 `POST /api/setup/wordpress` 要帶 `confirmSiteChange: true`，
+    否則 409、`.env` 不動。
+  - 後端沒拿到檔案路徑（`buildApp` 沒給 `setupFiles`）時兩個寫入路由回 503；`SetupStatus.canWrite` 是 false。
+  - `destinations`：`include` 至少一個；已存在的 key 要列在 `replace` 才取代，否則 409 且檔案不動；
+    選了站上沒有或帳號不能發的類型回 400。覆寫既有檔時 `backupFile` 是備份路徑。
+  - 有發布或上傳正在進行（或另一個儲存還沒完成）時兩個寫入路由回 409；儲存期間發布、上傳、換圖、放圖、
+    設封面回 503「設定精靈正在儲存…」。沒連上 WordPress 時 `destinations/check` 回 503。

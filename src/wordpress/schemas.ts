@@ -22,6 +22,11 @@ export const WordPressUserSchema = z.object({
   slug: z.string(),
   /** 只有 context=edit 才會有。 */
   roles: z.array(z.string()).optional(),
+  /**
+   * 只有 context=edit 才會有：`{ publish_posts: true, … }`。設定精靈用它判斷「能不能發」
+   * （P8-T002）。值照理是布林，但外掛可能塞別的；只把 `=== true` 當成有。
+   */
+  capabilities: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type WordPressUser = z.infer<typeof WordPressUserSchema>;

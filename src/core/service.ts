@@ -271,6 +271,10 @@ const DEFAULT_IMAGE_TIMEOUT_MS = 300_000;
 /** `agent_runs.purpose` 記的生圖那一趟。 */
 const GENERATE_IMAGE_PURPOSE: AgentRunTask = 'generate-image';
 
+/** 圖是傳到別的站的（設定精靈換過站，P8-T002）。 */
+const OTHER_SITE_MEDIA_MESSAGE =
+  '這張圖是傳到另一個站的媒體庫，現在發布台連的是別的站，不能用在這裡。請在現在這個站重新上傳這張圖。';
+
 export interface CoreServiceOptions {
   readonly db: DatabaseSync;
   readonly templates: TemplateRegistry;
@@ -287,14 +291,15 @@ export interface CoreServiceOptions {
 export class CoreService {
   private readonly repo: Repository;
   private readonly templates: TemplateRegistry;
-  private readonly targets: PublishTargetRegistry;
+  // 下面四個不是 readonly：設定精靈（P8-T002）不重新啟動就換連線與發布目標，見 reconfigure()。
+  private targets: PublishTargetRegistry;
   private readonly agents: AgentRegistry;
-  private readonly wordpress: WordPressClient | null;
+  private wordpress: WordPressClient | null;
   private readonly scrub: Scrubber;
   private readonly draftsDir: string;
   private readonly mediaDir: string;
-  private readonly siteId: number | null;
-  private readonly targetIds: Map<string, number>;
+  private siteId: number | null;
+  private targetIds: Map<string, number>;
   private readonly templateRowIds: Map<string, number>;
   /** 進行中的 Agent 執行；程式重啟就沒了，反正子行程也一起沒了。 */
   private readonly activeRuns = new Map<string, { runId: string; provider: AgentId; rowId: number }>();
@@ -307,6 +312,13 @@ export class CoreService {
    * 第二個寫入者的時候再說。
    */
   private readonly publishing = new Set<string>();
+  /**
+   * 設定精靈正在換連線或發布目標（P8-T002）。這段期間任何會碰 WordPress 或依賴「目前是哪個站」的動作
+   * 一律拒絕，免得半途換站、把東西記到錯的站上。
+   */
+  private reconfiguring = false;
+  /** 正在跟 WordPress 講話的動作（上傳、換圖、發布）。不是 0 就不准換設定。 */
+  private wordpressOps = 0;
 
   constructor(options: CoreServiceOptions) {
     this.repo = new Repository(options.db);
@@ -321,6 +333,85 @@ export class CoreService {
     this.siteId = this.repo.syncSite(options.site ?? null);
     this.targetIds = this.repo.syncTargets(this.targets.list(), this.siteId);
     this.templateRowIds = this.repo.syncTemplates(this.templates.list());
+  }
+
+  // --- 設定精靈 --------------------------------------------------------------
+
+  /** 有沒有發布正在進行。設定精靈在這時候不換連線（發到一半換站是最糟的情況）。 */
+  isPublishing(): boolean {
+    return this.publishing.size > 0;
+  }
+
+  /**
+   * 設定精靈要開始換設定。有發布、上傳在跑就回原因（不開始）；否則立起旗子回 null，
+   * 之後新的 WordPress 動作都會被擋，直到 endReconfigure()。
+   */
+  tryBeginReconfigure(): string | null {
+    if (this.reconfiguring) return '設定正在儲存中，等它完成再試';
+    if (this.publishing.size > 0) return '現在有一篇正在發布。等它發完再儲存設定，不然會發到一半換掉連線';
+    if (this.wordpressOps > 0) return '現在有圖片正在上傳到 WordPress。等它完成再儲存設定';
+    this.reconfiguring = true;
+    return null;
+  }
+
+  endReconfigure(): void {
+    this.reconfiguring = false;
+  }
+
+  /** 目前連的站上發過幾篇、傳過幾張圖。還沒連站是 null。 */
+  currentSiteUsage(): { publishedJobs: number; uploadedMedia: number } | null {
+    return this.siteId === null ? null : this.repo.siteUsage(this.siteId);
+  }
+
+  /** 會碰 WordPress 的動作都包在這裡：設定精靈換設定時擋掉；跑的期間設定精靈也不能換。 */
+  private async trackWordPress<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertNotReconfiguring();
+    this.wordpressOps += 1;
+    try {
+      return await fn();
+    } finally {
+      this.wordpressOps -= 1;
+    }
+  }
+
+  private assertNotReconfiguring(): void {
+    if (this.reconfiguring) {
+      throw new WordPressUnavailableError('設定精靈正在儲存新的 WordPress 設定，等幾秒再試一次');
+    }
+  }
+
+  /**
+   * 這張圖是不是傳到**別的站**的媒體庫（設定精靈換過站）。沒有站台紀錄的舊資料當成目前這個站，
+   * 不因為缺紀錄就擋住原本能用的東西。
+   */
+  private mediaOnOtherSite(asset: MediaAssetRow): boolean {
+    if (asset.wordpress_media_id === null) return false;
+    const sites = this.repo.mediaSiteIds(asset.job_id, asset.wordpress_media_id);
+    return sites.length > 0 && !sites.includes(this.siteId ?? -1);
+  }
+
+  /**
+   * 設定精靈存檔後就地換掉連線、站台、發布目標（P8-T002），不用重新啟動。
+   *
+   * 只換給了的部分。站台或目標變了就重新同步 `sites`／`publish_targets` 兩張表，跟建構時一樣。
+   * 進行中的 Agent 執行不受影響（它們不碰 WordPress）；正在發布時由呼叫端先擋掉（isPublishing）。
+   * 遮蔽器不在這裡換：建構時拿到的就是可更新的那一個（createMutableScrubber）。
+   */
+  reconfigure(options: {
+    readonly wordpress?: WordPressClient | null;
+    readonly site?: { key: string; displayName: string; baseUrl: string; username: string } | null;
+    readonly targets?: PublishTargetRegistry;
+  }): void {
+    // 最後一道檢查：呼叫端應該已經 tryBeginReconfigure() 過，這裡再確認沒有人正在跟 WordPress 講話。
+    if (this.publishing.size > 0 || this.wordpressOps > 0) {
+      throw new InvalidInputError('有發布或上傳正在進行，現在不能換設定');
+    }
+    if (options.wordpress !== undefined) this.wordpress = options.wordpress;
+    if (options.site !== undefined) this.siteId = this.repo.syncSite(options.site);
+    if (options.targets !== undefined) this.targets = options.targets;
+    if (options.site !== undefined || options.targets !== undefined) {
+      this.targetIds = this.repo.syncTargets(this.targets.list(), this.siteId);
+    }
   }
 
   // --- 建立與讀取 -----------------------------------------------------------
@@ -1789,6 +1880,10 @@ export class CoreService {
    * 照錨點自動放進正文（沒對上內文圖是 null，P5-T016）。
    */
   async addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
+    return this.trackWordPress(() => this.addMediaUntracked(uuid, input));
+  }
+
+  private async addMediaUntracked(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const client = this.requireWordPress();
@@ -1861,6 +1956,10 @@ export class CoreService {
    * 就算這張圖還沒插進正文也一樣。寧可多撤一次，也不要漏掉。
    */
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
+    return this.trackWordPress(() => this.replaceMediaUntracked(uuid, assetId, input));
+  }
+
+  private async replaceMediaUntracked(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const old = this.requireMedia(job, assetId);
@@ -1987,8 +2086,11 @@ export class CoreService {
 
   /** 換封面。走 createRevision，所以核准會失效。 */
   setFeaturedMedia(uuid: string, assetId: number | null): Revision {
+    this.assertNotReconfiguring();
     const job = this.requireJob(uuid);
-    if (assetId !== null) this.requireMedia(job, assetId);
+    if (assetId !== null && this.mediaOnOtherSite(this.requireMedia(job, assetId))) {
+      throw new MediaError(OTHER_SITE_MEDIA_MESSAGE);
+    }
     return this.createRevision(uuid, {
       origin: 'media',
       featuredMediaId: assetId,
@@ -2003,12 +2105,14 @@ export class CoreService {
    * 跟校對符號的 blockIndex 是同一套，符號才不會標錯段。
    */
   placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Revision {
+    this.assertNotReconfiguring();
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const asset = this.requireMedia(job, assetId);
     const template = this.requireTemplate(job);
     const revisionRow = this.requireRevision(job);
 
+    if (this.mediaOnOtherSite(asset)) throw new MediaError(OTHER_SITE_MEDIA_MESSAGE);
     const url = this.mediaUrl(asset);
     if (asset.wordpress_media_id === null || url === null) {
       throw new MediaError('這張圖還沒上傳到 WordPress，無法插進正文');
@@ -2132,6 +2236,10 @@ export class CoreService {
    * 同一個 job 同時只能有一次發布在跑（`publishing`），第二次直接拒絕而不是默默跟進。
    */
   async publish(uuid: string, input: PublishInput): Promise<PublishResult> {
+    return this.trackWordPress(() => this.publishUntracked(uuid, input));
+  }
+
+  private async publishUntracked(uuid: string, input: PublishInput): Promise<PublishResult> {
     const job = this.requireJob(uuid);
     const target = this.targetOf(job);
     if (!target) throw new PublishBlockedError('這個工作項目沒有綁定發布目標');
@@ -2306,8 +2414,21 @@ export class CoreService {
       throw this.rejectPublish(job, actor, '內容在核准之後被改過了，核准已失效。請重新預覽並核准');
     }
 
-    // 3. target 允許這次操作。
-    const existing = this.repo.publishedObject(job.id);
+    // 3. target 允許這次操作。只認**目前連的站**上的那篇（P8-T002：設定精靈可以換站）。
+    //    這篇發到過別的站、在這個站上沒有：不改發到新站、也不去動舊站，講清楚讓使用者決定。
+    const existing = this.repo.publishedObject(job.id, this.siteId);
+    if (existing === null && target.fixedObjectId === null) {
+      const elsewhere = this.repo.publishedObjectOnOtherSite(job.id, this.siteId);
+      if (elsewhere !== null) {
+        throw this.rejectPublish(
+          job,
+          actor,
+          `這篇之前發到另一個站（${elsewhere.base_url}，第 ${elsewhere.wordpress_id} 號），現在發布台連的是別的站。` +
+            '發布台不會把它改發到新站，也不會去動舊站的那篇：要發到現在這個站，請開一篇新稿把內容貼過去；' +
+            '要更新舊站那篇，請把設定換回那個站。',
+        );
+      }
+    }
     const targetId = target.fixedObjectId ?? existing?.wordpress_id ?? null;
     const creating = targetId === null;
     if (creating && !target.allowCreate) {
@@ -2326,6 +2447,24 @@ export class CoreService {
       payload.featuredMediaAssetId === null ? null : this.repo.mediaById(payload.featuredMediaAssetId);
     if (target.requireFeaturedImage && (featured === null || featured.wordpress_media_id === null)) {
       throw this.rejectPublish(job, actor, `發布目標 ${target.key} 必須設定精選圖片`);
+    }
+
+    // 4b. 封面與正文裡的圖都要在目前這個站的媒體庫裡。換過站的話，舊站的圖編號在新站上是別的東西
+    //     （或不存在），網址也還指著舊站——寧可擋下來講清楚，不要發出一篇掛著別站圖的文章。
+    if (featured !== null && this.mediaOnOtherSite(featured)) {
+      throw this.rejectPublish(job, actor, `封面圖是傳到另一個站的。${OTHER_SITE_MEDIA_MESSAGE}`);
+    }
+    const bodyHtml = revisionRow.rendered_html ?? '';
+    const strayImages = this.repo
+      .listMedia(job.id)
+      .filter((asset) => asset.wordpress_media_id !== null && this.mediaOnOtherSite(asset))
+      .filter((asset) => hasWpImageClass(bodyHtml, asset.wordpress_media_id!));
+    if (strayImages.length > 0) {
+      throw this.rejectPublish(
+        job,
+        actor,
+        `正文裡有 ${strayImages.length} 張圖是傳到另一個站的。先把它們從正文移除，在現在這個站重新上傳、放進正文，再核准發布。`,
+      );
     }
 
     return { job, approval, revisionRow, payload, featured, existing, targetId, creating };
@@ -2517,7 +2656,7 @@ export class CoreService {
 
   private mediaUrl(asset: MediaAssetRow): string | null {
     if (asset.wordpress_media_id === null) return null;
-    return this.repo.mediaObject(asset.wordpress_media_id)?.link ?? null;
+    return this.repo.mediaObject(asset.wordpress_media_id, this.siteId)?.link ?? null;
   }
 
   private mediaViews(job: JobRow, revision: Revision | null): MediaAsset[] {
@@ -2608,7 +2747,7 @@ export class CoreService {
     const blockers: string[] = [];
     if (!target) blockers.push('這個工作項目沒有綁定發布目標');
     if (!revision) blockers.push('還沒有任何內容');
-    if (this.wordpress === null) blockers.push('WordPress 尚未設定，請在 .env 填好連線資訊');
+    if (this.wordpress === null) blockers.push('WordPress 尚未設定，先到「設定」跑一次設定精靈');
     if (target?.requireFeaturedImage && revision?.featuredMediaId == null) {
       blockers.push('這個發布目標必須設定精選圖片');
     }

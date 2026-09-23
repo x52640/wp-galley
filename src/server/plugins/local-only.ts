@@ -73,6 +73,49 @@ function checkRequest(request: FastifyRequest): void {
   if (!isAllowedOrigin(request.headers.origin)) {
     throw new AppError(errorCodes.CROSS_ORIGIN_BLOCKED, '不接受跨站請求。', 403);
   }
+
+  // 4. 會改東西的請求再嚴一點（P8-T002）：見 isAllowedWriteSource。
+  if (!SAFE_METHODS.has(request.method) && !isAllowedWriteSource({ ...request.headers })) {
+    throw new AppError(errorCodes.CROSS_ORIGIN_BLOCKED, '不接受從其他網頁送來的修改請求。', 403);
+  }
+}
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * 會改東西的請求（POST／PUT／DELETE…）只接受發布台自己的畫面或非瀏覽器的本機程式。
+ *
+ * isAllowedOrigin 放行 `Origin: null`（同源的舊瀏覽器、非瀏覽器），但沙箱 iframe 與 `file://` 頁面
+ * 送出的也是 null——外站把自己塞進沙箱 iframe，就能發不帶 body 的 POST（不需要 preflight 的
+ * 「簡單請求」）。瀏覽器會附上 `Sec-Fetch-Site`，它說不是同源就擋；舊瀏覽器沒有這個標頭時，
+ * 至少把 null 擋掉。
+ *
+ * 有 Origin 時還要**跟 Host 同源**（同一個 host:port）：isAllowedOrigin 放行任何本機埠，
+ * 但 localhost:8080 上別人的開發中網站不該能改發布台的東西。發布台自己的畫面一律同源——
+ * 由後端直接提供時是 :3000 對 :3000；經 Vite dev server 時 proxy 不改 Host（changeOrigin: false），
+ * 瀏覽器看到的、送出的都是 :5173。
+ */
+export function isAllowedWriteSource(headers: {
+  readonly origin?: string | undefined;
+  readonly host?: string | undefined;
+  readonly 'sec-fetch-site'?: string | string[] | undefined;
+}): boolean {
+  if (headers.origin === 'null') return false;
+  if (headers.origin !== undefined) {
+    let origin: URL;
+    try {
+      origin = new URL(headers.origin);
+    } catch {
+      return false;
+    }
+    if (origin.protocol !== 'http:' || headers.host === undefined || origin.host !== headers.host.toLowerCase()) {
+      return false;
+    }
+  }
+  const site = headers['sec-fetch-site'];
+  if (site === undefined) return true;
+  const value = Array.isArray(site) ? site[0] : site;
+  return value === 'same-origin' || value === 'none';
 }
 
 /**

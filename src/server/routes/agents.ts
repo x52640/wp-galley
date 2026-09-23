@@ -15,9 +15,10 @@ import type { ImageGenerationStatus } from '../../contract/api.js';
 const AgentIdSchema = z.enum(['codex', 'claude', 'google']);
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
-  app.get<{ Querystring: { refresh?: string } }>('/api/agents', async (request) => {
-    const refresh = request.query.refresh === '1';
-    const statuses = await app.ctx.agents.detectAll({ refresh });
+  // 不再接受 ?refresh=1（P8-T002）：強制重跑偵測會啟動 CLI 子行程，是有副作用的讀取，
+  // 改由 POST /api/setup/agents（JSON＋同源守門）負責。這裡只給快取（30 秒內不重跑）。
+  app.get('/api/agents', async () => {
+    const statuses = await app.ctx.agents.detectAll();
     return {
       agents: statuses,
       busy: app.ctx.agents.busy !== null,

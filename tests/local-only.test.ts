@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { describe, expect, it, afterAll, beforeAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
-import { isAllowedHost, isAllowedOrigin, isLoopbackAddress } from '../src/server/plugins/local-only.js';
+import { isAllowedHost, isAllowedOrigin, isAllowedWriteSource, isLoopbackAddress } from '../src/server/plugins/local-only.js';
 import { loadConfig } from '../src/config/env.js';
 import { createTestDatabase } from './helpers/test-db.js';
 import { AgentRegistry } from '../src/agents/registry.js';
@@ -104,5 +104,74 @@ describe('守門判斷函式', () => {
     expect(isLoopbackAddress('::1')).toBe(true);
     expect(isLoopbackAddress('192.168.1.5')).toBe(false);
     expect(isLoopbackAddress(undefined)).toBe(false);
+  });
+});
+
+/**
+ * 會改東西的請求（P8-T002）：沙箱 iframe、file:// 頁面送的是 `Origin: null`，原本會被放行；
+ * 瀏覽器附的 Sec-Fetch-Site 說不是同源也要擋。GET 照舊（校樣 iframe 之類不受影響）。
+ */
+describe('修改請求的來源', () => {
+  it.each([
+    ['Origin: null', { origin: 'null' }],
+    ['Sec-Fetch-Site: cross-site', { 'sec-fetch-site': 'cross-site' }],
+    ['Sec-Fetch-Site: same-site（其他本機埠）', { origin: 'http://localhost:8080', 'sec-fetch-site': 'same-site' }],
+  ])('POST 擋掉 %s', async (_name, extra) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/jobs/does-not-exist/render',
+      headers: { host: '127.0.0.1:3000', ...extra },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('CROSS_ORIGIN_BLOCKED');
+  });
+
+  it('DELETE 也擋', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/jobs/does-not-exist',
+      headers: { host: '127.0.0.1:3000', origin: 'null' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('GET 不受影響', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/health',
+      headers: { host: '127.0.0.1:3000', origin: 'null', 'sec-fetch-site': 'cross-site' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('發布台自己的畫面（same-origin）與非瀏覽器（沒有這兩個標頭）照常', () => {
+    expect(isAllowedWriteSource({ 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:5173', host: '127.0.0.1:5173' })).toBe(true);
+    expect(isAllowedWriteSource({ origin: 'http://127.0.0.1:3000', host: '127.0.0.1:3000' })).toBe(true);
+    expect(isAllowedWriteSource({ origin: 'http://[::1]:3000', host: '[::1]:3000' })).toBe(true);
+    expect(isAllowedWriteSource({ 'sec-fetch-site': 'none' })).toBe(true);
+    expect(isAllowedWriteSource({})).toBe(true);
+    expect(isAllowedWriteSource({ origin: 'null' })).toBe(false);
+  });
+
+  it('Origin 要跟 Host 同源：其他本機埠、localhost 對 127.0.0.1、https 都不行', () => {
+    expect(isAllowedWriteSource({ origin: 'http://127.0.0.1:8080', host: '127.0.0.1:3000' })).toBe(false);
+    expect(isAllowedWriteSource({ origin: 'http://localhost:3000', host: '127.0.0.1:3000' })).toBe(false);
+    expect(isAllowedWriteSource({ origin: 'https://127.0.0.1:3000', host: '127.0.0.1:3000' })).toBe(false);
+    expect(isAllowedWriteSource({ origin: 'not a url', host: '127.0.0.1:3000' })).toBe(false);
+  });
+
+  it('POST 從其他本機埠來的擋掉，GET 照舊', async () => {
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/jobs/does-not-exist/render',
+      headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:8080' },
+    });
+    expect(post.statusCode).toBe(403);
+    const get = await app.inject({
+      method: 'GET',
+      url: '/api/health',
+      headers: { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:8080' },
+    });
+    expect(get.statusCode).toBe(200);
   });
 });

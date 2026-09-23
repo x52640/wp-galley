@@ -88,9 +88,14 @@ export function Diagnostics({ onBack }: { onBack: () => void }) {
           <h1>環境診斷</h1>
           <p className="stage">階段 5／7：發布台端到端</p>
         </div>
-        <button type="button" onClick={() => void load()} disabled={checking}>
-          {checking ? '檢查中…' : '重新檢查'}
-        </button>
+        <span className="row">
+          <a className="btn btn-quiet" href="#/setup">
+            重跑設定精靈
+          </a>
+          <button type="button" onClick={() => void load()} disabled={checking}>
+            {checking ? '檢查中…' : '重新檢查'}
+          </button>
+        </span>
       </header>
 
       {error && <p className="bad">無法連上後端：{error}</p>}
@@ -187,8 +192,8 @@ function WordPressPanel({
   if (!probe.configured) {
     return (
       <p className="pending">
-        尚未設定。請在 <code>.env</code> 填入 <code>WORDPRESS_URL</code>、
-        <code>WORDPRESS_USERNAME</code> 與 <code>WORDPRESS_APP_PASSWORD</code>。
+        尚未設定。到 <a href="#/setup">設定精靈</a> 連線（或在 <code>.env</code> 填入 <code>WORDPRESS_URL</code>、
+        <code>WORDPRESS_USERNAME</code> 與 <code>WORDPRESS_APP_PASSWORD</code> 後重新啟動）。
       </p>
     );
   }

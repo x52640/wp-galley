@@ -82,6 +82,8 @@ target 的 `postType` 叫「文章」（post）或「頁面」（page），同�
 檔案在但壞掉（不是 JSON、欄位錯、`targets` 是空陣列）仍然啟動失敗：那是寫錯了，不是還沒設定。
 
 啟動時終端機印出同一句（`startupNotice`）；建稿被拒時 CoreService 也回這一句。
+設定精靈第三步會寫這個檔（已經有檔時的規則見 [wordpress-site.md](wordpress-site.md)「設定精靈」），
+寫完當場生效，不用重新啟動。
 
 ## 發布目標（target）的欄位
 

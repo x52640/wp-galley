@@ -92,7 +92,7 @@ export class AgentError extends CoreError {
 
 export class WordPressUnavailableError extends CoreError {
   override readonly name = 'WordPressUnavailableError';
-  constructor(message = 'WordPress 尚未設定。請在 .env 填好 WORDPRESS_URL、WORDPRESS_USERNAME 與 WORDPRESS_APP_PASSWORD 後重新啟動') {
+  constructor(message = 'WordPress 尚未設定。到「設定」跑一次設定精靈（或在 .env 填好 WORDPRESS_URL、WORDPRESS_USERNAME 與 WORDPRESS_APP_PASSWORD 後重新啟動）') {
     super(coreErrorCodes.WORDPRESS_UNAVAILABLE, message);
   }
 }

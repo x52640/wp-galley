@@ -140,9 +140,14 @@ export function JobList({
     <div className="b0">
       <header className="appbar">
         <span className="brand">發布台</span>
-        <a className="icon-btn" href="#/diagnostics" aria-label="環境診斷" title="環境診斷">
-          <Icon name="gauge" size={18} />
-        </a>
+        <span className="row">
+          <a className="icon-btn" href="#/diagnostics" aria-label="環境診斷" title="環境診斷">
+            <Icon name="gauge" size={18} />
+          </a>
+          <a className="icon-btn" href="#/setup" aria-label="設定" title="設定（重跑設定精靈）">
+            <Icon name="settings" size={18} />
+          </a>
+        </span>
       </header>
 
       <main className="inbox">
@@ -192,10 +197,13 @@ export function JobList({
           </span>
         </div>
         {targetsLoaded && targets.length === 0 && (
-          <p className="note note-warn" role="alert">
+          <div className="note note-warn note-action" role="alert">
             <Icon name="alert" size={14} />
             <span>{NO_TARGETS_MESSAGE}</span>
-          </p>
+            <a className="btn btn-primary btn-tiny" href="#/setup">
+              開始設定
+            </a>
+          </div>
         )}
         {dropError && (
           <p className="note note-warn" role="alert">
