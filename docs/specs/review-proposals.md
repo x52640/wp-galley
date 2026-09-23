@@ -3,7 +3,7 @@
 > 擁有範圍：Agent 校稿結果如何存成提案、逐項套用、observations、中文 diff、
 > 待處理清單與左右對照的行為。
 > 程式：`src/core/review-apply.ts`、`src/core/word-diff.ts`、`src/core/diff.ts`（`computeComparison`）、
-> `src/ui/components/panels/ReviewPanel.tsx`、`CompareView.tsx`、`ViewSwitch.tsx`、
+> `src/ui/components/panels/ReviewPanel.tsx`、`CompareView.tsx`、`src/ui/lib/stage-view.ts`、
 > migration 003、`src/agents/output-contract.ts`（observations）。
 > 為什麼改成提案制：[ADR-0002](../adr/0002-review-as-proposal.md)。
 
@@ -96,15 +96,16 @@ interface Observation {
 
 也就是**把需要查的東西列出來，不假裝自己查過了**。
 
-## 主區的三種檢視（B 版，D-013）
+## 主區的檢視（B 版，D-013；D-018 拿掉三段切換）
 
-| 檢視 | 用途 |
-| --- | --- |
-| **編輯**（預設） | 讀整篇；待處理的建議標在字上，上一版的改動標在頁邊 |
-| **對照** | 跟提案或上一版逐段比對 |
-| **成品** | 跟網站上一模一樣，什麼都不標；發布前在這裡看過才准核准 |
+| 畫面 | 怎麼到 | 用途 |
+| --- | --- | --- |
+| **文章**（預設） | 打開稿件就是 | 讀整篇；待處理的建議標在字上，上一版的改動標在頁邊 |
+| **對照** | 校樣工具列「對照 AI 提案」／「對照上一版」（依比對對象），再按「回到文章」回來 | 跟提案或上一版逐段比對（有提案跟提案比，沒有就跟上一版比） |
+| **成品** | 只在發布面板打開時自動出現 | 跟網站上一模一樣，什麼都不標；核准前一定是這個畫面 |
 
-一個三段切換。不要再加第四種——查證的發現跟校稿建議一起掛在右欄。
+沒有切換列：成品不是能選的檢視，關掉發布面板就回到原本的文章或對照。對照蓋在校樣上，校樣不卸載。
+不要再加別的檢視——查證的發現跟校稿建議一起掛在右欄。畫面細節見 [design-system.md](design-system.md)。
 
 ### 左右對照的粒度
 

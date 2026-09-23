@@ -413,7 +413,7 @@ h1, h2, h3 { font-weight: 600; }
   font-size: .78rem;
   color: var(--shell-text-dim);
 }
-.proof-bar-left { display: flex; align-items: center; gap: .5rem; }
+.proof-bar-left { display: flex; align-items: center; gap: .5rem; margin-right: auto; }
 .proof-chip {
   padding: .1rem .45rem;
   border: 1px solid var(--shell-line);
@@ -887,8 +887,9 @@ h1, h2, h3 { font-weight: 600; }
 .pending { color: var(--warn-on-shell); }
 
 
-/* --- 主區：編輯、對照、成品共用同一格 ------------------------------------
-   編輯與成品是同一張校樣（差在標不標建議），對照蓋在它上面。
+/* --- 主區：文章、對照、成品共用同一格 ------------------------------------
+   文章與成品是同一張校樣（差在標不標建議；成品只在發布面板打開時出現，D-018），
+   對照蓋在它上面。
    ------------------------------------------------------------------------ */
 
 .stage { position: relative; display: flex; min-width: 0; min-height: 0; }
@@ -1241,28 +1242,6 @@ h1, h2, h3 { font-weight: 600; }
 .docbar-state { flex: none; font-size: .8rem; color: var(--shell-text-dim); }
 .docbar-state[data-state='APPROVED'], .docbar-state[data-state='PUBLISHED'] { color: var(--seal-on-shell); font-weight: 700; }
 .docbar-state[data-state='FAILED'] { color: var(--danger-on-shell); font-weight: 700; }
-
-/* 三段切換：編輯／對照／成品。 */
-.seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--shell-sunken); }
-.seg-item {
-  height: 2.1rem;
-  padding: 0 .9rem;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--shell-text-dim);
-  font: inherit;
-  font-size: .88rem;
-  cursor: pointer;
-  transition: background var(--fast), color var(--fast);
-}
-.seg-item:hover { color: var(--shell-text); }
-.seg-item[data-active='yes'] {
-  background: var(--shell-panel);
-  color: var(--shell-text);
-  font-weight: 700;
-  box-shadow: 0 1px 2px rgba(28, 27, 25, .12);
-}
 
 .badge {
   margin-left: .2rem;

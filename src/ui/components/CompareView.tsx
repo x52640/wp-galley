@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { Comparison, CompareRow, DiffSegment, LoadedJob } from '../service/types.js';
 import { Icon } from '../icons.js';
@@ -25,6 +25,7 @@ export function CompareView({
   focusBlock,
   /** 內容一改就重抓；父層把目前的 content hash 傳進來當作重抓的依據。 */
   revisionKey,
+  tools,
 }: {
   job: LoadedJob;
   /**
@@ -35,6 +36,8 @@ export function CompareView({
    */
   focusBlock: number | null;
   revisionKey: string;
+  /** 工具列右邊的按鈕。對照蓋住了校樣的工具列，「回到文章」要放在這裡才按得到。 */
+  tools?: ReactNode;
 }): JSX.Element {
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,7 @@ export function CompareView({
             <span className="proof-bar-note">左右對照</span>
           )}
         </div>
+        {tools}
       </header>
 
       <div className="compare-scroll" ref={scrollRef}>

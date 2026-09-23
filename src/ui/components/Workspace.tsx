@@ -4,6 +4,7 @@ import { isLoaded, type JobDetail, type ReviewItem } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
+import { stageDisplay, type StageView } from '../lib/stage-view.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
 import { useConfirm } from './ConfirmDialog.js';
@@ -12,7 +13,6 @@ import { typeLabel } from './JobList.js';
 import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn } from './SuggestionColumn.js';
-import { ViewSwitch, type StageMode } from './ViewSwitch.js';
 import { MediaPanel } from './panels/MediaPanel.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
@@ -20,8 +20,11 @@ import { SourcePanel } from './panels/SourcePanel.js';
 /**
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
  *
- * 上方只有三件事：看哪一種檢視、請 AI 看一遍、發布。其他動作都跟著內容走——
- * 要改字就在卡片上按、要自己改就直接在文章上打字（P5-T010），不必去找「現在是第幾步」。
+ * 上方只有兩件事：請 AI 看一遍、發布。其他動作都跟著內容走——
+ * 要改字就在卡片上按、要自己改就直接在文章上打字（P5-T010），要比對就按校樣工具列上的
+ * 「對照上一版」，不必去找「現在是第幾步」。
+ *
+ * 沒有「成品」這個檢視可以選（D-018）：乾淨的成品只在發布面板打開時出現，見 lib/stage-view.ts。
  *
  * 只有一個資料來源：`GET /api/jobs/:uuid`。每個動作做完就重新抓一次，
  * 不在前端自己推算狀態——狀態機與核准失效都是後端的權責，前端猜錯會很危險。
@@ -38,7 +41,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   const [blocks, setBlocks] = useState<{ index: number; text: string }[]>([]);
   // 校樣回應的 ETag：使用者眼前那一份的 hash。null = 還沒問到或問不到。
   const [previewHash, setPreviewHash] = useState<string | null>(null);
-  const [mode, setMode] = useState<StageMode>('edit');
+  /** 文章或對照。成品不在這裡：它跟著發布面板走。 */
+  const [view, setView] = useState<StageView>('article');
   /** 亮起來的那一項建議（校樣上的標記與右欄卡片同步）。 */
   const [activeId, setActiveId] = useState<number | null>(null);
   /** 要框起來的段落。建議定位不到字（例如要自己改的那種）時，至少框出那一段。 */
@@ -97,7 +101,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setSheet(null);
     setEditing(null);
     setEditNotice(null);
-    setMode('edit');
+    setView('article');
   }, [uuid]);
 
   useEffect(() => {
@@ -162,7 +166,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
       return;
     }
     setEditNotice(null);
-    setMode('edit');
+    // 對照蓋在校樣上面，看不到正在改的文章；先回到文章再進編輯。
+    setView('article');
     setSheet(null);
     setEditing({
       itemId: item?.id ?? null,
@@ -176,11 +181,9 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setEditNotice(notice ?? null);
   }, []);
 
-  const openPublish = useCallback(() => {
-    // 發布前要看的是成品：跟網站上一模一樣、什麼都不標的那一份。
-    setMode('final');
-    setSheet('publish');
-  }, []);
+  // 發布前要看的是成品：跟網站上一模一樣、什麼都不標的那一份。面板打開，主區就自動是成品
+  // （stageDisplay）；關掉面板，view 沒被動過，自然回到原本的文章或對照。
+  const openPublish = useCallback(() => setSheet('publish'), []);
 
   if (error && !job) {
     return (
@@ -225,6 +228,22 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     job.imageBriefs.some((brief) => !brief.fulfilled) ||
     (job.target.requireFeaturedImage && job.featuredMediaId === null);
   const showImages = imagesOpen ?? imagesAttention;
+  const display = stageDisplay(view, sheet === 'publish');
+  // 編輯中工具列整條換成「取消／儲存」，這顆按鈕本來就看不到；這裡再擋一次，不讓編輯中進對照。
+  // 字跟著畫面上實際顯示的走：從對照打開發布面板時，成品上方不能還寫著「回到文章」。
+  const compareToggle = (
+    <button
+      type="button"
+      className="btn btn-quiet btn-tiny"
+      // 發布面板開著時畫面一定是成品；鍵盤還是 Tab 得到這顆，按了會在關面板後突然跳進對照。
+      disabled={editing !== null || sheet === 'publish'}
+      onClick={() => setView(display.compare ? 'article' : 'compare')}
+    >
+      <Icon name={display.compare ? 'arrow-left' : 'columns'} size={13} />
+      {/* 有未結案的校稿提案時，後端跟提案比，不是跟上一版比（getComparison 的預設）。按鈕要照實講。 */}
+      {display.compare ? '回到文章' : job.review ? '對照 AI 提案' : '對照上一版'}
+    </button>
+  );
 
   return (
     <div className="workspace">
@@ -244,7 +263,6 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         </div>
 
         <div className="docbar-right">
-          <ViewSwitch mode={mode} onMode={setMode} />
           {!isFinished(job.state) && <AgentButton job={job} refresh={refresh} onError={setAgentError} />}
           {job.published ? (
             <a className="btn" href={job.published.link} target="_blank" rel="noreferrer">
@@ -307,14 +325,14 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
           校樣永遠掛在樹上，切到對照時只是被蓋住（見 styles.css 的 .stage）。
           卸載掉的話 iframe 會重載、量到的區塊也會清空，插入圖片的位置就會是空的。
         */}
-        <div className="stage" data-mode={mode === 'compare' ? 'compare' : 'proof'}>
+        <div className="stage" data-mode={display.compare ? 'compare' : 'proof'}>
           <ProofView
             job={job}
-            mode={mode === 'final' ? 'final' : 'edit'}
+            mode={display.proof}
             highlights={highlights}
             activeHighlight={activeId}
             onHighlight={onHighlight}
-            focusBlock={mode === 'final' ? null : focusBlock}
+            focusBlock={display.proof === 'final' ? null : focusBlock}
             onBlocks={onBlocks}
             onPreviewed={onPreviewed}
             onPreviewHash={onPreviewHash}
@@ -336,27 +354,35 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
               return saved.contentHash;
             }}
             tools={
-              !isFinished(job.state) && (
-                <>
-                  <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setSheet('source')}>
-                    標題與網址
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-tiny"
-                    disabled={working}
-                    title={working ? 'AI 還在處理這篇，等它跑完再改' : undefined}
-                    onClick={() => startEdit(null)}
-                  >
-                    <Icon name="file-text" size={13} />
-                    改原文
-                  </button>
-                </>
-              )
+              <>
+                {compareToggle}
+                {!isFinished(job.state) && (
+                  <>
+                    <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setSheet('source')}>
+                      標題與網址
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
+                      disabled={working}
+                      title={working ? 'AI 還在處理這篇，等它跑完再改' : undefined}
+                      onClick={() => startEdit(null)}
+                    >
+                      <Icon name="file-text" size={13} />
+                      改原文
+                    </button>
+                  </>
+                )}
+              </>
             }
           />
-          {mode === 'compare' && (
-            <CompareView job={job} focusBlock={focusBlock} revisionKey={job.currentRevision?.contentHash ?? 'none'} />
+          {display.compare && (
+            <CompareView
+              job={job}
+              focusBlock={focusBlock}
+              revisionKey={job.currentRevision?.contentHash ?? 'none'}
+              tools={compareToggle}
+            />
           )}
         </div>
 
@@ -365,10 +391,9 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             job={job}
             refresh={refresh}
             activeId={activeId}
-            onActivate={(item) => {
-              if (mode === 'final') setMode('edit');
-              activate(item);
-            }}
+            // 在對照中按卡片就留在對照，CompareView 會捲到那一段並框起來；
+            // 同一時間底下的校樣也標亮，回到文章時就停在那一項。
+            onActivate={activate}
             onEditSource={startEdit}
           />
 
@@ -417,7 +442,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             previewHash={previewHash}
             onGoTo={(where) => {
               setSheet(null);
-              setMode('edit');
+              // 「回去看」要看的是標在字上的建議或圖片區，所以回到文章，不回對照。
+              setView('article');
               if (where === 'images') setImagesOpen(true);
             }}
           />
