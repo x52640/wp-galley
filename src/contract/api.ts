@@ -84,7 +84,7 @@ export interface DiffSegment {
 }
 
 /**
- * 左右對照的一列。欄位裡是**純文字**不是 HTML：這個畫面的用途是逐字比對，
+ * 對照的一列。欄位裡是**純文字**不是 HTML：這個畫面的用途是逐字比對，
  * 排版看校樣。
  */
 export interface CompareRow {
@@ -94,6 +94,11 @@ export interface CompareRow {
   readonly rightIndex: number | null;
   readonly left: DiffSegment[] | null;
   readonly right: DiffSegment[] | null;
+  /**
+   * 單欄（git diff 式，D-019）用的完整序列：same、removed、added 照原本的順序排在一起，
+   * 刪掉的字緊接著換上的字。整段新增就是一段 added、整段刪除就是一段 removed。
+   */
+  readonly segments: DiffSegment[];
   /**
    * 文字一模一樣、但標記被改掉時的說明（換了連結、換了圖片、h2 變 h3）。
    * 沒有這一句的話，這種列在對照畫面上會長得跟「沒改」完全一樣。
@@ -107,6 +112,22 @@ export interface Comparison {
   readonly leftLabel: string;
   readonly rightLabel: string;
   readonly rows: CompareRow[];
+  /**
+   * 正文以外的改動（D-019）：標題、網址片段、分類／標籤等 templateData 欄位，以及精選圖片。
+   * 沒改的欄位不列。欄位的中文名稱與值怎麼顯示由後端決定（精選圖片給檔名／說明，不給 id），
+   * 畫面照抄就好。
+   */
+  readonly fieldChanges: FieldChange[];
+}
+
+export interface FieldChange {
+  /** templateData 的欄位名；精選圖片固定是 `featuredMedia`。 */
+  readonly field: string;
+  /** 給人看的名稱，例如「標題」「精選圖片」。 */
+  readonly label: string;
+  /** 顯示用的值；null＝這一邊沒有設定。 */
+  readonly before: string | null;
+  readonly after: string | null;
 }
 
 // --- Agent 的輸出 -------------------------------------------------------------

@@ -356,6 +356,55 @@ describe('左右對照', () => {
     expect(comparison.rows.filter((row) => row.kind === 'replaced')).toHaveLength(1);
   });
 
+  it('跟上一版比：只換了封面也要講出來，正文一段都沒改（D-019，使用者 r12 → r13）', async () => {
+    const f = await setup();
+    const uuid = newJob(f.core);
+    const asset = await f.core.addMedia(uuid, {
+      bytes: TINY_PNG,
+      mimeType: 'image/png',
+      filename: 'cover',
+      altText: '一張封面',
+    });
+    f.core.setFeaturedMedia(uuid, asset.id);
+
+    const comparison = f.core.getComparison(uuid);
+    expect(comparison.against).toBe('previous');
+    expect(comparison.rows.every((row) => row.kind === 'same')).toBe(true);
+    expect(comparison.fieldChanges).toHaveLength(1);
+    const [change] = comparison.fieldChanges;
+    expect(change!.field).toBe('featuredMedia');
+    expect(change!.label).toBe('精選圖片');
+    expect(change!.before).toBeNull();
+    // 顯示檔名／替代文字，不是資料庫的 id。
+    expect(change!.after).toContain('一張封面');
+    expect(change!.after).not.toBe(String(asset.id));
+  });
+
+  it('跟上一版比：標題、網址片段這些正文以外的欄位也列出來', async () => {
+    const f = await setup();
+    const uuid = newJob(f.core);
+    const current = f.core.getJob(uuid).currentRevision!.templateData;
+    f.core.createRevision(uuid, {
+      templateData: { ...current, title: '20260829', slug: '20260829' },
+      reason: '手動',
+    });
+    const comparison = f.core.getComparison(uuid);
+    expect(comparison.fieldChanges.map((change) => change.label)).toEqual(['標題', '網址片段']);
+    expect(comparison.fieldChanges[0]).toMatchObject({ before: '20260828', after: '20260829' });
+  });
+
+  it('跟 AI 提案比：提案改了標題也要列出來；正文與精選圖片沿用時不列', async () => {
+    const f = await setup(
+      reviewResult({ templateData: { title: '讀完一本書', body: PROPOSED_BODY } }),
+    );
+    const uuid = await propose(f.core);
+    const comparison = f.core.getComparison(uuid);
+    expect(comparison.against).toBe('proposal');
+    expect(comparison.fieldChanges).toEqual([
+      { field: 'title', label: '標題', before: '20260828', after: '讀完一本書' },
+    ]);
+  });
+
   it('只有一版又沒有提案時老實說沒得比', async () => {
     const f = await setup();
     const uuid = newJob(f.core);

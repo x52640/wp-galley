@@ -32,7 +32,7 @@
 | `POST` | `/api/jobs/:uuid/review/resolve` | 逐項套用或略過 | `ResolveReviewRequest` → `ReviewResolveResult` |
 | `POST` | `/api/jobs/:uuid/review/accept-all` | 採用整份稿 | `ProposalRefRequest` → `ReviewResolveResult` |
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
-| `GET` | `/api/jobs/:uuid/compare` | 左右對照，`?against=proposal\|previous` | → `Comparison` |
+| `GET` | `/api/jobs/:uuid/compare` | 對照（逐段差異＋正文以外的欄位差異），`?against=proposal\|previous` | → `Comparison` |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
 | `GET` | `/api/jobs/:uuid/candidates/:id` | 候選圖本體（`image/*`，`no-store`），只在本機 | → 圖檔 |
@@ -74,5 +74,9 @@
   候選圖的檔案路徑只由資料庫決定，路由只收編號。`use` 與 `POST /media` 對上封面那條時回
   `autoFeature`（`set`／`kept-existing`／`failed`，沒對上是 null）：已經有使用者選的封面就不覆蓋。
   細節見 [agent-tasks.md](agent-tasks.md)「用 Codex 生圖」。
+- `compare`（D-019）：`rows` 是正文逐段差異，每列的 `segments` 是單欄畫面用的完整序列；
+  `fieldChanges` 是正文以外的改動（標題、網址片段、分類／標籤等 templateData 欄位，跟上一版比時另有精選圖片），
+  名稱與顯示值由後端決定，畫面照抄。跟提案比時不比精選圖片（提案不動它）。畫面見
+  [review-proposals.md](review-proposals.md)「對照畫面長什麼樣」。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
   [review-proposals.md](review-proposals.md)。`blockIndex` 的語意見 review-proposals.md。

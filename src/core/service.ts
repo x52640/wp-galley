@@ -27,6 +27,7 @@ import type {
 } from '../contract/api.js';
 import { computeRevisionHash } from './content-hash.js';
 import { computeComparison, computeProofMarks, type CompareRow, type ProofMark } from './diff.js';
+import { describeMediaForDiff, diffFields } from './field-diff.js';
 import {
   AgentError,
   ApprovalForbiddenError,
@@ -1056,38 +1057,64 @@ export class CoreService {
   getComparison(uuid: string, against?: 'proposal' | 'previous'): ComparisonView {
     const job = this.requireJob(uuid);
     const revisionRow = this.repo.latestRevision(job.id);
-    if (!revisionRow) {
-      return { against: 'none', leftLabel: '', rightLabel: '', rows: [] };
-    }
+    const none: ComparisonView = { against: 'none', leftLabel: '', rightLabel: '', rows: [], fieldChanges: [] };
+    if (!revisionRow) return none;
 
     const proposal = this.repo.openReviewProposal(job.id);
     const mode = against ?? (proposal ? 'proposal' : 'previous');
+    const current = this.payloadOf(revisionRow);
+    // 跟上一版比不需要模板；發布目標被拿掉的舊稿件也要比得出來，正文欄位就當成 body。
+    const publishSlot = this.targetOf(job) ? this.requireTemplate(job).manifest.publishSlot : 'body';
 
     if (mode === 'proposal' && proposal) {
       const template = this.requireTemplate(job);
       const proposed = JSON.parse(proposal.proposed_data_json) as Record<string, unknown>;
       const rendered = this.renderPayload(template, {
         templateData: proposed,
-        featuredMediaAssetId: this.payloadOf(revisionRow).featuredMediaAssetId,
+        featuredMediaAssetId: current.featuredMediaAssetId,
       });
       return {
         against: 'proposal',
         leftLabel: `目前 r${revisionRow.revision_number}`,
         rightLabel: `${proposal.provider} 的提案`,
         rows: computeComparison(revisionRow.rendered_html ?? '', rendered.result.publishHtml),
+        // 提案不動精選圖片（全部接受也沿用目前那一張），所以只比 templateData。
+        fieldChanges: diffFields({
+          before: current.templateData,
+          after: proposed,
+          publishSlot,
+        }),
       };
     }
 
     const previous = this.repo.previousRevision(job.id, revisionRow.revision_number);
-    if (!previous) {
-      return { against: 'none', leftLabel: '', rightLabel: '', rows: [] };
-    }
+    if (!previous) return none;
+    const earlier = this.payloadOf(previous);
     return {
       against: 'previous',
       leftLabel: `r${previous.revision_number}`,
       rightLabel: `r${revisionRow.revision_number}`,
       rows: computeComparison(previous.rendered_html ?? '', revisionRow.rendered_html ?? ''),
+      fieldChanges: diffFields({
+        before: earlier.templateData,
+        after: current.templateData,
+        publishSlot,
+        featured: {
+          beforeId: earlier.featuredMediaAssetId,
+          afterId: current.featuredMediaAssetId,
+          before: this.featuredLabel(earlier.featuredMediaAssetId),
+          after: this.featuredLabel(current.featuredMediaAssetId),
+        },
+      }),
     };
+  }
+
+  /** 對照摘要裡精選圖片的名字：檔名／替代文字，不是 id（D-019）。 */
+  private featuredLabel(assetId: number | null): string | null {
+    if (assetId === null) return null;
+    const asset = this.repo.mediaById(assetId);
+    if (!asset) return '一張已經移除的圖片';
+    return describeMediaForDiff({ url: this.mediaUrl(asset), altText: asset.alt_text });
   }
 
   /**

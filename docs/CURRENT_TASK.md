@@ -4,14 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **40 檔 / 608 測試**全綠（2026-09-23，P5-T014 後）
+- `npm run verify`：typecheck 通過；Vitest **42 檔 / 642 測試**全綠（2026-09-23，P5-T015 後）
 - migration head：`005-image-candidates`
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
 P5-T001 實測進行中（走到第 2 步）。使用者要求把實測發現的問題當場修，已完成：P5-T008 定位忽略空白、
-P5-T009 兩欄各自捲動、P5-T010 直接在文章上改、P5-T011 標出要改的地方、P5-T012 改完卡片自動結案、[P5-T014](tasks/P5-T014-remove-view-switch.md) 拿掉三段切換（D-018）。下一步：回到實測第 3 步（只接受一個錯字）。
+P5-T009 兩欄各自捲動、P5-T010 直接在文章上改、P5-T011 標出要改的地方、P5-T012 改完卡片自動結案、[P5-T014](tasks/P5-T014-remove-view-switch.md) 拿掉三段切換（D-018）、[P5-T015](tasks/P5-T015-unified-diff.md) 對照改成 git diff 式（D-019）。下一步：回到實測第 3 步（只接受一個錯字）。
 
 [P5-T013](tasks/P5-T013-codex-image-generation.md) 用 Codex 生圖（D-017）已完成，只走過示範資料；
 **真實 Codex 生圖與「用這張」的真實上傳還沒跑過**（耗額度、會寫進媒體庫），留給使用者在實測時做。

@@ -27,6 +27,14 @@
   --proof-bg:        #FFFFFF;
   --proof-text:      #1A1A1A;
   --proof-rule:      #E2E0DA;
+  --proof-dim:       #5F5E5A;
+  --proof-sunken:    #F6F5F1;
+
+  /* 對照的刪除／新增（D-019）。印在紙上，紙永遠是淺色，深色模式不換 */
+  --diff-del:        #B91C1C;
+  --diff-del-bg:     #FDE8E8;
+  --diff-add:        #166534;
+  --diff-add-bg:     #DCF5E3;
 
   /* 唯一的強調色：下一步該按的那一顆 */
   --accent:          #2D5A4A;
@@ -933,59 +941,96 @@ h1, h2, h3 { font-weight: 600; }
   to   { opacity: 1; }
 }
 
-/* --- 左右對照 ------------------------------------------------------------ */
+/* --- 對照（D-019，git diff 式） -----------------------------------------
+   單欄：最上面一句摘要，只列有改的段落，沒變的收成一行可以展開。
+   ------------------------------------------------------------------------ */
 
 .compare-scroll { flex: 1; overflow-y: auto; padding: 0 1.25rem 3rem; }
 
-/* 一樣是紙。逐字比對還是在讀文章，不是在讀儀表板。 */
+/* 一樣是紙。逐字比對還是在讀文章，不是在讀儀表板。寬度跟校樣差不多，一行不要長到讀不完。 */
 .compare-sheet {
-  max-width: 74rem;
+  max-width: 48rem;
   margin: 1.5rem auto 0;
-  padding: 0 0 2rem;
+  overflow: hidden;
   background: var(--proof-bg);
   color: var(--proof-text);
   border-radius: 2px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
 }
 
-.compare-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0 1.5rem;
-  padding: .6rem 1.5rem;
-  background: var(--proof-bg);
+.diff-summary {
+  padding: 1rem 1.75rem .9rem;
   border-bottom: 1px solid var(--proof-rule);
-  font-size: .74rem;
-  letter-spacing: .06em;
-  color: #6b7280;
 }
-.compare-head span:first-child { grid-column: 2; }
+.diff-summary-line { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.6; }
 
-.compare-row {
-  display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0 1.5rem;
-  padding: .55rem 1.5rem;
+.diff-fields { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .3rem; }
+.diff-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  font-size: .88rem;
+  line-height: 1.6;
+  color: var(--proof-dim);
+}
+.diff-field svg { flex: none; color: var(--proof-dim); }
+.diff-field-label { color: var(--proof-text); font-weight: 600; margin-right: .2rem; }
+.diff-field-none { color: var(--proof-dim); }
+.diff-field .seg { text-decoration-thickness: 1px; }
+
+.diff-row {
+  padding: .7rem 1.75rem .8rem 1.5rem;
   border-bottom: 1px solid var(--proof-rule);
   border-left: 3px solid transparent;
 }
-.compare-row:last-child { border-bottom: 0; }
+.diff-row[data-kind='replaced'] { border-left-color: var(--mark); }
+.diff-row[data-kind='inserted'] { border-left-color: var(--diff-add); }
+.diff-row[data-kind='deleted'] { border-left-color: var(--diff-del); }
+/* 展開來看的沒變段落安靜下去，眼睛才會停在真的動過的地方。 */
+.diff-row[data-kind='same'] { color: var(--proof-dim); }
 
-/* 沒改的段落安靜下去，眼睛才會停在真的動過的地方。 */
-.compare-row[data-kind='same'] { color: #6b7280; }
-.compare-row[data-kind='replaced'],
-.compare-row[data-kind='inserted'],
-.compare-row[data-kind='deleted'] { border-left-color: var(--mark); }
-
-.compare-row[data-focused='yes'] {
+.diff-row[data-focused='yes'] {
   background: color-mix(in srgb, var(--mark) 8%, transparent);
   border-left-color: var(--mark);
+  outline: 1.5px solid color-mix(in srgb, var(--mark) 45%, transparent);
+  outline-offset: -1.5px;
 }
 
-.compare-num { margin: 0; font-size: .72rem; color: #9ca3af; padding-top: .2rem; }
+.diff-row-head { display: flex; align-items: center; gap: .5rem; margin: 0 0 .25rem; font-size: .76rem; }
+.diff-pos { color: var(--proof-dim); letter-spacing: .04em; }
+.diff-kind {
+  padding: 0 .4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 10%, transparent);
+}
+.diff-kind[data-kind='inserted'] { color: var(--diff-add); background: var(--diff-add-bg); }
+.diff-kind[data-kind='deleted'] { color: var(--diff-del); background: var(--diff-del-bg); }
+
+.diff-fold { border-bottom: 1px solid var(--proof-rule); }
+.compare-sheet > :last-child { border-bottom: 0; }
+.diff-fold[data-open='yes'] > .diff-row:last-child { border-bottom: 0; }
+.diff-fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  width: 100%;
+  padding: .45rem 1.75rem .45rem 1.5rem;
+  border: 0;
+  background: var(--proof-sunken);
+  color: var(--proof-dim);
+  font: inherit;
+  font-size: .82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+.diff-fold-toggle:hover { background: color-mix(in srgb, var(--proof-dim) 12%, transparent); }
+.diff-fold-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.diff-fold[data-open='yes'] > .diff-fold-toggle { border-bottom: 1px solid var(--proof-rule); }
+.diff-fold-hint { margin-left: auto; font-size: .76rem; }
 
 .compare-text {
   margin: 0;
@@ -993,10 +1038,9 @@ h1, h2, h3 { font-weight: 600; }
   line-height: 1.85;
   overflow-wrap: anywhere;
 }
-.compare-text-empty { color: #9ca3af; font-style: normal; }
+.compare-text-empty { color: var(--proof-dim); font-style: normal; font-size: .85rem; }
 
 .compare-note {
-  grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: .35rem;
@@ -1007,25 +1051,23 @@ h1, h2, h3 { font-weight: 600; }
 .compare-note svg { flex: none; }
 
 /*
-  改動的標記。**不只靠顏色**：刪掉的加刪除線、加上的加底線，另外還有給螢幕
-  閱讀器的「刪除起／迄」。
-
-  兩邊都用 --mark 而不是紅綠一組：設計系統把 --mark 定義成「改動」的顏色，
-  刪掉和加上都是改動；左右兩欄的位置與刪除線／底線已經分得出是哪一種，
-  再引進第二個強調色只會讓校樣區多一種顏色。
+  改動的標記：刪掉的紅色刪除線、加上的綠色底色加底線（D-019，跟 git diff 一樣的直覺）。
+  **不只靠顏色**：刪除線／底線本身就分得出來，另外還有給螢幕閱讀器的「刪除起／迄」。
+  紙永遠是淺色，所以這組顏色不跟著深色模式換。
 */
-.seg { border-radius: 2px; padding: 0 .08em; background: none; color: inherit; }
+.seg { border-radius: 2px; padding: 0 .08em; background: none; color: inherit; text-decoration: none; }
 .seg[data-op='removed'] {
   text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  color: color-mix(in srgb, var(--mark) 70%, #6b7280);
+  text-decoration-thickness: 1.5px;
+  color: var(--diff-del);
+  background: var(--diff-del-bg);
 }
 .seg[data-op='added'] {
   text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: .18em;
-  color: var(--mark);
-  background: color-mix(in srgb, var(--mark) 10%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: .2em;
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
 }
 
 /* --- Agent 執行中 --------------------------------------------------------
@@ -1571,7 +1613,7 @@ h1, h2, h3 { font-weight: 600; }
 @media (max-width: 1280px) {
   .desk { grid-template-columns: minmax(0, 1fr) 22rem; }
   .proof-scroll, .compare-scroll { padding: 0 .75rem 3rem; }
-  .compare-row, .compare-head { padding-left: 1rem; padding-right: 1rem; gap: 0 .9rem; }
+  .diff-row, .diff-summary, .diff-fold-toggle { padding-left: 1rem; padding-right: 1rem; }
   .mark-pop { width: 17rem; }
   :root { --gutter: 2.5rem; }
 }

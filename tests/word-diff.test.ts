@@ -110,9 +110,41 @@ describe('左右對照', () => {
     expect(hasWordChanges(rows[0]!.left!)).toBe(false);
   });
 
+  it('單欄用的 segments 照順序把刪掉與換上的字排在一起（D-019）', () => {
+    const rows = computeComparison(
+      `${p('一')}${p('今天讀完了這本書')}${p('三')}`,
+      `${p('一')}${p('今天讀完這本書')}${p('三')}${p('新的')}`,
+    );
+    const replaced = rows.find((row) => row.kind === 'replaced')!;
+    expect(replaced.segments.map((s) => `${s.op}:${s.text}`)).toEqual(['same:今天讀完', 'removed:了', 'same:這本書']);
+    expect(rows.find((row) => row.kind === 'same')!.segments).toEqual([{ op: 'same', text: '一' }]);
+    expect(rows.find((row) => row.kind === 'inserted')!.segments).toEqual([{ op: 'added', text: '新的' }]);
+    const removed = computeComparison(`${p('一')}${p('二')}`, `${p('一')}`);
+    expect(removed[1]!.segments).toEqual([{ op: 'removed', text: '二' }]);
+  });
+
   it('對照用的索引跟校對符號是同一套（第 n 段就是第 n 個頂層區塊）', () => {
     const rows = computeComparison(`${p('一')}${p('二')}${p('三')}`, `${p('一')}${p('改過')}${p('三')}`);
     const changed = rows.find((row) => row.kind === 'replaced')!;
     expect(changed.rightIndex).toBe(1);
+  });
+});
+
+describe('computeComparison：沒有文字的段落（圖片、分隔線）', () => {
+  const figure = '<figure class="wp-block-image"><img src="https://example.com/a.png" alt=""></figure>';
+  const p = (text: string): string => `<p>${text}</p>`;
+
+  it('新增一張沒有圖說的圖：segments 是空的，畫面才會顯示「這一段沒有文字」', () => {
+    const rows = computeComparison(p('一'), `${p('一')}${figure}`);
+    const inserted = rows.find((row) => row.kind === 'inserted')!;
+    expect(inserted.segments).toEqual([]);
+    expect(inserted.right).toEqual([]);
+  });
+
+  it('刪掉一張沒有圖說的圖：同上', () => {
+    const rows = computeComparison(`${p('一')}${figure}`, p('一'));
+    const deleted = rows.find((row) => row.kind === 'deleted')!;
+    expect(deleted.segments).toEqual([]);
+    expect(deleted.left).toEqual([]);
   });
 });

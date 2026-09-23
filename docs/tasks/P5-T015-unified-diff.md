@@ -1,7 +1,7 @@
 ---
 id: P5-T015
 phase: 5
-status: in_progress
+status: done
 depends_on: [P5-T014]
 specs: [review-proposals.md, http-api.md, core-service.md, design-system.md]
 write_paths: ["src/core/", "src/contract/api.ts", "src/server/routes/", "src/ui/", "tests/", "docs/specs/", "docs/tasks/", "docs/CURRENT_TASK.md"]
@@ -43,15 +43,31 @@ D-019。實測（使用者 2026-09-23）：「對照上一版」沒辦法馬上�
 `npm run verify`；`node scripts/ui-drive.mjs` 走示範資料兩種例子，並用真實後端（唯讀）看使用者那篇 r12→r13
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 無頭 Chrome：只換封面的版本摘要寫得出來；改字的版本只列有改的段落、收合可展開、點卡片會展開並框出
-- [ ] 相關 spec 已更新
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] 無頭 Chrome：只換封面的版本摘要寫得出來；改字的版本只列有改的段落、收合可展開、點卡片會展開並框出
+- [x] 相關 spec 已更新
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task
-- 已通過驗證：—
-- 下一步：交給 subagent
+- 最後完成：實作、spec、無頭驗收、真實 r12→r13 唯讀檢查
+- 已通過驗證：`npm run verify` 42 檔／642 測試綠
+- 下一步：主 agent 審查後 commit（`feat(P5-T015): 對照改成 git diff 式`）
 - Blocker：無
 
 ## 完成結果
+
+- 契約（additive）：`Comparison.fieldChanges: FieldChange[]`（`field`／`label`／`before`／`after`，值是顯示用字串，
+  null＝沒設定）；`CompareRow.segments`（單欄用的完整差異序列）。
+- 後端：`src/core/field-diff.ts`（`diffFields`、`describeMediaForDiff`），`getComparison` 兩種比對都帶 `fieldChanges`；
+  跟提案比不比精選圖片（提案不動它）。精選圖片顯示「WordPress 網址的檔名（替代文字，24 字截斷）」，
+  沒上傳只有替代文字；本機不存原始檔名。跟上一版比不再需要模板。
+- 前端：`src/ui/lib/diff-view.ts`（分組、段號、摘要、`runKeyForBlock`）＋重寫的 `CompareView`；
+  Workspace 多一個 `focusSeq`，每點一次卡片加一，對照據此展開收起來的那一組並捲過去。
+- 示範資料：f-reviewed（跟提案比，改字，第 3–4 段收起，點「八成」觀察卡片會展開並框出第 3 段）、
+  f-rendered（跟上一版比，改字＋新增一段＋標籤）、f-torn（只換封面）。
+- 真實資料（唯讀）：使用者那篇 r12→r13 顯示「正文沒變，只設了精選圖片」（監工時把「換了」改成依情況「設了／換了／拿掉了」），
+  「精選圖片（沒有）→ featured.png（一份表單上只有一個核取方塊…）」，下面一行「第 1–15 段沒變（15 段）」。
+- 測試：新增 `tests/field-diff.test.ts`、`tests/diff-view.test.ts`，`word-diff`／`review-proposal` 各加幾條（608 → 637）。
+- 審查（subagent）後監工修正（637 → 642）：沒有文字的新增／刪除段落（沒圖說的圖、分隔線）給空的 segments，
+  畫面才會說「這一段沒有文字」而不是一個空標記；字串清單（標籤、分類）當集合比，只換順序不算改動。
+

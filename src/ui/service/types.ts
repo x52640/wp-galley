@@ -49,6 +49,7 @@ export type {
   CompareRow,
   Comparison,
   DiffSegment,
+  FieldChange,
   ImageBrief,
   ImageBriefDraft,
   ImageCandidate,

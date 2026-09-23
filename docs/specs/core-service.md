@@ -60,5 +60,9 @@ interface CoreService {
 }
 ```
 
+`getComparison(uuid, against?)`：有未結案提案就跟提案比，沒有就跟上一版比；回傳 `Comparison`，
+除了逐段的 `rows`，還有正文以外的 `fieldChanges`（`src/core/field-diff.ts`，D-019）。
+跟上一版比不需要模板（發布目標被拿掉的舊稿件正文欄位當成 `body`）。
+
 提案制（階段 5.5）之後 `runAgentReview` 不再直接產生 revision，見
 [review-proposals.md](review-proposals.md)。

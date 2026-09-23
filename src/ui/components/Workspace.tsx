@@ -47,6 +47,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   const [activeId, setActiveId] = useState<number | null>(null);
   /** 要框起來的段落。建議定位不到字（例如要自己改的那種）時，至少框出那一段。 */
   const [focusBlock, setFocusBlock] = useState<number | null>(null);
+  /** 每點一次卡片加一：同一張卡片再點一次，對照也要再展開、再捲過去（D-019）。 */
+  const [focusSeq, setFocusSeq] = useState(0);
   const [sheet, setSheet] = useState<SheetKey>(null);
   /**
    * 直接在文章上改。編輯中右欄與上方動作都鎖住：那些動作會產生新版本、讓校樣重載，
@@ -149,6 +151,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   const activate = useCallback((item: ReviewItem | null) => {
     setActiveId(item?.id ?? null);
     setFocusBlock(item?.blockIndex ?? null);
+    setFocusSeq((seq) => seq + 1);
   }, []);
 
   const onHighlight = useCallback(
@@ -380,6 +383,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             <CompareView
               job={job}
               focusBlock={focusBlock}
+              focusSeq={focusSeq}
               revisionKey={job.currentRevision?.contentHash ?? 'none'}
               tools={compareToggle}
             />

@@ -237,10 +237,10 @@ function promoteMoves(marks: readonly ProofMark[]): ProofMark[] {
     .sort((a, b) => a.blockIndex - b.blockIndex);
 }
 
-// --- 左右對照（階段 5.5-B） -------------------------------------------------
+// --- 對照（階段 5.5-B；D-019 改單欄） -------------------------------------------------
 
 /*
- * 左右對照的一列（CompareRow，形狀定義在 src/contract/api.ts）。
+ * 對照的一列（CompareRow，形狀定義在 src/contract/api.ts）。
  *
  * 粒度是**頂層區塊**，跟校對符號、跟「把圖片插在第 n 段後面」用的是同一套索引。
  * 三者共用同一套索引是刻意的：使用者在對照畫面點某一段、在校樣上看到的符號、
@@ -251,7 +251,7 @@ function promoteMoves(marks: readonly ProofMark[]): ProofMark[] {
  */
 
 /**
- * 兩版正文的左右對照。
+ * 兩版正文的逐段對照。
  *
  * 區塊配對沿用校對符號那一套 LCS，所以兩個畫面永遠說同一件事；
  * 配好對之後，每一對再用 `diffWords` 做逐詞比對。
@@ -274,6 +274,7 @@ export function computeComparison(leftHtml: string, rightHtml: string): CompareR
         rightIndex: op.curr,
         left: text.length === 0 ? [] : [{ op: 'same', text }],
         right: text.length === 0 ? [] : [{ op: 'same', text }],
+        segments: text.length === 0 ? [] : [{ op: 'same', text }],
         note: null,
       });
       index += 1;
@@ -300,28 +301,35 @@ export function computeComparison(leftHtml: string, rightHtml: string): CompareR
         rightIndex: inserts[k]!,
         left: segments.filter((segment) => segment.op !== 'added'),
         right: segments.filter((segment) => segment.op !== 'removed'),
+        segments,
         note: before.text === after.text ? describeMarkupChange(before, after) : null,
       });
     }
     for (let k = paired; k < inserts.length; k += 1) {
       const text = current[inserts[k]!]!.text;
+      // 沒有文字的段落（沒圖說的圖、分隔線）給空陣列：畫面會改說「這一段沒有文字」，
+      // 不然只會出現一個空的標記，看起來像什麼都沒改。
+      const added: DiffSegment[] = text.length === 0 ? [] : [{ op: 'added', text }];
       rows.push({
         kind: 'inserted',
         leftIndex: null,
         rightIndex: inserts[k]!,
         left: null,
-        right: [{ op: 'added', text }],
+        right: added,
+        segments: added,
         note: null,
       });
     }
     for (let k = paired; k < deletes.length; k += 1) {
       const text = previous[deletes[k]!]!.text;
+      const removed: DiffSegment[] = text.length === 0 ? [] : [{ op: 'removed', text }];
       rows.push({
         kind: 'deleted',
         leftIndex: deletes[k]!,
         rightIndex: null,
-        left: [{ op: 'removed', text }],
+        left: removed,
         right: null,
+        segments: removed,
         note: null,
       });
     }
