@@ -23,3 +23,6 @@ coverage/
 *.log
 .playwright/
 test-results/
+
+# --- 使用者的方法論筆記，不進版控 ---
+know_how.md
