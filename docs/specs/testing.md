@@ -11,3 +11,11 @@
 - 每階段除了單元測試，都要拿**真實資料**實跑一次（115 篇文章、真實 CLI）——
   階段 2 就是這樣抓到「h2 沒人用」是錯的結論。
 - 依名稱篩選：`npx vitest run -t "遮蔽"`；單一檔案：`npx vitest run tests/health.test.ts`。
+
+## UI 驗收
+
+- 畫面一律先用示範資料走一次：網址加 `?fixtures=1`，不需要後端也不會連 WordPress。
+- 要實際點按、截圖時用 `node scripts/ui-drive.mjs <steps.json>`（無頭 Chrome，不用裝套件）。
+  步驟格式寫在檔頭；先 `npm run build:ui`，對 `http://127.0.0.1:3000` 測（Vite 的 HMR 連線會讓
+  無頭 Chrome 等不完）。
+- 用真實後端時，**不按任何會寫到正式站的按鈕**（發布、上傳媒體）；那一步留給使用者。
