@@ -1,4 +1,5 @@
 import { splitTopLevelBlocks, type TopLevelBlock } from './html-blocks.js';
+import { diffWords, type DiffSegment } from './word-diff.js';
 
 /**
  * 校對符號（階段 5 契約第四節）。
@@ -243,4 +244,111 @@ function promoteMoves(marks: readonly ProofMark[]): ProofMark[] {
   return result
     .filter((mark) => !consumedDeletes.has(mark))
     .sort((a, b) => a.blockIndex - b.blockIndex);
+}
+
+// --- 左右對照（階段 5.5-B） -------------------------------------------------
+
+/**
+ * 左右對照的一列。
+ *
+ * 粒度是**頂層區塊**，跟校對符號、跟「把圖片插在第 n 段後面」用的是同一套索引。
+ * 三者共用同一套索引是刻意的：使用者在對照畫面點某一段、在校樣上看到的符號、
+ * 送給後端的插入位置，指的必須是同一個東西。
+ *
+ * 欄位裡放的是**純文字**不是 HTML：這個畫面的用途是逐字比對，不是再看一次排版
+ * （排版看校樣）。而且逐詞標記要疊在文字上，把 HTML 一起丟進來只會兩邊打架。
+ */
+export interface CompareRow {
+  readonly kind: 'same' | 'replaced' | 'inserted' | 'deleted';
+  /** 在左邊那一版的區塊索引；新增的列沒有左邊，是 null。 */
+  readonly leftIndex: number | null;
+  readonly rightIndex: number | null;
+  readonly left: DiffSegment[] | null;
+  readonly right: DiffSegment[] | null;
+  /**
+   * 文字一模一樣、但標記被改掉時的說明（換了連結、換了圖片、h2 變 h3）。
+   * 沒有這一句的話，這種列在對照畫面上會長得跟「沒改」完全一樣——
+   * 使用者核准的就會是他沒看到的改動。
+   */
+  readonly note: string | null;
+}
+
+/**
+ * 兩版正文的左右對照。
+ *
+ * 區塊配對沿用校對符號那一套 LCS，所以兩個畫面永遠說同一件事；
+ * 配好對之後，每一對再用 `diffWords` 做逐詞比對。
+ */
+export function computeComparison(leftHtml: string, rightHtml: string): CompareRow[] {
+  const previous = splitTopLevelBlocks(leftHtml);
+  const current = splitTopLevelBlocks(rightHtml);
+  const ops = diffBlocks(previous, current);
+
+  const rows: CompareRow[] = [];
+  let index = 0;
+
+  while (index < ops.length) {
+    const op = ops[index]!;
+    if (op.kind === 'equal') {
+      const text = current[op.curr]!.text;
+      rows.push({
+        kind: 'same',
+        leftIndex: op.prev,
+        rightIndex: op.curr,
+        left: text.length === 0 ? [] : [{ op: 'same', text }],
+        right: text.length === 0 ? [] : [{ op: 'same', text }],
+        note: null,
+      });
+      index += 1;
+      continue;
+    }
+
+    const deletes: number[] = [];
+    const inserts: number[] = [];
+    while (index < ops.length && ops[index]!.kind !== 'equal') {
+      const change = ops[index]!;
+      if (change.kind === 'delete') deletes.push(change.prev);
+      else inserts.push(change.curr);
+      index += 1;
+    }
+
+    const paired = Math.min(deletes.length, inserts.length);
+    for (let k = 0; k < paired; k += 1) {
+      const before = previous[deletes[k]!]!;
+      const after = current[inserts[k]!]!;
+      const segments = diffWords(before.text, after.text);
+      rows.push({
+        kind: 'replaced',
+        leftIndex: deletes[k]!,
+        rightIndex: inserts[k]!,
+        left: segments.filter((segment) => segment.op !== 'added'),
+        right: segments.filter((segment) => segment.op !== 'removed'),
+        note: before.text === after.text ? describeMarkupChange(before, after) : null,
+      });
+    }
+    for (let k = paired; k < inserts.length; k += 1) {
+      const text = current[inserts[k]!]!.text;
+      rows.push({
+        kind: 'inserted',
+        leftIndex: null,
+        rightIndex: inserts[k]!,
+        left: null,
+        right: [{ op: 'added', text }],
+        note: null,
+      });
+    }
+    for (let k = paired; k < deletes.length; k += 1) {
+      const text = previous[deletes[k]!]!.text;
+      rows.push({
+        kind: 'deleted',
+        leftIndex: deletes[k]!,
+        rightIndex: null,
+        left: [{ op: 'removed', text }],
+        right: null,
+        note: null,
+      });
+    }
+  }
+
+  return rows;
 }

@@ -124,10 +124,12 @@ describe('POST/GET /api/jobs', () => {
         'blockers',
         'currentRevision',
         'featuredMediaId',
+        'imageBriefs',
         'marks',
         'media',
         'previewUrl',
         'published',
+        'review',
         'revisionCount',
         'sourceText',
         'state',
@@ -403,23 +405,43 @@ describe('媒體', () => {
   });
 });
 
-describe('Agent 路由', () => {
-  it('派工成功回傳這次的改動摘要', async () => {
-    const adapter = new FakeAdapter('codex', 'Codex', {
-      result: {
-        ok: true,
-        data: {
+/** 提了一項錯字建議與一個要人判斷的觀察。SOURCE 的第一段是「今天讀完這本書，想到很多事。」 */
+function reviewAdapter(): FakeAdapter {
+  return new FakeAdapter('codex', 'Codex', {
+    result: {
+      ok: true,
+      data: {
+        title: '20260828',
+        summary: '補了標點',
+        correctedSource: '今天讀完這本書，想到很多事情。',
+        changes: [
+          { type: 'clarity', before: '很多事', after: '很多事情', reason: '語感', meaningChanged: false },
+        ],
+        observations: [
+          {
+            kind: 'missing-source',
+            blockIndex: 0,
+            excerpt: '這本書',
+            detail: '沒有寫是哪一本書',
+            suggestion: '補上書名',
+          },
+        ],
+        templateData: {
           title: '20260828',
-          summary: '補了標點',
-          correctedSource: '今天讀完這本書。',
-          changes: [],
-          templateData: { title: '20260828', body: '<p class="wp-block-paragraph">今天讀完這本書。</p>' },
-          imageBriefs: [],
+          body:
+            '<p class="wp-block-paragraph">今天讀完這本書，想到很多事情。</p>' +
+            '<p class="wp-block-paragraph">不是書裡寫的那些，而是別的。</p>',
         },
-        meta: { runId: 'r', agentId: 'codex', model: null, durationMs: 1, stderrTail: '' },
+        imageBriefs: [],
       },
-    });
-    const instance = await build({ adapters: [adapter] });
+      meta: { runId: 'r', agentId: 'codex', model: null, durationMs: 1, stderrTail: '' },
+    },
+  });
+}
+
+describe('Agent 路由', () => {
+  it('派工成功回傳待處理清單，而不是一個新版本', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
     const uuid = await createJob(instance);
 
     const res = await instance.inject({
@@ -430,7 +452,12 @@ describe('Agent 路由', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().summary).toBe('補了標點');
-    expect(res.json().revision.origin).toBe('agent_review');
+    expect(res.json().review.pendingCount).toBe(2);
+    expect(res.json()).not.toHaveProperty('revision');
+
+    // 內容還是原稿，只有一個版本。
+    const revisions = await instance.inject({ method: 'GET', url: `/api/jobs/${uuid}/revisions`, headers });
+    expect(revisions.json().revisions).toHaveLength(1);
   });
 
   it('未知的 provider 回 400', async () => {
@@ -450,5 +477,118 @@ describe('Agent 路由', () => {
     const uuid = await createJob(instance);
     const res = await instance.inject({ method: 'DELETE', url: `/api/jobs/${uuid}/agent`, headers });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('待處理清單路由', () => {
+  /** 建一個 job 並跑一次校稿，回傳 uuid 與清單上的項目。 */
+  async function withReview(instance: Awaited<ReturnType<typeof build>>): Promise<{
+    uuid: string;
+    items: { id: number; ordinal: number; type: string; state: string }[];
+  }> {
+    const uuid = await createJob(instance);
+    await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/agent`,
+      headers,
+      payload: { provider: 'codex' },
+    });
+    const res = await instance.inject({ method: 'GET', url: `/api/jobs/${uuid}/review`, headers });
+    return { uuid, items: res.json().review.items };
+  }
+
+  it('GET /review 給出清單，改動與觀察在同一張表上', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { items } = await withReview(instance);
+    expect(items.map((item) => item.type)).toEqual(['change', 'observation']);
+    expect(items.every((item) => item.state === 'pending')).toBe(true);
+  });
+
+  it('套用勾選的項目會產生新版本', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid, items } = await withReview(instance);
+
+    const res = await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/review/resolve`,
+      headers,
+      payload: { itemIds: [items[0]!.id], decision: 'apply' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().revision.publishHtml).toContain('很多事情');
+    expect(res.json().applied).toHaveLength(1);
+  });
+
+  it('decision 只認得 apply 與 skip', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid, items } = await withReview(instance);
+    const res = await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/review/resolve`,
+      headers,
+      payload: { itemIds: [items[0]!.id], decision: 'delete' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('全部接受走另一條路徑，觀察留在清單上', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid } = await withReview(instance);
+
+    const res = await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/review/accept-all`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().review.pendingCount).toBe(1);
+  });
+
+  it('丟棄提案之後清單就沒了', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid } = await withReview(instance);
+
+    const res = await instance.inject({ method: 'DELETE', url: `/api/jobs/${uuid}/review`, headers });
+    expect(res.statusCode).toBe(200);
+    const after = await instance.inject({ method: 'GET', url: `/api/jobs/${uuid}/review`, headers });
+    expect(after.json().review).toBeNull();
+  });
+
+  it('沒有提案時套用回 400，說得出原因', async () => {
+    const instance = await build();
+    const uuid = await createJob(instance);
+    const res = await instance.inject({
+      method: 'POST',
+      url: `/api/jobs/${uuid}/review/resolve`,
+      headers,
+      payload: { itemIds: [1], decision: 'apply' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('INVALID_INPUT');
+  });
+
+  it('GET /compare 給左右對照，逐詞標出差異', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid } = await withReview(instance);
+
+    const res = await instance.inject({ method: 'GET', url: `/api/jobs/${uuid}/compare`, headers });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().against).toBe('proposal');
+    const added = res
+      .json()
+      .rows.flatMap((row: { right: { op: string; text: string }[] | null }) => row.right ?? [])
+      .filter((segment: { op: string }) => segment.op === 'added');
+    expect(added.map((segment: { text: string }) => segment.text)).toContain('事情');
+  });
+
+  it('against 只認得 proposal 與 previous', async () => {
+    const instance = await build({ adapters: [reviewAdapter()] });
+    const { uuid } = await withReview(instance);
+    const res = await instance.inject({
+      method: 'GET',
+      url: `/api/jobs/${uuid}/compare?against=whatever`,
+      headers,
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

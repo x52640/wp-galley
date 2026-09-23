@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
 import { api } from '../../service/client.js';
-import type { LoadedJob, MediaAsset } from '../../service/types.js';
+import type { ImageBrief, LoadedJob, MediaAsset } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { formatBytes } from '../../lib/format.js';
 import { prepareForUpload } from '../../lib/svg-to-png.js';
@@ -18,6 +18,11 @@ import { ErrorNote, Field, Spinner, useAction } from './shared.js';
  * 還沒發布時是 null。所以本回合上傳的圖另外用 blob 網址記在下面這個表裡，
  * 讓使用者至少在這一次操作中看得到自己剛放進去的圖。重新整理後會退回占位圖，
  * 這是後端還沒有本機媒體檔案端點的必然結果，不是壞掉。
+ *
+ * **配圖需求（imageBriefs）在這裡只做前半段。** 三個 Agent CLI 都不能生圖，
+ * 生圖 API 也還沒選，所以「一鍵配圖」給的是一份採買清單：該配什麼圖、prompt
+ * 長怎樣。使用者按「複製 prompt」拿去生圖，回來在同一張卡片上傳，靠 briefKey
+ * 把圖跟需求接起來。不假裝自己會生圖，但也不讓使用者為了這件事離開發布台。
  */
 const sessionThumbs = new Map<number, string>();
 
@@ -85,8 +90,25 @@ export function MediaPanel({
         </p>
       )}
 
-      {job.media.length === 0 && !needsFeatured && (
-        <p className="empty-line">還沒有圖片。日記多半用不到，長文一定要有精選圖片。</p>
+      {job.imageBriefs.length > 0 && (
+        <section className="briefs" aria-label="配圖需求">
+          <h3 className="briefs-head">
+            <Icon name="image-plus" size={14} />
+            Agent 建議的配圖（{job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張待處理）
+          </h3>
+          <ul className="brief-list">
+            {job.imageBriefs.map((brief) => (
+              <BriefCard key={brief.id} job={job} brief={brief} refresh={refresh} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {job.media.length === 0 && !needsFeatured && job.imageBriefs.length === 0 && (
+        <p className="empty-line">
+          還沒有圖片。日記多半用不到，長文一定要有精選圖片。
+          想不到配什麼圖的話，到「校稿」那一格按「一鍵配圖」。
+        </p>
       )}
 
       <ul className="media-list">
@@ -177,6 +199,122 @@ export function MediaPanel({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 一條配圖需求。
+ *
+ * 「複製 prompt」是這張卡片的重點：使用者要拿它去別的地方生圖，那一步我們幫不上，
+ * 但至少不要讓他自己反白選字。複製失敗（沒有剪貼簿權限）就說出來，不要靜靜地失敗。
+ */
+function BriefCard({
+  job,
+  brief,
+  refresh,
+}: {
+  job: LoadedJob;
+  brief: ImageBrief;
+  refresh: () => Promise<void>;
+}): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const action = useAction();
+  const confirm = useConfirm();
+
+  const upload = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    void action.run(async () => {
+      const prepared = await prepareForUpload(file);
+      const asset = await api.addMedia(job.uuid, {
+        file: prepared.blob,
+        filename: prepared.filename,
+        mimeType: prepared.blob.type || 'image/png',
+        altText: brief.altText,
+        briefKey: brief.key,
+        ...(brief.caption === null ? {} : { caption: brief.caption }),
+      });
+      sessionThumbs.set(asset.id, URL.createObjectURL(prepared.blob));
+      await refresh();
+    });
+  };
+
+  return (
+    <li className="brief" data-fulfilled={brief.fulfilled ? 'yes' : 'no'}>
+      <div className="brief-head">
+        <span className="brief-key mono">{brief.key}</span>
+        <span className="brief-ratio mono">{brief.aspectRatio}</span>
+        {brief.placement !== null && <span className="brief-where">{brief.placement}</span>}
+        {brief.fulfilled && (
+          <span className="brief-done">
+            <Icon name="check" size={13} />
+            已上傳
+          </span>
+        )}
+      </div>
+
+      <p className="brief-purpose">{brief.purpose}</p>
+      <p className="brief-prompt">{brief.prompt}</p>
+      <p className="brief-alt">
+        <span className="brief-alt-tag">alt</span>
+        {brief.altText}
+      </p>
+
+      <ErrorNote message={action.error} />
+
+      <div className="brief-actions">
+        <button
+          type="button"
+          className="btn btn-quiet btn-tiny"
+          onClick={() =>
+            void action.run(async () => {
+              await navigator.clipboard.writeText(brief.prompt);
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2000);
+            })
+          }
+        >
+          <Icon name={copied ? 'check' : 'scissors'} size={13} />
+          {copied ? '已複製' : '複製 prompt'}
+        </button>
+
+        <label className="btn btn-quiet btn-tiny btn-file">
+          <Icon name="upload" size={13} />
+          {action.busy ? '處理中…' : brief.fulfilled ? '換一張' : '上傳這張'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
+            onChange={upload}
+            disabled={action.busy}
+          />
+        </label>
+
+        <button
+          type="button"
+          className="btn btn-quiet btn-tiny btn-danger-text brief-drop"
+          onClick={() =>
+            confirm({
+              title: '不要這張配圖？',
+              danger: true,
+              body: (
+                <p>
+                  「{brief.key}」這條建議會從清單上消失。已經上傳的圖片不受影響。
+                  要再拿到建議只能重跑一次「一鍵配圖」。
+                </p>
+              ),
+              confirmLabel: '不要了',
+              onConfirm: async () => {
+                await api.dismissImageBrief(job.uuid, brief.id);
+                await refresh();
+              },
+            })
+          }
+        >
+          不要了
+        </button>
+      </div>
+    </li>
   );
 }
 

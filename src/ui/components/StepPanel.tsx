@@ -5,6 +5,7 @@ import { readString, readStringArray } from '../lib/format.js';
 import { STATE_LABEL, isTerminal, primaryPanel, type PanelKey } from '../lib/steps.js';
 import { AgentPanel } from './panels/AgentPanel.js';
 import { ApprovePanel } from './panels/ApprovePanel.js';
+import { ReviewPanel } from './panels/ReviewPanel.js';
 import { MediaPanel } from './panels/MediaPanel.js';
 import { PublishPanel } from './panels/PublishPanel.js';
 import { SourcePanel } from './panels/SourcePanel.js';
@@ -42,6 +43,12 @@ const CARDS: CardSpec[] = [
         : job.marks.length > 0
           ? `${job.marks.length} 處改動`
           : undefined,
+  },
+  {
+    key: 'review',
+    icon: 'list-checks',
+    title: '待處理',
+    hint: (job) => (job.review === null ? undefined : `${job.review.pendingCount} 項`),
   },
   {
     key: 'media',
@@ -88,14 +95,17 @@ export function StepPanel({
   refresh,
   blocks,
   previewHash,
+  onFocusBlock,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
   blocks: { index: number; text: string }[];
   /** 校樣回應的 ETag。核准面板拿它跟稿件的 hash 對帳，null = 無法確認。 */
   previewHash: string | null;
+  /** 待處理清單點某一項時，主區要跳到那一段。 */
+  onFocusBlock: (index: number | null) => void;
 }): JSX.Element {
-  const primary = primaryPanel(job.state);
+  const primary = primaryPanel(job.state, (job.review?.pendingCount ?? 0) > 0);
   const [open, setOpen] = useState<PanelKey | null>(primary);
 
   useEffect(() => setOpen(primary), [primary]);
@@ -135,6 +145,9 @@ export function StepPanel({
           >
             {card.key === 'source' && <SourcePanel job={job} refresh={refresh} />}
             {card.key === 'agent' && <AgentPanel job={job} refresh={refresh} />}
+            {card.key === 'review' && (
+              <ReviewPanel job={job} refresh={refresh} onFocusBlock={onFocusBlock} />
+            )}
             {card.key === 'media' && <MediaPanel job={job} refresh={refresh} blocks={blocks} />}
             {card.key === 'taxonomy' && <TaxonomyPanel job={job} refresh={refresh} />}
             {card.key === 'approve' && (

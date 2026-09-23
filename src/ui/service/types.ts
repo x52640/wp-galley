@@ -57,6 +57,124 @@ export interface ProofMark {
   after: string | null;
 }
 
+// --- 待處理清單（階段 5.5） -------------------------------------------------
+
+export type ReviewItemType = 'change' | 'observation';
+export type ReviewItemState = 'pending' | 'applied' | 'skipped' | 'unappliable';
+
+export interface ReviewChange {
+  type: 'typo' | 'grammar' | 'clarity' | 'style';
+  before: string;
+  after: string;
+  reason: string;
+  /** Agent 自評有沒有改變原意。true 者要標紅且**預設不勾選**。 */
+  meaningChanged: boolean;
+}
+
+export interface Observation {
+  kind: 'contradiction' | 'unsupported-claim' | 'missing-source' | 'gap';
+  /** 掛在正文第幾個頂層區塊上，跟校對符號用同一套索引。 */
+  blockIndex: number;
+  excerpt: string;
+  detail: string;
+  suggestion: string;
+}
+
+/**
+ * 清單上的一項。
+ *
+ * 改動與觀察不是同一種東西（一個能自動套用，一個只能請人判斷），但都是
+ * 「掛在文章某一段上的待辦事項」，所以用同一個容器裝——階段 6 的查證發現
+ * 也會掛進來。差別只在那一項給的按鈕。
+ */
+export interface ReviewItem {
+  id: number;
+  ordinal: number;
+  type: ReviewItemType;
+  state: ReviewItemState;
+  change: ReviewChange | null;
+  observation: Observation | null;
+  /**
+   * 這一項掛在正文第幾個頂層區塊上（後端每次讀取時重算）。
+   * null = 在目前的內容裡定位不到，那一項就沒有「跳到該段」。
+   */
+  blockIndex: number | null;
+  resolvedAt: string | null;
+}
+
+export interface ReviewProposal {
+  id: number;
+  provider: string;
+  summary: string | null;
+  createdAt: string;
+  baseContentHash: string;
+  /** 提案之後內容又被改過。逐項套用還能試，「全部接受」會被後端擋下。 */
+  stale: boolean;
+  pendingCount: number;
+  items: ReviewItem[];
+}
+
+export interface ReviewResolveResult {
+  revision: Revision | null;
+  applied: number[];
+  skipped: number[];
+  /** 想套用但在目前內容裡定位不到。這幾項得自己改。 */
+  unappliable: number[];
+  review: ReviewProposal | null;
+}
+
+// --- 配圖需求 ---------------------------------------------------------------
+
+/**
+ * 一條配圖需求。
+ *
+ * **這裡不生圖。** 三個 Agent CLI 都不能產生圖片，生圖 API 也還沒選。所以自動化的
+ * 只有前半段：Agent 說出「哪一段該放什麼圖、prompt 長怎樣」，使用者拿去生完回來
+ * 在同一格上傳，靠 `key` 對回這條需求。
+ */
+export interface ImageBrief {
+  id: number;
+  key: string;
+  purpose: string;
+  /** 拿去貼進生圖工具的那段文字。 */
+  prompt: string;
+  aspectRatio: string;
+  altText: string;
+  caption: string | null;
+  /** Agent 講的位置描述（「第三段之後」）。**不是**區塊索引。 */
+  placement: string | null;
+  /** 已經有圖對上這條需求了。 */
+  fulfilled: boolean;
+  dismissed: boolean;
+  createdAt: string;
+}
+
+// --- 左右對照 ---------------------------------------------------------------
+
+export type SegmentOp = 'same' | 'removed' | 'added';
+
+export interface DiffSegment {
+  op: SegmentOp;
+  text: string;
+}
+
+export interface CompareRow {
+  kind: 'same' | 'replaced' | 'inserted' | 'deleted';
+  leftIndex: number | null;
+  rightIndex: number | null;
+  left: DiffSegment[] | null;
+  right: DiffSegment[] | null;
+  /** 文字一樣但標記改了時的說明；其他情況是 null。 */
+  note: string | null;
+}
+
+export interface Comparison {
+  against: 'proposal' | 'previous' | 'none';
+  leftLabel: string;
+  rightLabel: string;
+  rows: CompareRow[];
+}
+
 // --- Job ------------------------------------------------------------------
 
 export interface JobTarget {
@@ -122,6 +240,8 @@ export interface Approval {
 export interface AgentRun {
   status: AgentRunStatus;
   provider: string;
+  /** 這一趟做的是什麼。 */
+  task: AgentTask;
   startedAt: string;
   finishedAt: string | null;
   errorMessage: string | null;
@@ -154,6 +274,10 @@ export interface JobDetail {
   blockers: string[];
   published: PublishedRef | null;
   agentRun: AgentRun | null;
+  /** 待處理清單。沒有未結案的校稿提案就是 null。 */
+  review: ReviewProposal | null;
+  /** 配圖需求。已經丟掉的不會出現。 */
+  imageBriefs: ImageBrief[];
   sourceText: string | null;
 }
 
@@ -216,8 +340,13 @@ export interface CreateRevisionInput {
   expectedContentHash?: string;
 }
 
+/** `review` 校稿（產生待處理清單）；`images` 配圖需求（不會洗掉待處理清單）。 */
+export type AgentTask = 'review' | 'images';
+
 export interface AgentReviewInput {
   provider: AgentProvider;
+  /** 預設 review。 */
+  task?: AgentTask;
   model?: string;
   instruction?: string;
   timeoutMs?: number;
@@ -252,7 +381,16 @@ export interface AgentRunResult {
   runId: string;
   status: AgentRunStatus;
   summary: string | null;
-  revision: Revision | null;
+  changes: ReviewChange[];
+  observations: Observation[];
+  imageBriefs: ImageBrief[];
+  task: AgentTask;
+  /**
+   * 校稿結果存成提案，**文章一個字都還沒動**。要套用哪幾項由使用者逐項決定。
+   * 這裡沒有 revision 欄位是刻意的（見 docs/STAGE-5-CONTRACT.md 第七節）。
+   * `task === 'images'` 那一趟不產生提案，所以是 null。
+   */
+  review: ReviewProposal | null;
 }
 
 export interface PublishResult {
@@ -294,6 +432,24 @@ export interface PublisherApi {
 
   runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   cancelAgent(uuid: string): Promise<void>;
+
+  /** 逐項套用或略過。套用會產生新版本，略過不動內容。 */
+  resolveReview(
+    uuid: string,
+    input: { itemIds: number[]; decision: 'apply' | 'skip' },
+  ): Promise<ReviewResolveResult>;
+  /**
+   * 採用 Agent 的整份稿。跟「把每一項都勾起來」不一樣，見 CoreService 的說明。
+   *
+   * 兩個整份操作都要帶 `proposalId`：確認對話框開著的時候如果又跑了一次校稿，
+   * 不帶的話會作用在使用者沒看過的那一份上。
+   */
+  acceptWholeReview(uuid: string, proposalId: number): Promise<ReviewResolveResult>;
+  discardReview(uuid: string, reason: string, proposalId: number): Promise<void>;
+  /** 左右對照。不給 against 就是「有提案跟提案比，沒有就跟上一版比」。 */
+  fetchComparison(uuid: string, against?: 'proposal' | 'previous'): Promise<Comparison>;
+  /** 丟掉一條配圖需求。 */
+  dismissImageBrief(uuid: string, briefId: number): Promise<void>;
 
   addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset>;
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;

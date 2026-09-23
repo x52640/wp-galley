@@ -102,6 +102,22 @@ export function normalizeText(value: string): string {
  * 沒有東西需要包時**原樣回傳**，不重新序列化——否則既有內容的 content hash
  * 會因為空白與屬性引號的正規化而平白改變，核准就全部失效了。
  */
+/**
+ * 哪一個頂層區塊裝著這段文字。找不到就回 null。
+ *
+ * 用途只有一個：讓待處理清單上的一項可以「跳到那一段並標亮」。所以定位失敗
+ * 不是錯誤，只是那一項沒有跳轉按鈕——猜一個段落跳過去比不能跳更糟。
+ *
+ * 比對前先把空白正規化：正文的 HTML 常常在標籤之間換行縮排，`textContent`
+ * 拿到的字串會夾著換行，直接跟 Agent 給的片段比一定對不上。
+ */
+export function findBlockContaining(blocks: readonly TopLevelBlock[], needle: string): number | null {
+  const target = normalizeText(needle);
+  if (target.length === 0) return null;
+  const index = blocks.findIndex((block) => normalizeText(block.text).includes(target));
+  return index < 0 ? null : index;
+}
+
 export function wrapBareTopLevelText(html: string): string {
   const fragment = parseFragment(html) as unknown as Node;
   const children = childrenOf(fragment);

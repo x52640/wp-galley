@@ -3,6 +3,7 @@ import type {
   AgentReviewInput,
   AgentRunResult,
   Approval,
+  Comparison,
   CreateJobInput,
   CreateRevisionInput,
   JobDetail,
@@ -15,6 +16,10 @@ import type {
   PublishResult,
   RenderOutcome,
   Revision,
+  ImageBrief,
+  ReviewItem,
+  ReviewProposal,
+  ReviewResolveResult,
   Term,
 } from './types.js';
 
@@ -203,6 +208,185 @@ const LONGFORM_MARKS: ProofMark[] = [
   },
 ];
 
+/**
+ * 示範用的待處理清單。
+ *
+ * 刻意混了三種：安全的錯字、自承改了原意的（要標紅且預設不勾）、以及一個
+ * 只能請人判斷的觀察。少了任何一種，清單的樣子就練不到。
+ */
+function reviewItem(
+  id: number,
+  ordinal: number,
+  partial: Pick<ReviewItem, 'type' | 'change' | 'observation' | 'blockIndex'>,
+  state: ReviewItem['state'] = 'pending',
+): ReviewItem {
+  return { id, ordinal, state, resolvedAt: null, ...partial };
+}
+
+function diaryReview(): ReviewProposal {
+  return {
+    id: 501,
+    provider: 'claude',
+    summary: '三處標點與一個前後對不上的地方',
+    createdAt: '2026-08-28T09:39:10Z',
+    baseContentHash: '5c02f7ab91de4460'.padEnd(64, '0'),
+    stale: false,
+    pendingCount: 4,
+    items: [
+      reviewItem(9001, 0, {
+        type: 'change',
+        blockIndex: 0,
+        change: {
+          type: 'typo',
+          before: '想到很多事',
+          after: '想到很多事情',
+          reason: '句子讀起來斷得太快',
+          meaningChanged: false,
+        },
+        observation: null,
+      }),
+      reviewItem(9002, 1, {
+        type: 'change',
+        blockIndex: 1,
+        change: {
+          type: 'style',
+          before: '我在那裡站了大概四十秒',
+          after: '我在那裡站了四十秒',
+          reason: '「大概」與具體秒數互相矛盾',
+          meaningChanged: false,
+        },
+        observation: null,
+      }),
+      reviewItem(9003, 2, {
+        type: 'change',
+        blockIndex: 1,
+        change: {
+          type: 'clarity',
+          before: '忽然覺得這種等待其實很難得',
+          after: '忽然意識到這種等待其實是奢侈的',
+          reason: '「難得」偏中性，這裡想表達的更接近珍惜',
+          meaningChanged: true,
+        },
+        observation: null,
+      }),
+      reviewItem(9004, 3, {
+        type: 'observation',
+        blockIndex: 2,
+        change: null,
+        observation: {
+          kind: 'contradiction',
+          blockIndex: 2,
+          excerpt: '有八成都沒有發生',
+          detail: '第 1 段說「想到很多事」，第 3 段說擔心的事八成沒發生，兩處指的是不是同一批事情沒有交代。',
+          suggestion: '確認這兩段講的是不是同一件事，或補一句把它們接起來。',
+        },
+      }),
+    ],
+  };
+}
+
+/** 示範用的配圖需求。這裡不生圖，只給「該配什麼圖」與可以直接貼去生圖的 prompt。 */
+function diaryBriefs(): ImageBrief[] {
+  return [
+    {
+      id: 601,
+      key: 'rainy_crossing',
+      purpose: '第二段的雨天路口，給讀者一個具體的畫面落腳',
+      prompt:
+        '台北街頭的雨天路口，柏油路積著一小攤水，水面反射對面招牌的紅光；黃昏、細雨、'
+        + '沒有人物入鏡；寫實攝影風格，淺景深，冷色調中帶一點暖紅。',
+      aspectRatio: '16:9',
+      altText: '雨天路口積水處反射著紅色招牌的燈光',
+      caption: null,
+      placement: '第 2 段之後',
+      fulfilled: false,
+      dismissed: false,
+      createdAt: '2026-08-28T09:41:00Z',
+    },
+    {
+      id: 602,
+      key: 'old_notebook',
+      purpose: '第三段翻舊筆記的動作，收束整篇的回望感',
+      prompt:
+        '攤開的舊筆記本放在木桌上，紙頁泛黃、有手寫字跡但看不清內容；桌燈側光，'
+        + '安靜的室內夜晚；寫實攝影風格，俯角。',
+      aspectRatio: '4:3',
+      altText: '木桌上攤開一本泛黃的舊筆記本',
+      caption: '去年的筆記',
+      placement: '第 3 段之後',
+      fulfilled: false,
+      dismissed: false,
+      createdAt: '2026-08-28T09:41:00Z',
+    },
+  ];
+}
+
+/** 對照畫面的示範資料。手寫而不是即時算——比對的程式在後端，前端不重做一份。 */
+function diaryComparison(): Comparison {
+  return {
+    against: 'proposal',
+    leftLabel: '目前 r2',
+    rightLabel: 'claude 的提案',
+    rows: [
+      {
+        kind: 'replaced',
+        leftIndex: 0,
+        rightIndex: 0,
+        left: [
+          { op: 'same', text: '今天讀完這本書，想到很多' },
+          { op: 'removed', text: '事' },
+          { op: 'same', text: '。不是書裡寫的那些，而是被書勾起來的、原本以為早就忘掉的片段。' },
+        ],
+        right: [
+          { op: 'same', text: '今天讀完這本書，想到很多' },
+          { op: 'added', text: '事情' },
+          { op: 'same', text: '。不是書裡寫的那些，而是被書勾起來的、原本以為早就忘掉的片段。' },
+        ],
+        note: null,
+      },
+      {
+        kind: 'replaced',
+        leftIndex: 1,
+        rightIndex: 1,
+        left: [
+          { op: 'same', text: '下午的雨下得很急，路口的紅燈前積了一小攤水，反射著對面招牌的紅色。我在那裡站了' },
+          { op: 'removed', text: '大概' },
+          { op: 'same', text: '四十秒，忽然' },
+          { op: 'removed', text: '覺得' },
+          { op: 'same', text: '這種等待其實' },
+          { op: 'removed', text: '很難得' },
+          { op: 'same', text: '。' },
+        ],
+        right: [
+          { op: 'same', text: '下午的雨下得很急，路口的紅燈前積了一小攤水，反射著對面招牌的紅色。我在那裡站了' },
+          { op: 'same', text: '四十秒，忽然' },
+          { op: 'added', text: '意識到' },
+          { op: 'same', text: '這種等待其實' },
+          { op: 'added', text: '是奢侈的' },
+          { op: 'same', text: '。' },
+        ],
+        note: null,
+      },
+      {
+        kind: 'same',
+        leftIndex: 2,
+        rightIndex: 2,
+        left: [{ op: 'same', text: '晚上把去年的筆記翻出來對照，發現當時擔心的事情有八成都沒有發生。剩下的兩成也不是用擔心解決的。' }],
+        right: [{ op: 'same', text: '晚上把去年的筆記翻出來對照，發現當時擔心的事情有八成都沒有發生。剩下的兩成也不是用擔心解決的。' }],
+        note: null,
+      },
+      {
+        kind: 'same',
+        leftIndex: 3,
+        rightIndex: 3,
+        left: [{ op: 'same', text: '明天要早起。就先寫到這裡。' }],
+        right: [{ op: 'same', text: '明天要早起。就先寫到這裡。' }],
+        note: null,
+      },
+    ],
+  };
+}
+
 function revision(
   number: number,
   origin: Revision['origin'],
@@ -238,6 +422,8 @@ function baseDiary(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     blockers: [],
     published: null,
     agentRun: null,
+    review: null,
+    imageBriefs: [],
     sourceText: '今天讀完這本書想到很多事……',
     createdAt: '2026-08-28T09:05:00Z',
     updatedAt: '2026-08-28T09:40:00Z',
@@ -267,6 +453,8 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
     blockers: [],
     published: null,
     agentRun: null,
+    review: null,
+    imageBriefs: [],
     sourceText: null,
     createdAt: '2026-08-27T14:00:00Z',
     updatedAt: '2026-08-28T10:02:00Z',
@@ -284,11 +472,14 @@ function buildStore(): Map<string, FixtureJob> {
       agentRun: {
         status: 'succeeded',
         provider: 'claude',
+        task: 'review',
         startedAt: '2026-08-28T09:38:00Z',
         finishedAt: '2026-08-28T09:39:10Z',
         errorMessage: null,
       },
-      blockers: ['尚未渲染'],
+      review: diaryReview(),
+      imageBriefs: diaryBriefs(),
+      blockers: ['還有 4 項校稿建議沒處理', '尚未渲染'],
     }),
     baseLongform('f-media', {
       state: 'MEDIA_READY',
@@ -304,6 +495,7 @@ function buildStore(): Map<string, FixtureJob> {
       agentRun: {
         status: 'succeeded',
         provider: 'codex',
+        task: 'review',
         startedAt: '2026-08-28T09:38:00Z',
         finishedAt: '2026-08-28T09:39:02Z',
         errorMessage: null,
@@ -364,6 +556,11 @@ const TERMS: Record<string, Term[]> = {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function readBody(job: FixtureJob): string {
+  const value = job.currentRevision?.templateData['body'];
+  return typeof value === 'string' ? value : '';
 }
 
 function mustGet(uuid: string): FixtureJob {
@@ -495,29 +692,155 @@ export const fixtureApi: PublisherApi = {
     return mustGet(uuid).currentRevision?.contentHash ?? null;
   },
 
+  /**
+   * 校稿。**內容一個字都不動**——結果存成待處理清單，等使用者逐項決定。
+   * 核准因此也不會失效，這正是提案制跟「直接落地」的差別。
+   */
   async runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult> {
     const job = mustGet(uuid);
+    const task = input.task ?? 'review';
     const startedAt = new Date().toISOString();
-    job.agentRun = { status: 'running', provider: input.provider, startedAt, finishedAt: null, errorMessage: null };
-    await delay(1400);
-    invalidateApproval(job, 'Agent 產生了新的內容');
+    job.agentRun = { status: 'running', provider: input.provider, task, startedAt, finishedAt: null, errorMessage: null };
+    // 真的 Agent 要跑幾十秒到幾分鐘。示範資料等久一點，才練得到「執行中」的畫面。
+    await delay(task === 'images' ? 2600 : 3400);
     job.agentRun = {
       status: 'succeeded',
       provider: input.provider,
+      task,
       startedAt,
       finishedAt: new Date().toISOString(),
       errorMessage: null,
     };
-    job.state = 'REVIEWED';
-    job.marks = job.target.key === 'diary' ? DIARY_MARKS : LONGFORM_MARKS;
-    job.blockers = ['尚未渲染'];
-    return { runId: 'fixture-run', status: 'succeeded', summary: '已套用建議', revision: job.currentRevision };
+
+    // 配圖那一趟不建提案，所以按「一鍵配圖」不會洗掉還沒清完的校稿清單。
+    if (task === 'images') {
+      job.imageBriefs = diaryBriefs();
+      return {
+        runId: 'fixture-run',
+        status: 'succeeded',
+        summary: '兩個配圖建議',
+        changes: [],
+        observations: [],
+        imageBriefs: clone(job.imageBriefs),
+        task,
+        review: clone(job.review),
+      };
+    }
+
+    if (job.state === 'SOURCE') job.state = 'REVIEWED';
+    job.review = { ...diaryReview(), provider: input.provider };
+    job.blockers = [`還有 ${job.review.pendingCount} 項校稿建議沒處理`];
+    return {
+      runId: 'fixture-run',
+      status: 'succeeded',
+      summary: job.review.summary,
+      changes: job.review.items.flatMap((item) => (item.change ? [item.change] : [])),
+      observations: job.review.items.flatMap((item) => (item.observation ? [item.observation] : [])),
+      imageBriefs: [],
+      task,
+      review: clone(job.review),
+    };
+  },
+
+  async dismissImageBrief(uuid: string, briefId: number) {
+    await delay(120);
+    const job = mustGet(uuid);
+    job.imageBriefs = job.imageBriefs.filter((brief) => brief.id !== briefId);
   },
 
   async cancelAgent(uuid: string) {
     await delay(100);
     const job = mustGet(uuid);
     if (job.agentRun) job.agentRun = { ...job.agentRun, status: 'cancelled' };
+  },
+
+  /**
+   * 逐項處理。
+   *
+   * **正文要真的跟著改。** 早期版本只改版本號與 hash，於是示範模式按下「套用」
+   * 會看到核准失效、版本 +1，但校樣上一個字都沒變——示範資料的用途就是讓人在
+   * 沒有後端的情況下走完流程，會說謊就沒有意義了。
+   */
+  async resolveReview(uuid: string, input: { itemIds: number[]; decision: 'apply' | 'skip' }) {
+    await delay(320);
+    const job = mustGet(uuid);
+    if (!job.review) throw new Error('這篇稿件沒有待處理的校稿提案');
+
+    const wanted = new Set(input.itemIds);
+    const applied: number[] = [];
+    const skipped: number[] = [];
+    let body = readBody(job);
+
+    job.review.items = job.review.items.map((item) => {
+      if (!wanted.has(item.id) || item.state === 'applied') return item;
+      if (input.decision === 'skip') {
+        skipped.push(item.id);
+        return { ...item, state: 'skipped', resolvedAt: new Date().toISOString() };
+      }
+      // 後端是在標籤外面定位的；示範資料的正文都是規規矩矩的段落，
+      // 直接換第一個出現的位置就夠像了。
+      if (item.change) body = body.replace(item.change.before, item.change.after);
+      applied.push(item.id);
+      return { ...item, state: 'applied', resolvedAt: new Date().toISOString() };
+    });
+
+    if (applied.length > 0 && job.currentRevision) {
+      invalidateApproval(job, '套用了校稿建議');
+      job.marks = job.target.key === 'diary' ? DIARY_MARKS : LONGFORM_MARKS;
+      job.currentRevision = {
+        ...job.currentRevision,
+        number: job.currentRevision.number + 1,
+        contentHash: nextHash().padEnd(64, '0'),
+        templateData: { ...job.currentRevision.templateData, body },
+        publishHtml: body,
+      };
+      job.revisionCount += 1;
+      job.review.baseContentHash = job.currentRevision.contentHash;
+    }
+
+    job.review.pendingCount = job.review.items.filter(
+      (item) => item.state === 'pending' || item.state === 'unappliable',
+    ).length;
+    if (job.review.pendingCount === 0) job.review = null;
+    job.blockers = job.review ? [`還有 ${job.review.pendingCount} 項校稿建議沒處理`] : [];
+
+    return {
+      revision: applied.length > 0 ? clone(job.currentRevision) : null,
+      applied,
+      skipped,
+      unappliable: [],
+      review: clone(job.review),
+    } satisfies ReviewResolveResult;
+  },
+
+  async acceptWholeReview(uuid: string, proposalId: number) {
+    await delay(320);
+    const job = mustGet(uuid);
+    if (!job.review) throw new Error('這篇稿件沒有待處理的校稿提案');
+    if (job.review.id !== proposalId) throw new Error('這份校稿建議已經被另一次校稿取代了');
+    if (job.review.stale) throw new Error('內容在這次校稿之後被改過了，請改用逐項套用');
+
+    const changeIds = job.review.items.filter((item) => item.type === 'change').map((item) => item.id);
+    // 明寫 fixtureApi 不用 this：呼叫端是透過 client.ts 的 Proxy 取到這個函式的，
+    // this 綁到誰要看呼叫方式，不該去賭。
+    return fixtureApi.resolveReview(uuid, { itemIds: changeIds, decision: 'apply' });
+  },
+
+  async discardReview(uuid: string, _reason: string, proposalId: number) {
+    await delay(150);
+    const job = mustGet(uuid);
+    if (job.review && job.review.id !== proposalId) {
+      throw new Error('這份校稿建議已經被另一次校稿取代了');
+    }
+    job.review = null;
+    job.blockers = [];
+  },
+
+  async fetchComparison(uuid: string) {
+    await delay(200);
+    const job = mustGet(uuid);
+    if (!job.review) return { against: 'none', leftLabel: '', rightLabel: '', rows: [] } satisfies Comparison;
+    return { ...diaryComparison(), rightLabel: `${job.review.provider} 的提案` };
   },
 
   async addMedia(uuid: string, input: AddMediaInput) {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 目前狀態
 
-**階段 1–5／7 已完成。下一步是階段 5.5（小）或階段 6（大）。**
+**階段 1–5.5／7 程式碼完成。下一步：陪使用者實測 5.5，再進階段 6。**
 
 | 階段 | 內容 | 狀態 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 3 | 訂閱式 Agent 適配器 | ✅ 三家實測端到端通過 |
 | 4 | WordPress REST 與媒體流程 | ✅ 正式站實測建立過兩篇草稿 |
 | 5 | 發布台端到端 UI | ✅ 436 個測試，Codex review 後已修 |
-| 5.5 | observations、左右對照檢視 | ⬜ 小，接著做 |
+| 5.5 | observations、待處理清單、左右對照、一鍵動作、配圖需求 | ⚠️ 519 個測試綠，**但使用者還沒實測過** |
 | 6 | AI 查證（需連外，動到信任邊界） | ⬜ 大，獨立做 |
 | 7 | 測試、文件與交付 | ⬜ |
 
@@ -32,6 +32,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `IMPLEMENTATION_PLAN.md`（繁中）是原始計畫，**已有多處被實測推翻**。
 
+### 2026-08-28 這一天做了什麼
+
+一次做完階段 5.5 的全部，外加兩件使用者當場提的：
+
+| 做的事 | 落在哪 |
+| --- | --- |
+| `observations`（要人判斷的觀察） | `src/agents/output-contract.ts` |
+| 提案制：校稿不再直接產生版本 | migration 003、`review_proposals` / `review_items` |
+| 逐項套用（含只在標籤外定位） | `src/core/review-apply.ts` |
+| 中文逐詞 diff（`Intl.Segmenter`） | `src/core/word-diff.ts`、`diff.ts` 的 `computeComparison` |
+| 待處理清單、左右對照 | `ReviewPanel.tsx`、`CompareView.tsx`、`ViewSwitch.tsx` |
+| 三顆一鍵按鈕（校驗／只找錯字／配圖） | `AgentPanel.tsx` |
+| 配圖需求 | migration 004、`image_briefs`、`MediaPanel.tsx` 的 `BriefCard` |
+| Agent 執行中的回饋 | `AgentProgress.tsx` |
+
+**還沒 commit。** 收工時工作區有 35 個異動檔案，建議分兩筆：階段 5.5 本體、
+以及 Codex review 的修正——之後回頭看得出哪些是 review 抓到的。
+
 ### 這個專案的定位
 
 **本機 AI 當編輯，使用者當總編。** Agent 進不了 WordPress 是賣點不是限制——
@@ -40,9 +58,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 設計準則：**任何會讓使用者離開發布台的功能都算 bug。**
 
+### ⏸ 接手第一件事：階段 5.5 還沒被人測過
+
+**程式碼寫完了、519 個測試綠、Codex review 修完了，但使用者還沒實際點過畫面。**
+2026-08-28 收工時的狀態就停在這裡。不要急著往階段 6 走，先陪他把 5.5 測完。
+
+測試素材已經備好：`drafts/測試素材/測試長文-行為科學課.txt`（1,400 字，
+刻意埋了錯字、前後矛盾的年份、加起來 105% 的百分比、沒出處的引用與宣稱）。
+**那個檔案的每一處錯誤都是故意的**，看到不要順手改掉。
+
+建議的測試順序：建 job（長文目標）→ 渲染 → 一鍵校驗 → 看清單有沒有抓到那些坑 →
+只勾一個錯字套用（其他要還在）→ 一鍵配圖（**校稿清單不該消失**）→ 上傳一張圖。
+`?fixtures=1` 不用後端也走得完。
+
+### 收工時還沒回答的四個問題
+
+前三個是使用者體驗，我做了選擇但他還沒表態；第四個是功能方向。
+
+1. **「還有 N 項校稿建議沒處理」要不要真的擋住發布？** 現在只寫進 `blockers`
+   給畫面看，`preflightPublish` 不管它。
+2. **處理過的項目留在清單上變淡，還是直接消失？** 現在是變淡。
+3. **預設勾選 `meaningChanged: false` 的改動，還是全部不勾？**
+   現在是前者（一鍵清掉不用動腦的部分）；`STAGE-6-FACTCHECK.md` 的示意圖是後者。
+4. **要不要讓 Agent 直接寫 SVG 再轉 PNG 當作真正的「一鍵生圖」？**
+   管線已經在了（`src/ui/lib/svg-to-png.ts`），不用金鑰、不用外部 API。
+   限制是只做得到概念圖／流程圖／幾何抽象，做不到照片。
+   要做的話：output contract 加 svg 欄位、一條新的 agent task、配圖卡片多一顆按鈕。
+   ⚠️ 使用者一度以為這個已經做好了——**目前沒有**，別跟著誤會。
+
+### 階段 5.5 改掉的一個前提
+
+**校稿不再直接產生新版本。** Agent 的輸出存成「提案」（`review_proposals` /
+`review_items`），內容一個字都不動，使用者在右面板的「待處理」逐項決定。
+所以校稿本身不會讓核准失效，套用某一項才會。細節與取捨在
+`docs/STAGE-5-CONTRACT.md` 第七節。
+
 ### 接手時要知道的已知限制
 
 這些是刻意接受的，不要當成 bug 去「修」：
+
+- **逐項套用靠字串定位，而且只在標籤外面找。** `before` 被 HTML 標籤切斷、
+  或已經被別的改動吃掉，就定位不到，該項標成「要自己改」。這是刻意選的——
+  猜一個位置替換下去，使用者不會知道文章被改到哪裡。
+  `after` 帶標籤一律拒絕（那是 Agent 在寫 HTML）。
 
 - **`actor: 'ui'` 是宣告不是證明。** 本機單人工具無法真正證明呼叫來源；靠 loopback
   守門加這道檢查擋住我們自己的 MCP 路徑，僅此而已。
@@ -61,9 +119,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 還沒決定的事
 
-**要接哪一家圖片生成 API。** 接口留著，使用者找到後會把金鑰貼進 `.env`。
-三個 CLI 都不能生圖（用它們自己的 `--help` 確認過，`codex -i/--image` 是把圖片
-當**輸入**附加，不是產出）。
+**要接哪一家圖片生成 API。** 三個 CLI 都不能生圖（用它們自己的 `--help` 確認過，
+`codex -i/--image` 是把圖片當**輸入**附加，不是產出）。
+
+階段 5.5 已經把**前半段**做完了：「一鍵配圖」讓 Agent 產生 `imageBriefs`
+（該配什麼圖 + 可以直接貼去生圖的 prompt），存在 `image_briefs`，配圖面板上
+每張卡片可以複製 prompt、直接上傳、或丟掉。**接生圖 API 的位置就是那張卡片上
+再多一顆按鈕，資料結構不用動。** 使用者找到之後把金鑰貼進 `.env`。
 
 ## 指令
 

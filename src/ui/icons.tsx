@@ -176,6 +176,30 @@ const PATHS: Record<string, JSX.Element> = {
     </>
   ),
   circle: <circle cx="12" cy="12" r="10" />,
+  /** columns-2：左右對照。 */
+  columns: (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M12 3v18" />
+    </>
+  ),
+  /** list-checks：待處理清單。 */
+  'list-checks': (
+    <>
+      <path d="m3 17 2 2 4-4" />
+      <path d="m3 7 2 2 4-4" />
+      <path d="M13 6h8" />
+      <path d="M13 12h8" />
+      <path d="M13 18h8" />
+    </>
+  ),
+  /** flag：要人判斷的觀察。跟「警告」（alert）刻意分開——它不是錯誤。 */
+  flag: (
+    <>
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <path d="M4 22v-7" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

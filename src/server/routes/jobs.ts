@@ -39,6 +39,8 @@ const CreateRevisionBody = z.object({
 
 const AgentBody = z.object({
   provider: z.enum(['codex', 'claude', 'google']),
+  /** 預設 review。images 那一趟不會產生提案，所以不會洗掉待處理清單。 */
+  task: z.enum(['review', 'images']).optional(),
   model: z.string().max(120).optional(),
   instruction: z.string().max(8_000).optional(),
   timeoutMs: z.number().int().min(1_000).max(900_000).optional(),
@@ -59,6 +61,28 @@ const MediaBody = z.object({
 });
 
 const PlaceBody = z.object({ afterBlockIndex: z.number().int().min(-1).max(10_000) });
+
+/**
+ * 逐項處理校稿建議。
+ *
+ * 上限 500 是配合 `changes` 的 maxItems 300 加上 `observations` 的 50 再留餘裕——
+ * 「全部套用」會把清單上所有 id 一次送過來，數字要蓋得住整份提案。
+ */
+const ResolveReviewBody = z.object({
+  itemIds: z.array(z.number().int().positive()).min(1).max(500),
+  decision: z.enum(['apply', 'skip']),
+});
+
+/**
+ * 整份操作要指名是哪一份提案。
+ *
+ * 只帶 job uuid 的話認的是「目前那一份」；確認對話框開著的時候如果又跑了一次
+ * 校稿，按下去就會作用在使用者沒看過的那一份上。
+ */
+const ProposalRefBody = z.object({ proposalId: z.number().int().positive().optional() }).optional();
+const DiscardReviewBody = z
+  .object({ reason: z.string().max(200).optional(), proposalId: z.number().int().positive().optional() })
+  .optional();
 const ApproveBody = z.object({ contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位') });
 const RevokeBody = z.object({ reason: z.string().max(200).optional() }).optional();
 const PublishBody = z.object({
@@ -267,6 +291,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return guard(() =>
       core().runAgentReview(uuid, {
         provider: body.provider,
+        ...(body.task === undefined ? {} : { task: body.task }),
         ...(body.model === undefined ? {} : { model: body.model }),
         ...(body.instruction === undefined ? {} : { instruction: body.instruction }),
         ...(body.timeoutMs === undefined ? {} : { timeoutMs: body.timeoutMs }),
@@ -281,6 +306,67 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       return { cancelled: true };
     });
   });
+
+  // --- 待處理清單（階段 5.5） ------------------------------------------------
+
+  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request) => {
+    const { uuid } = parse(UuidParams, request.params);
+    return guard(() => ({ review: core().getReview(uuid) }));
+  });
+
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/resolve', async (request) => {
+    const { uuid } = parse(UuidParams, request.params);
+    const body = parse(ResolveReviewBody, request.body);
+    return guard(() => core().resolveReviewItems(uuid, body));
+  });
+
+  /**
+   * 接受 Agent 的整份稿。
+   *
+   * 跟「把每一項都勾起來送 resolve」不是同一件事：那個只會套上 Agent 申報過的
+   * 改動，這個是整份採用。差別寫在 CoreService.acceptWholeProposal。
+   */
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/review/accept-all', async (request) => {
+    const { uuid } = parse(UuidParams, request.params);
+    const body = parse(ProposalRefBody, request.body ?? {});
+    return guard(() =>
+      core().acceptWholeProposal(uuid, body?.proposalId === undefined ? {} : { proposalId: body.proposalId }),
+    );
+  });
+
+  app.delete<{ Params: { uuid: string } }>('/api/jobs/:uuid/review', async (request) => {
+    const { uuid } = parse(UuidParams, request.params);
+    const body = parse(DiscardReviewBody, request.body ?? {});
+    return guard(() => {
+      core().discardReview(
+        uuid,
+        body?.reason ?? '使用者丟棄這份校稿提案',
+        body?.proposalId === undefined ? {} : { proposalId: body.proposalId },
+      );
+      return { discarded: true };
+    });
+  });
+
+  app.delete<{ Params: { uuid: string; id: string } }>('/api/jobs/:uuid/briefs/:id', async (request) => {
+    const { uuid } = parse(UuidParams, request.params);
+    const briefId = parseId(request.params.id);
+    return guard(() => {
+      core().dismissImageBrief(uuid, briefId);
+      return { dismissed: true };
+    });
+  });
+
+  app.get<{ Params: { uuid: string }; Querystring: { against?: string } }>(
+    '/api/jobs/:uuid/compare',
+    async (request) => {
+      const { uuid } = parse(UuidParams, request.params);
+      const against = request.query.against;
+      if (against !== undefined && against !== 'proposal' && against !== 'previous') {
+        throw new AppError(errorCodes.VALIDATION_FAILED, 'against 只能是 proposal 或 previous', 400);
+      }
+      return guard(() => core().getComparison(uuid, against));
+    },
+  );
 
   // --- 媒體 -----------------------------------------------------------------
 

@@ -104,6 +104,51 @@ export interface AgentRunRow {
   readonly error_message: string | null;
 }
 
+export type ReviewProposalStatus = 'open' | 'closed';
+export type ReviewItemType = 'change' | 'observation';
+export type ReviewItemState = 'pending' | 'applied' | 'skipped' | 'unappliable';
+
+export interface ReviewProposalRow {
+  readonly id: number;
+  readonly job_id: number;
+  readonly agent_run_id: number | null;
+  readonly base_revision_id: number;
+  readonly base_content_hash: string;
+  readonly provider: string;
+  readonly summary: string | null;
+  readonly proposed_data_json: string;
+  readonly status: ReviewProposalStatus;
+  readonly created_at: string;
+  readonly closed_at: string | null;
+  readonly close_reason: string | null;
+}
+
+export interface ReviewItemRow {
+  readonly id: number;
+  readonly proposal_id: number;
+  readonly ordinal: number;
+  readonly item_type: ReviewItemType;
+  readonly state: ReviewItemState;
+  readonly payload_json: string;
+  readonly revision_id: number | null;
+  readonly resolved_at: string | null;
+}
+
+export interface ImageBriefRow {
+  readonly id: number;
+  readonly job_id: number;
+  readonly agent_run_id: number | null;
+  readonly brief_key: string;
+  readonly purpose: string;
+  readonly prompt: string;
+  readonly aspect_ratio: string;
+  readonly alt_text: string;
+  readonly caption: string | null;
+  readonly placement: string | null;
+  readonly created_at: string;
+  readonly dismissed_at: string | null;
+}
+
 export interface PublishEventRow {
   readonly id: number;
   readonly job_id: number;
@@ -612,6 +657,154 @@ export class Repository {
         .prepare("SELECT * FROM agent_runs WHERE job_id = ? AND status = 'running' ORDER BY id DESC LIMIT 1")
         .get(jobId) as unknown as AgentRunRow) ?? null
     );
+  }
+
+  // --- 校稿提案 -------------------------------------------------------------
+
+  insertReviewProposal(input: {
+    jobId: number;
+    agentRunId: number | null;
+    baseRevisionId: number;
+    baseContentHash: string;
+    provider: string;
+    summary: string | null;
+    proposedDataJson: string;
+  }): ReviewProposalRow {
+    const result = this.db
+      .prepare(`
+        INSERT INTO review_proposals
+          (job_id, agent_run_id, base_revision_id, base_content_hash, provider, summary, proposed_data_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        input.jobId,
+        input.agentRunId,
+        input.baseRevisionId,
+        input.baseContentHash,
+        input.provider,
+        input.summary,
+        input.proposedDataJson,
+      );
+    return this.reviewProposalById(rowId(result))!;
+  }
+
+  insertReviewItem(input: {
+    proposalId: number;
+    ordinal: number;
+    itemType: ReviewItemType;
+    payload: unknown;
+  }): ReviewItemRow {
+    const result = this.db
+      .prepare('INSERT INTO review_items (proposal_id, ordinal, item_type, payload_json) VALUES (?, ?, ?, ?)')
+      .run(input.proposalId, input.ordinal, input.itemType, JSON.stringify(input.payload));
+    return this.db
+      .prepare('SELECT * FROM review_items WHERE id = ?')
+      .get(rowId(result)) as unknown as ReviewItemRow;
+  }
+
+  reviewProposalById(id: number): ReviewProposalRow | null {
+    return (
+      (this.db.prepare('SELECT * FROM review_proposals WHERE id = ?').get(id) as unknown as ReviewProposalRow) ??
+      null
+    );
+  }
+
+  /** 這個 job 目前未結案的提案。同一時間只該有一份。 */
+  openReviewProposal(jobId: number): ReviewProposalRow | null {
+    return (
+      (this.db
+        .prepare("SELECT * FROM review_proposals WHERE job_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1")
+        .get(jobId) as unknown as ReviewProposalRow) ?? null
+    );
+  }
+
+  listReviewItems(proposalId: number): ReviewItemRow[] {
+    return this.db
+      .prepare('SELECT * FROM review_items WHERE proposal_id = ? ORDER BY ordinal')
+      .all(proposalId) as unknown as ReviewItemRow[];
+  }
+
+  updateReviewItemState(id: number, state: ReviewItemState, revisionId: number | null): void {
+    this.db
+      .prepare(`
+        UPDATE review_items
+        SET state = ?, revision_id = COALESCE(?, revision_id),
+            resolved_at = CASE WHEN ? = 'pending' THEN NULL ELSE datetime('now') END
+        WHERE id = ?
+      `)
+      .run(state, revisionId, state, id);
+  }
+
+  /** 逐項套用之後，提案的比對基準要跟著換到新那一版，剩下的項目才還套得動。 */
+  rebaseReviewProposal(id: number, revisionId: number, contentHash: string): void {
+    this.db
+      .prepare('UPDATE review_proposals SET base_revision_id = ?, base_content_hash = ? WHERE id = ?')
+      .run(revisionId, contentHash, id);
+  }
+
+  closeReviewProposal(id: number, reason: string): void {
+    this.db
+      .prepare("UPDATE review_proposals SET status = 'closed', closed_at = datetime('now'), close_reason = ? WHERE id = ? AND status = 'open'")
+      .run(reason, id);
+  }
+
+  // --- 配圖需求 -------------------------------------------------------------
+
+  /** 同一個 key 覆蓋掉上一次的建議，並把「不要了」的標記清掉——這是新的一份。 */
+  upsertImageBrief(input: {
+    jobId: number;
+    agentRunId: number | null;
+    briefKey: string;
+    purpose: string;
+    prompt: string;
+    aspectRatio: string;
+    altText: string;
+    caption: string | null;
+    placement: string | null;
+  }): void {
+    this.db
+      .prepare(`
+        INSERT INTO image_briefs
+          (job_id, agent_run_id, brief_key, purpose, prompt, aspect_ratio, alt_text, caption, placement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (job_id, brief_key) DO UPDATE SET
+          agent_run_id = excluded.agent_run_id,
+          purpose      = excluded.purpose,
+          prompt       = excluded.prompt,
+          aspect_ratio = excluded.aspect_ratio,
+          alt_text     = excluded.alt_text,
+          caption      = excluded.caption,
+          placement    = excluded.placement,
+          created_at   = datetime('now'),
+          dismissed_at = NULL
+      `)
+      .run(
+        input.jobId,
+        input.agentRunId,
+        input.briefKey,
+        input.purpose,
+        input.prompt,
+        input.aspectRatio,
+        input.altText,
+        input.caption,
+        input.placement,
+      );
+  }
+
+  listImageBriefs(jobId: number): ImageBriefRow[] {
+    return this.db
+      .prepare('SELECT * FROM image_briefs WHERE job_id = ? ORDER BY id')
+      .all(jobId) as unknown as ImageBriefRow[];
+  }
+
+  imageBriefById(id: number): ImageBriefRow | null {
+    return (
+      (this.db.prepare('SELECT * FROM image_briefs WHERE id = ?').get(id) as unknown as ImageBriefRow) ?? null
+    );
+  }
+
+  dismissImageBrief(id: number): void {
+    this.db.prepare("UPDATE image_briefs SET dismissed_at = datetime('now') WHERE id = ?").run(id);
   }
 
   // --- 稽核 -----------------------------------------------------------------

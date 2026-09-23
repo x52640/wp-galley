@@ -3,8 +3,11 @@ import { api, describeError } from '../service/client.js';
 import { isLoaded, type JobDetail } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished } from '../lib/steps.js';
+import { AgentBanner } from './AgentProgress.js';
 import { useConfirm } from './ConfirmDialog.js';
+import { CompareView } from './CompareView.js';
 import { ProofView } from './ProofView.js';
+import type { StageMode } from './ViewSwitch.js';
 import { StateRail } from './StateRail.js';
 import { StepPanel } from './StepPanel.js';
 
@@ -23,6 +26,17 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   const [blocks, setBlocks] = useState<{ index: number; text: string }[]>([]);
   // 校樣回應的 ETag：使用者眼前那一份的 hash。null = 還沒問到或問不到。
   const [previewHash, setPreviewHash] = useState<string | null>(null);
+  /** 主區的檢視。預設永遠是校樣——左右對照是「要逐字比對時才切過去」的地方。 */
+  const [mode, setMode] = useState<StageMode>('proof');
+  /**
+   * 待處理清單點過來的段落。
+   *
+   * 放在這裡而不是各自的元件裡，是因為兩個檢視都要用同一個值：在校樣上是畫框，
+   * 在左右對照上是標亮那一列。清單點一次，切到哪個檢視都看得到同一段。
+   */
+  const [focusBlock, setFocusBlock] = useState<number | null>(null);
+  /** 頂端長條上的「停止」按下之後，避免連按。 */
+  const [cancelling, setCancelling] = useState(false);
   const confirm = useConfirm();
   const alive = useRef(true);
   /**
@@ -63,6 +77,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setError(null);
     setBlocks([]);
     setPreviewHash(null);
+    setFocusBlock(null);
   }, [uuid]);
 
   useEffect(() => {
@@ -222,6 +237,28 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         </p>
       )}
 
+      {/*
+        Agent 在跑的時候，這條長條在工作區的任何畫面都看得到。
+        使用者在看校樣或左右對照時不會把右面板打開，「還在跑」這件事必須自己找上門，
+        否則等了兩分鐘只會覺得軟體卡死了。
+      */}
+      {job.agentRun?.status === 'running' && (
+        <AgentBanner
+          run={job.agentRun}
+          cancelling={cancelling}
+          onCancel={() => {
+            setCancelling(true);
+            void api
+              .cancelAgent(job.uuid)
+              .catch((cause: unknown) => setError(describeError(cause)))
+              .finally(() => {
+                setCancelling(false);
+                void refresh();
+              });
+          }}
+        />
+      )}
+
       <div className="panes">
         <StateRail
           job={job}
@@ -242,13 +279,38 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             })
           }
         />
-        <ProofView
+        {/*
+          校樣永遠掛在樹上，切到左右對照時只是被蓋住（見 styles.css 的 .stage）。
+          卸載掉的話 iframe 會重載、量到的區塊也會清空，右面板的「插入位置」
+          就會在切回來之前一直是空的。
+        */}
+        <div className="stage" data-mode={mode}>
+          <ProofView
+            job={job}
+            mode={mode}
+            onMode={setMode}
+            focusBlock={focusBlock}
+            onBlocks={onBlocks}
+            onPreviewed={onPreviewed}
+            onPreviewHash={onPreviewHash}
+          />
+          {mode === 'compare' && (
+            <CompareView
+              job={job}
+              mode={mode}
+              onMode={setMode}
+              focusBlock={focusBlock}
+              revisionKey={job.currentRevision?.contentHash ?? 'none'}
+            />
+          )}
+        </div>
+        <StepPanel
           job={job}
-          onBlocks={onBlocks}
-          onPreviewed={onPreviewed}
-          onPreviewHash={onPreviewHash}
+          refresh={refresh}
+          blocks={blocks}
+          previewHash={previewHash}
+          onFocusBlock={setFocusBlock}
         />
-        <StepPanel job={job} refresh={refresh} blocks={blocks} previewHash={previewHash} />
       </div>
     </div>
   );

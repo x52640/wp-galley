@@ -3,6 +3,7 @@ import { api, describeError, isFixtureMode } from '../service/client.js';
 import type { LoadedJob, ProofMark } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { shortHash } from '../lib/format.js';
+import { ViewSwitch, type StageMode } from './ViewSwitch.js';
 
 /**
  * 中央校樣。
@@ -28,16 +29,30 @@ import { shortHash } from '../lib/format.js';
 interface BlockBox {
   index: number;
   top: number;
+  /**
+   * 區塊的高度。標亮某一段時要畫一個蓋住整段的框，所以高度也得量。
+   *
+   * 框畫在 iframe **外面**：文件本身帶著 `default-src 'none'` 的 CSP，而且
+   * 「不去碰校樣文件的內部」本來就是這個元件的原則——量得到位置就夠了。
+   */
+  height: number;
   text: string;
 }
 
 export function ProofView({
   job,
+  mode,
+  onMode,
+  focusBlock,
   onBlocks,
   onPreviewed,
   onPreviewHash,
 }: {
   job: LoadedJob;
+  mode: StageMode;
+  onMode: (next: StageMode) => void;
+  /** 待處理清單點過來的段落。會捲到那一段並畫一個框。 */
+  focusBlock: number | null;
   /**
    * 把量到的區塊回報上去，右面板的「插入位置」要用。
    *
@@ -169,11 +184,15 @@ export function ProofView({
 
     const body = doc.querySelector('.preview-body');
     const children = body ? Array.from(body.children) : [];
-    const measured = children.map((element, index) => ({
-      index,
-      top: element.getBoundingClientRect().top + scrollY,
-      text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
-    }));
+    const measured = children.map((element, index) => {
+      const box = element.getBoundingClientRect();
+      return {
+        index,
+        top: box.top + scrollY,
+        height: box.height,
+        text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+      };
+    });
     setBlocks(measured);
     onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
   }, []);
@@ -195,6 +214,21 @@ export function ProofView({
     observerRef.current = observer;
     window.setTimeout(() => measure(token), 250);
   }, [measure]);
+
+  // 從清單點過來的那一段：捲過去並畫框。量測還沒好就先不動，等量完這個 effect
+  // 會因為 blocks 改變再跑一次。
+  const focused = focusBlock === null ? undefined : blocks.find((block) => block.index === focusBlock);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const frame = frameRef.current;
+    const scroller = scrollRef.current;
+    if (focused === undefined || !frame || !scroller) return;
+    const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTo({
+      top: Math.max(offset + focused.top - 96, 0),
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
+  }, [focused?.index, focused?.top]);
 
   const markGroups = groupMarks(job.marks);
 
@@ -221,9 +255,10 @@ export function ProofView({
             <span>顯示校對符號</span>
           </label>
         )}
+        <ViewSwitch mode={mode} onMode={onMode} />
       </header>
 
-      <div className="proof-scroll">
+      <div className="proof-scroll" ref={scrollRef}>
         {loading && <p className="proof-status">載入校樣…</p>}
 
         {error && (
@@ -267,6 +302,14 @@ export function ProofView({
                   }),
                 )}
               </div>
+            )}
+
+            {focused !== undefined && (
+              <div
+                className="proof-focus"
+                style={{ top: `${focused.top - 6}px`, height: `${focused.height + 12}px` }}
+                aria-hidden="true"
+              />
             )}
 
             <iframe

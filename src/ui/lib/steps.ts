@@ -79,9 +79,26 @@ export function railStatus(step: RailStep, state: JobState): StepStatus {
 }
 
 /** 右面板現在該把哪一張卡片攤開。 */
-export type PanelKey = 'source' | 'agent' | 'media' | 'taxonomy' | 'approve' | 'publish' | 'result';
+export type PanelKey =
+  | 'source'
+  | 'agent'
+  | 'review'
+  | 'media'
+  | 'taxonomy'
+  | 'approve'
+  | 'publish'
+  | 'result';
 
-export function primaryPanel(state: JobState): PanelKey {
+/**
+ * 有待處理的項目時，那張卡片優先攤開。
+ *
+ * 狀態機不知道清單的存在（清單不改變狀態），所以這件事只能在畫面這一層決定：
+ * 使用者的下一步是「把清單清完」，不是往下一格走。
+ */
+export function primaryPanel(state: JobState, hasPendingReview = false): PanelKey {
+  if (hasPendingReview && state !== 'PUBLISHING' && state !== 'PUBLISHED' && !isTerminal(state)) {
+    return 'review';
+  }
   switch (state) {
     case 'SOURCE':
       return 'source';

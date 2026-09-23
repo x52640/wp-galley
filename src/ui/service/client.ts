@@ -3,6 +3,7 @@ import type {
   AgentReviewInput,
   AgentRunResult,
   Approval,
+  Comparison,
   CreateJobInput,
   CreateRevisionInput,
   JobDetail,
@@ -15,6 +16,7 @@ import type {
   PublishResult,
   RenderOutcome,
   Revision,
+  ReviewResolveResult,
   Term,
 } from './types.js';
 import { fixtureApi } from './fixtures.js';
@@ -220,6 +222,23 @@ const httpApi: PublisherApi = {
 
   async cancelAgent(uuid: string) {
     await sendJson<unknown>(`/api/jobs/${uuid}/agent`, 'DELETE');
+  },
+
+  resolveReview: (uuid: string, input: { itemIds: number[]; decision: 'apply' | 'skip' }) =>
+    sendJson<ReviewResolveResult>(`/api/jobs/${uuid}/review/resolve`, 'POST', input),
+
+  acceptWholeReview: (uuid: string, proposalId: number) =>
+    sendJson<ReviewResolveResult>(`/api/jobs/${uuid}/review/accept-all`, 'POST', { proposalId }),
+
+  async discardReview(uuid: string, reason: string, proposalId: number) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/review`, 'DELETE', { reason, proposalId });
+  },
+
+  fetchComparison: (uuid: string, against?: 'proposal' | 'previous') =>
+    getJson<Comparison>(`/api/jobs/${uuid}/compare${against === undefined ? '' : `?against=${against}`}`),
+
+  async dismissImageBrief(uuid: string, briefId: number) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/briefs/${briefId}`, 'DELETE');
   },
 
   async addMedia(uuid: string, input: AddMediaInput) {

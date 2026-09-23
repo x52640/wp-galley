@@ -633,28 +633,39 @@ describe('Agent 校稿', () => {
     data: {
       title: '20260828',
       summary: '補了標點',
-      correctedSource: '今天讀完這本書，想到很多事。',
+      correctedSource: '今天讀完這本書，想到很多事情。',
       changes: [
-        { type: 'typo' as const, before: '恨', after: '很', reason: '錯字', meaningChanged: false },
+        { type: 'clarity' as const, before: '很多事', after: '很多事情', reason: '語感', meaningChanged: false },
       ],
-      templateData: { title: '20260828', body: '<p class="wp-block-paragraph">今天讀完這本書，想到很多事。</p>' },
+      observations: [],
+      templateData: {
+        title: '20260828',
+        body:
+          '<p class="wp-block-paragraph">今天讀完這本書，想到很多事情。</p>' +
+          '<p class="wp-block-paragraph">不是書裡寫的那些，而是別的。</p>',
+      },
       imageBriefs: [],
     },
     meta: { runId: 'r', agentId: 'codex' as const, model: null, durationMs: 1, stderrTail: '' },
   };
 
-  it('Agent 回來的資料會變成新 revision，狀態進到 REVIEWED', async () => {
+  it('Agent 回來的東西存成提案，內容一個字都沒動，狀態進到 REVIEWED', async () => {
     const f = await setup({ adapters: [new FakeAdapter('codex', 'Codex', { result: reviewOutput })] });
     const uuid = newDiaryJob(f.core);
+    const before = f.core.getJob(uuid).currentRevision!.contentHash;
 
     const result = await f.core.runAgentReview(uuid, { provider: 'codex' });
     expect(result.status).toBe('succeeded');
     expect(result.summary).toBe('補了標點');
-    expect(result.revision?.origin).toBe('agent_review');
+    expect(result.review!.pendingCount).toBe(1);
     expect(f.core.getJob(uuid).state).toBe('REVIEWED');
+
+    // 提案制的重點：沒有新版本，內容也沒被改。
+    expect(f.core.listRevisions(uuid)).toHaveLength(1);
+    expect(f.core.getJob(uuid).currentRevision!.contentHash).toBe(before);
   });
 
-  it('Agent 給的 templateData 不合模板 schema 就整份退回，不建立 revision', async () => {
+  it('Agent 給的 templateData 不合模板 schema 就整份退回，連提案都不留', async () => {
     const bad = {
       ...reviewOutput,
       data: { ...reviewOutput.data, templateData: { title: '只有標題' } },
@@ -664,17 +675,24 @@ describe('Agent 校稿', () => {
 
     await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(ContentInvalidError);
     expect(f.core.listRevisions(uuid)).toHaveLength(1);
+    expect(f.core.getReview(uuid)).toBeNull();
   });
 
-  it('Agent 校稿會讓既有核准失效', async () => {
+  it('校稿本身不動內容，所以核准還在；套用任何一項才會讓核准失效', async () => {
     const f = await setup({ adapters: [new FakeAdapter('codex', 'Codex', { result: reviewOutput })] });
     const uuid = newDiaryJob(f.core);
     approveJob(f.core, uuid);
 
     await f.core.runAgentReview(uuid, { provider: 'codex' });
+    expect(f.core.getJob(uuid).approval?.valid).toBe(true);
+    expect(f.core.getJob(uuid).state).toBe('APPROVED');
+
+    const item = f.core.getReview(uuid)!.items[0]!;
+    f.core.resolveReviewItems(uuid, { itemIds: [item.id], decision: 'apply' });
+
     const detail = f.core.getJob(uuid);
     expect(detail.approval?.valid).toBe(false);
-    expect(detail.state).toBe('REVIEWED');
+    expect(detail.state).toBe('RENDERED');
   });
 
   it('Agent 失敗會記錄下來並丟出錯誤', async () => {
@@ -749,6 +767,7 @@ const REVIEW_OUTPUT = {
     summary: '補了標點',
     correctedSource: '今天讀完這本書，想到很多事。',
     changes: [],
+    observations: [],
     templateData: {
       title: '20260828',
       body: '<p class="wp-block-paragraph">Agent 改過的內容。</p>',
@@ -929,12 +948,13 @@ describe('Agent 執行期間的變動', () => {
 
     await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(ContentChangedError);
 
-    // 使用者的編輯還在，沒有被 Agent 的舊稿蓋掉。
+    // 使用者的編輯還在，沒有被 Agent 的舊稿蓋掉，也沒有留下一份對著舊稿做的提案。
     const detail = f.core.getJob(uuid);
     expect(detail.currentRevision!.publishHtml).toContain('使用者自己改的內容');
     expect(detail.currentRevision!.publishHtml).not.toContain('Agent 改過的內容');
     expect(f.core.listRevisions(uuid)).toHaveLength(2);
     expect(detail.agentRun?.status).toBe('failed');
+    expect(detail.review).toBeNull();
   });
 
   it('已經被取消的執行，結果不會套用', async () => {
@@ -953,6 +973,7 @@ describe('Agent 執行期間的變動', () => {
     await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(/cancelled/);
     expect(f.core.listRevisions(uuid)).toHaveLength(1);
     expect(f.core.getJob(uuid).agentRun?.status).toBe('cancelled');
+    expect(f.core.getReview(uuid)).toBeNull();
   });
 });
 

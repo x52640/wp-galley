@@ -23,6 +23,28 @@ export interface ReviewChange {
   readonly meaningChanged: boolean;
 }
 
+/**
+ * 需要人判斷的觀察（階段 5.5-A）。
+ *
+ * `changes` 的形狀是「把 A 改成 B」，但校稿真正有價值的另一半不是字詞替換：
+ * 「第 3 段寫 1985、第 7 段寫 1987，講的是同一件事」不是一個可以自動套用的改動，
+ * 是一個要人去確認的疑點。以前沒有地方放，Agent 只能硬塞進 `changes` 裡假裝
+ * 自己知道正確答案，或者乾脆不講。
+ *
+ * **不需要連外就做得到**，所以它屬於現在這個階段：把要查的東西列出來，
+ * 而不是假裝自己查過了。真的去查是階段 6 的事（見 docs/STAGE-6-FACTCHECK.md）。
+ */
+export interface Observation {
+  readonly kind: 'contradiction' | 'unsupported-claim' | 'missing-source' | 'gap';
+  /** 對應正文第幾個頂層區塊，讓 UI 把它掛到那一段的頁邊。 */
+  readonly blockIndex: number;
+  /** 原文中被指涉的片段，用來標亮。 */
+  readonly excerpt: string;
+  readonly detail: string;
+  /** 建議怎麼處理；**不是**自動套用的改動。 */
+  readonly suggestion: string;
+}
+
 export interface ImageBrief {
   /** 供 templateData 的 featuredImageBriefKey 指向。 */
   readonly key: string;
@@ -40,6 +62,7 @@ export interface ReviewOutput {
   readonly summary: string;
   readonly correctedSource: string;
   readonly changes: ReviewChange[];
+  readonly observations: Observation[];
   readonly templateData: Record<string, unknown>;
   readonly imageBriefs: ImageBrief[];
 }
@@ -49,7 +72,15 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
   title: '校稿結果',
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'summary', 'correctedSource', 'changes', 'templateData', 'imageBriefs'],
+  required: [
+    'title',
+    'summary',
+    'correctedSource',
+    'changes',
+    'observations',
+    'templateData',
+    'imageBriefs',
+  ],
   properties: {
     title: {
       type: 'string',
@@ -83,6 +114,35 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
             type: 'boolean',
             description: '這項修改有沒有可能改變原意。不確定就填 true。',
           },
+        },
+      },
+    },
+    observations: {
+      type: 'array',
+      maxItems: 50,
+      description:
+        '需要人判斷的觀察，不是字詞替換：段落之間互相矛盾、沒有出處的宣稱、前後日期兜不攏。' +
+        '不確定的事就寫在這裡，不要寫進 changes 假裝自己知道答案；沒有就給空陣列。',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'blockIndex', 'excerpt', 'detail', 'suggestion'],
+        properties: {
+          kind: {
+            type: 'string',
+            enum: ['contradiction', 'unsupported-claim', 'missing-source', 'gap'],
+            description:
+              'contradiction：前後說法兜不攏。unsupported-claim：宣稱沒有依據。' +
+              'missing-source：引用或數據沒標出處。gap：少了讀者需要的交代。',
+          },
+          blockIndex: {
+            type: 'integer',
+            minimum: 0,
+            description: '正文第幾個頂層區塊（段落、標題、清單各算一個），0 起算。',
+          },
+          excerpt: { type: 'string', maxLength: 300, description: '原文中被指涉的片段，要一字不差。' },
+          detail: { type: 'string', maxLength: 500, description: '觀察到什麼。講事實，不要下結論。' },
+          suggestion: { type: 'string', maxLength: 300, description: '建議怎麼處理。' },
         },
       },
     },
