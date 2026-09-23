@@ -10,8 +10,9 @@
 
 ## 進行中
 
-P5-T001 實測進行中（走到第 2 步）。使用者要求把實測發現的問題當場修，已完成：P5-T008 定位忽略空白、
-P5-T009 兩欄各自捲動、P5-T010 直接在文章上改、P5-T011 標出要改的地方、P5-T012 改完卡片自動結案、[P5-T014](tasks/P5-T014-remove-view-switch.md) 拿掉三段切換（D-018）、[P5-T015](tasks/P5-T015-unified-diff.md) 對照改成 git diff 式（D-019）、[P5-T016](tasks/P5-T016-insert-image-in-article.md) 在文章上直接插圖＋AI 配圖自動放位置（D-020，未 commit）。下一步：回到實測第 3 步（只接受一個錯字）。
+[P8-T001](tasks/P8-T001-site-profile.md) 通用文章類型與本機站台設定檔（D-016），交給 subagent。之後接 P8-T002 首次設定精靈。
+
+P5-T001 實測已結案（2026-09-23，使用者實測並發布）；實測中當場修的是 P5-T008～P5-T016，見該 Task 的完成結果。
 
 [P5-T013](tasks/P5-T013-codex-image-generation.md) 用 Codex 生圖（D-017）已完成，只走過示範資料；
 **真實 Codex 生圖與「用這張」的真實上傳還沒跑過**（耗額度、會寫進媒體庫），留給使用者在實測時做。
@@ -26,9 +27,10 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 
 ## Ready
 
+
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P5-T001](tasks/P5-T001-test-stage-5-5.md) | 陪使用者實測（5.5 功能＋B 版畫面） | 需要使用者在場；**下一步** |
+| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
 | [P5-T005](tasks/P5-T005-expected-content-hash.md) | 後端真的檢查 expectedContentHash | 小；保護目前不存在 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 
@@ -36,8 +38,6 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 
 | Task | 等什麼 |
 | --- | --- |
-| [P6-T001](tasks/P6-T001-factcheck.md) AI 查證 | P5-T001 |
-| [P8-T001](tasks/P8-T001-site-profile.md) 通用文章類型與本機站台設定檔（D-016） | P5-T001 |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016） | P8-T001 |
 
 ## 待專案擁有者

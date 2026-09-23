@@ -1,7 +1,7 @@
 ---
 id: P8-T001
 phase: 8
-status: blocked          # 等 P5-T001（D-016：排在實測之後）
+status: in_progress
 depends_on: [P5-T001]
 specs: [templates.md, wordpress-site.md, architecture.md, security.md]
 write_paths: ["config/", "templates/", "src/templates/", "src/wordpress/targets.ts", "src/db/migrations/", "src/contract/api.ts", "src/ui/", "tests/", "docs/specs/templates.md", "docs/specs/wordpress-site.md", "docs/specs/architecture.md", ".gitignore", ".env.example"]
@@ -62,7 +62,7 @@ D-016：讓任何 WordPress 站都能用。現在有兩個地方把發布台綁�
 ## 中斷／接手紀錄
 - 最後完成：尚未開始
 - 已通過驗證：—
-- 下一步：等 P5-T001 完成後改成 ready
-- Blocker：P5-T001
+- 下一步：交給 subagent（P5-T001 已於 2026-09-23 結案）
+- Blocker：無
 
 ## 完成結果

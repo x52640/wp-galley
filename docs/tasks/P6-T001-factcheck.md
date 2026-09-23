@@ -1,7 +1,7 @@
 ---
 id: P6-T001
 phase: 6
-status: blocked
+status: ready
 depends_on: [P5-T001]
 specs: [factcheck.md, security.md]
 write_paths: []
