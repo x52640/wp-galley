@@ -230,6 +230,8 @@ export interface JobSummary extends Job {
   readonly revisionNumber: number | null;
   readonly approved: boolean;
   readonly publishedId: number | null;
+  /** 未結案的校稿提案還剩幾項沒處理；沒有提案就是 0。列表靠它說「還有 N 項建議」。 */
+  readonly pendingReviewCount: number;
 }
 
 export interface JobTarget {

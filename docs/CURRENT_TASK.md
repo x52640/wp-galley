@@ -10,7 +10,7 @@
 
 ## 進行中
 
-- **P5-T003** UI 改版為 B 版 → [tasks/P5-T003-ui-redesign-b.md](tasks/P5-T003-ui-redesign-b.md)
+- **P5-T006** B1 工作區 → [tasks/P5-T006-ui-b1-workspace.md](tasks/P5-T006-ui-b1-workspace.md)（之後 P5-T007 B2 發布面板）
 
 ## Ready
 
@@ -24,6 +24,7 @@
 
 | Task | 等什麼 |
 | --- | --- |
+| [P5-T007](tasks/P5-T007-ui-b2-publish.md) B2 發布面板 | P5-T006 |
 | [P6-T001](tasks/P6-T001-factcheck.md) AI 查證 | P5-T001 |
 
 ## 待專案擁有者

@@ -1,10 +1,16 @@
 import { useEffect, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
-import type { JobTarget } from '../service/types.js';
+import type { PublishTargetSummary } from '../service/types.js';
 import { Icon } from '../icons.js';
+import { typeLabel } from './JobList.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 
-/** 新增稿件：選發布目標、貼原稿。其他都等進了工作區再說。 */
+/**
+ * 新稿件：選類型、貼原稿，其他都等進了工作區再說。
+ *
+ * 從總覽按「新長文／新日記」進來時類型已經定了，不再問；從拖放或貼上進來時文字
+ * 已經在了，只差一個類型。**類型決定發到哪裡**，所以選完就寫出來，不讓人猜。
+ */
 
 function today(): string {
   const now = new Date();
@@ -12,17 +18,29 @@ function today(): string {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
 }
 
+/** 第一行當標題：常見的稿子第一行就是標題，太長的不算。 */
+function firstLineTitle(text: string): string {
+  const line = text.split('\n').find((row) => row.trim().length > 0)?.trim() ?? '';
+  return line.length > 0 && line.length <= 60 ? line : '';
+}
+
 export function NewJob({
+  presetTarget,
+  initialText,
   onCreated,
   onCancel,
 }: {
+  /** 從「新長文／新日記」進來時帶的 target key。 */
+  presetTarget?: string | undefined;
+  /** 從拖放或貼上進來時帶的原稿。 */
+  initialText?: string | undefined;
   onCreated: (uuid: string) => void;
   onCancel: () => void;
 }): JSX.Element {
-  const [targets, setTargets] = useState<JobTarget[] | null>(null);
-  const [targetKey, setTargetKey] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [source, setSource] = useState('');
+  const [targets, setTargets] = useState<PublishTargetSummary[] | null>(null);
+  const [targetKey, setTargetKey] = useState<string | null>(presetTarget ?? null);
+  const [source, setSource] = useState(initialText ?? '');
+  const [title, setTitle] = useState(() => firstLineTitle(initialText ?? ''));
   const [loadError, setLoadError] = useState<string | null>(null);
   const create = useAction();
 
@@ -33,7 +51,8 @@ export function NewJob({
       .then((list) => {
         if (cancelled) return;
         setTargets(list);
-        setTargetKey((current) => current ?? list[0]?.key ?? null);
+        // 只有一種類型就不用問了。
+        if (list.length === 1) setTargetKey((current) => current ?? list[0]?.key ?? null);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(describeError(cause));
@@ -45,52 +64,59 @@ export function NewJob({
 
   const target = targets?.find((item) => item.key === targetKey) ?? null;
   const isDiary = target?.contentType === 'diary';
+  const locked = presetTarget !== undefined && target !== null;
+  const chars = source.replace(/\s/g, '').length;
 
   return (
-    <div className="new-screen">
-      <header className="list-head">
-        <div>
-          <button type="button" className="btn btn-quiet btn-tiny" onClick={onCancel}>
-            <Icon name="arrow-left" size={14} />
-            全部稿件
-          </button>
-          <h1 className="list-title">新增稿件</h1>
-        </div>
+    <div className="b0">
+      <header className="appbar">
+        <button type="button" className="btn btn-quiet btn-tiny" onClick={onCancel}>
+          <Icon name="arrow-left" size={14} />
+          全部稿件
+        </button>
       </header>
 
-      <ErrorNote message={loadError} />
+      <main className="compose">
+        <h1 className="compose-title">{locked ? `新${typeLabel(target.contentType)}` : '新稿件'}</h1>
 
-      <div className="new-form">
-        <Field label="發布到哪裡">
-          <div className="target-grid">
-            {targets === null && !loadError && <span className="field-hint">讀取發布目標…</span>}
-            {targets?.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className="target-card"
-                data-active={targetKey === item.key ? 'yes' : 'no'}
-                aria-pressed={targetKey === item.key}
-                onClick={() => setTargetKey(item.key)}
-              >
-                <span className="target-name">{item.displayName}</span>
-                <span className="target-meta mono">{item.key}</span>
-                <span className="target-note">
-                  {item.requireFeaturedImage ? '需要精選圖片' : '不需要精選圖片'}
-                  {item.taxonomy ? `・${item.taxonomy}` : ''}
-                </span>
-              </button>
-            ))}
+        <ErrorNote message={loadError} />
+
+        {!locked && (
+          <div className="field">
+            <span className="field-label">類型</span>
+            <div className="type-cards" role="radiogroup" aria-label="類型">
+              {targets === null && !loadError && <span className="field-hint">讀取發布目標…</span>}
+              {targets?.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={targetKey === item.key}
+                  className="type-card"
+                  data-active={targetKey === item.key ? 'yes' : 'no'}
+                  onClick={() => setTargetKey(item.key)}
+                >
+                  <span className="type-card-name">{typeLabel(item.contentType)}</span>
+                  <span className="type-card-note">
+                    發到「{item.displayName}」{item.requireFeaturedImage ? '・要有封面圖' : ''}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </Field>
+        )}
 
-        <Field
-          label="標題"
-          hint={isDiary ? '日記的慣例是 YYYYMMDD。' : '留空的話進工作區再補。'}
-        >
+        {target && (
+          <p className="compose-dest">
+            <Icon name="globe" size={14} />
+            會發到「{target.displayName}」，WordPress 裡的 <span className="mono">{target.postType}</span>
+          </p>
+        )}
+
+        <Field label="標題" hint={isDiary ? '日記的慣例是 YYYYMMDD。' : '留空的話進去再補。'}>
           <div className="row">
             <input
-              className="input"
+              className="input input-title"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder={isDiary ? today() : '文章標題'}
@@ -103,10 +129,10 @@ export function NewJob({
           </div>
         </Field>
 
-        <Field label="原稿" hint="純文字或 HTML 都可以。之後可以交給 Agent 校稿，也可以直接渲染發布。">
+        <Field label={`內文${chars > 0 ? `・${chars.toLocaleString()} 字` : ''}`} hint="純文字或 HTML 都可以。">
           <textarea
-            className="input textarea"
-            rows={14}
+            className="input textarea compose-body"
+            rows={16}
             value={source}
             onChange={(event) => setSource(event.target.value)}
             placeholder="把稿子貼進來…"
@@ -115,13 +141,13 @@ export function NewJob({
 
         <ErrorNote message={create.error} />
 
-        <div className="row row-end">
+        <div className="compose-actions">
           <button type="button" className="btn btn-quiet" onClick={onCancel} disabled={create.busy}>
             取消
           </button>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-primary btn-big"
             disabled={create.busy || targetKey === null || source.trim().length === 0}
             onClick={() =>
               void create.run(async () => {
@@ -135,11 +161,14 @@ export function NewJob({
               })
             }
           >
-            {create.busy ? <Spinner /> : <Icon name="plus" size={14} />}
-            建立稿件
+            建立並打開
+            {create.busy ? <Spinner /> : <Icon name="chevron-right" size={16} />}
           </button>
         </div>
-      </div>
+        {targetKey === null && targets !== null && targets.length > 1 && (
+          <p className="field-hint compose-why">先選類型：它決定這篇會發到網站的哪個地方。</p>
+        )}
+      </main>
     </div>
   );
 }

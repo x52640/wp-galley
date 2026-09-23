@@ -437,6 +437,7 @@ export class CoreService {
         revisionNumber: latest?.revision_number ?? null,
         approved: approval !== null && latest !== null && approval.content_hash === latest.content_hash,
         publishedId: published?.wordpress_id ?? null,
+        pendingReviewCount: this.pendingReviewCount(row.id),
       };
     });
   }
@@ -1181,6 +1182,15 @@ export class CoreService {
       .listReviewItems(proposalId)
       .filter((row) => row.state === 'pending' || row.state === 'unappliable');
     if (remaining.length === 0) this.repo.closeReviewProposal(proposalId, '所有項目都處理完了');
+  }
+
+  /** 列表用的輕量版：只數數量，不重算每一項的段落位置。 */
+  private pendingReviewCount(jobId: number): number {
+    const proposal = this.repo.openReviewProposal(jobId);
+    if (!proposal) return 0;
+    return this.repo
+      .listReviewItems(proposal.id)
+      .filter((row) => row.state === 'pending' || row.state === 'unappliable').length;
   }
 
   private reviewView(jobId: number, revision: Revision | null): ReviewProposalView | null {

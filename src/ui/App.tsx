@@ -16,13 +16,15 @@ import { Icon } from './icons.js';
 
 type Route =
   | { name: 'list' }
-  | { name: 'new' }
+  | { name: 'new'; target?: string }
   | { name: 'job'; uuid: string }
   | { name: 'diagnostics' };
 
 function parse(hash: string): Route {
   const path = hash.replace(/^#/, '');
   if (path === '/new') return { name: 'new' };
+  const preset = /^\/new\/([^/]+)$/.exec(path);
+  if (preset?.[1]) return { name: 'new', target: decodeURIComponent(preset[1]) };
   if (path === '/diagnostics') return { name: 'diagnostics' };
   const job = /^\/jobs\/([^/]+)$/.exec(path);
   if (job?.[1]) return { name: 'job', uuid: decodeURIComponent(job[1]) };
@@ -35,6 +37,8 @@ function go(path: string): void {
 
 export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
+  /** 在總覽拖放或貼上的原稿，帶進新稿件畫面。只活在這一次導覽裡。 */
+  const [pendingText, setPendingText] = useState<string | undefined>(undefined);
   const fixtures = isFixtureMode();
 
   useEffect(() => {
@@ -44,7 +48,21 @@ export function App(): JSX.Element {
   }, []);
 
   const openJob = useCallback((uuid: string) => go(`/jobs/${encodeURIComponent(uuid)}`), []);
-  const backToList = useCallback(() => go('/'), []);
+  const backToList = useCallback(() => {
+    setPendingText(undefined);
+    go('/');
+  }, []);
+  const startNew = useCallback((target?: string, text?: string) => {
+    setPendingText(text);
+    go(target === undefined ? '/new' : `/new/${encodeURIComponent(target)}`);
+  }, []);
+  const created = useCallback(
+    (uuid: string) => {
+      setPendingText(undefined);
+      openJob(uuid);
+    },
+    [openJob],
+  );
 
   return (
     <ConfirmProvider>
@@ -66,18 +84,20 @@ export function App(): JSX.Element {
       )}
 
       <div className="app" data-fixtures={fixtures ? 'yes' : 'no'}>
-        {route.name === 'list' && <JobList onOpen={openJob} onNew={() => go('/new')} />}
-        {route.name === 'new' && <NewJob onCreated={openJob} onCancel={backToList} />}
+        {route.name === 'list' && <JobList onOpen={openJob} onNew={startNew} />}
+        {route.name === 'new' && (
+          <NewJob
+            key={route.target ?? 'any'}
+            presetTarget={route.target}
+            initialText={pendingText}
+            onCreated={created}
+            onCancel={backToList}
+          />
+        )}
         {route.name === 'job' && <Workspace uuid={route.uuid} onBack={backToList} />}
         {route.name === 'diagnostics' && <Diagnostics onBack={backToList} />}
       </div>
 
-      {route.name !== 'diagnostics' && (
-        <a className="diag-link" href="#/diagnostics">
-          <Icon name="gauge" size={13} />
-          環境診斷
-        </a>
-      )}
     </ConfirmProvider>
   );
 }

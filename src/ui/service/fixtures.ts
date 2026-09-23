@@ -609,6 +609,7 @@ export const fixtureApi: PublisherApi = {
       revisionNumber: job.currentRevision?.number ?? null,
       approved: job.approval?.valid === true,
       publishedId: job.published?.wordpressId ?? null,
+      pendingReviewCount: job.review?.pendingCount ?? 0,
     }));
   },
 
