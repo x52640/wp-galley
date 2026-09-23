@@ -89,6 +89,20 @@ adapter，介面不變。
 
 `--help` 沒寫、但實際會炸的東西。CLI 改版後請重新驗證這一節。
 
+#### Codex 生圖（2026-09-23 實測，codex-cli 0.153.4）
+
+`--help` 看不出來，但 `codex features list` 的 `image_generation` 是 stable／true，用訂閱就能生圖。
+
+| 事實 | 細節 |
+| --- | --- |
+| 非互動模式可用 | `codex exec --json --skip-git-repo-check -C <dir> "<請生成…>"`，約 54 秒 |
+| 產出 | PNG 1672×941（要求 16:9），1.7 MB |
+| 圖檔位置 | **一定**在 `~/.codex/generated_images/<thread_id>/exec-<uuid>.png`；`thread_id` 是第一個事件 `{"type":"thread.started","thread_id":…}` |
+| 叫它存到工作目錄 | 它會用 shell `cp` 複製過去，需要 `workspace-write`。**不要靠這個**：直接從上面的位置讀，Agent 就能維持 `read-only` |
+| 事件流 | 生圖本身不出現在 item 事件裡；看得到的是它讀 imagegen skill、以及 cp 指令 |
+| 額度 | 這一次 input 114k tokens（多半是快取）、output 427 |
+| 雜訊 | 使用者本機設定的 Figma MCP 沒登入，stderr 會有一行 `AuthRequired` 錯誤，不影響結果 |
+
 #### Codex
 
 | 問題 | 處理 |
