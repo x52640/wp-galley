@@ -1,10 +1,10 @@
 ---
 id: P8-T002
 phase: 8
-status: blocked          # 等 P8-T001
+status: in_progress
 depends_on: [P8-T001]
 specs: [security.md, wordpress-site.md, agent-cli.md, http-api.md, design-system.md]
-write_paths: ["src/config/", "src/wordpress/", "src/agents/", "src/server/routes/", "src/contract/api.ts", "src/ui/", "tests/", "docs/specs/security.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "README.md"]
+write_paths: ["src/config/", "src/wordpress/", "src/agents/", "src/server/", "src/core/", "src/contract/api.ts", "src/ui/", "tests/", "docs/specs/", "docs/tasks/", "docs/CURRENT_TASK.md", "README.md", ".env.example", "config/publish-targets.example.json"]
 contract_change: additive
 expected_commit: "feat(P8-T002): 首次設定精靈"
 ---
@@ -21,8 +21,8 @@ D-016：別人裝好之後第一眼看到的畫面。README 只能叫人改設�
 | 步驟 | 內容 | 要能分辨的失敗 |
 | --- | --- | --- |
 | 1 連線 WordPress | 網址、帳號、應用程式密碼 → 測試連線 | 不是 HTTPS、REST API 被擋（安全外掛／主機商）、帳密錯、權限不夠發文 |
-| 2 選 Agent | 偵測 Codex／Claude Code／agy 有沒有裝、有沒有登入 | 沒裝附安裝指令、沒登入附登入指令（使用者自己在終端機執行） |
-| 3 發到哪裡 | 文章或頁面，寫入 P8-T001 的本機站台設定檔 | — |
+| 2 選 Agent | 偵測 Codex／Claude Code／agy 有沒有裝、有沒有登入；講清楚只有 Codex 能生圖（D-017） | 沒裝附安裝指令、沒登入附登入指令（使用者自己在終端機執行） |
+| 3 發到哪裡 | 文章或頁面，寫入 P8-T001 的本機站台設定檔（`config/publish-targets.json`，格式照 `config/publish-targets.example.json`；post 的分類要帶 `taxonomyRestBase`，照連線診斷從 `/wp/v2/taxonomies` 讀到的 rest_base） | 站上沒開放這個類型的 REST |
 | 4 完成 | 進稿件總覽；設定頁可重跑精靈 | — |
 
 - 沒有設定時自動進精靈；已有設定時不打擾。
@@ -64,7 +64,7 @@ D-016：別人裝好之後第一眼看到的畫面。README 只能叫人改設�
 ## 中斷／接手紀錄
 - 最後完成：尚未開始
 - 已通過驗證：—
-- 下一步：等 P8-T001
-- Blocker：P8-T001
+- 下一步：交給 subagent（P8-T001 已於 2026-09-24 完成）
+- Blocker：無
 
 ## 完成結果
