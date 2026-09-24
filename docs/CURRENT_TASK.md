@@ -4,12 +4,16 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **50 檔 / 870 測試**全綠（2026-09-24，P5-T017 之後）
-- migration head：`007-article-content-type`（dev server 已自動套到本機 DB）
+- `npm run verify`：typecheck 通過；Vitest **51 檔 / 914 測試**全綠（2026-09-24，P5-T018 之後）
+- migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
+
+[P5-T018](tasks/P5-T018-ai-image-at-position.md) 插圖面板直接請 AI 配一張（D-022）：實作完成、verify 綠、
+示範資料走完；**還沒 commit**，等使用者看過。真實 Codex 還沒用這個 prompt 跑過（耗額度）。
+migration 008 已被 dev server 套到本機 DB（SQL 已定稿，不能再改）。
 
 [P5-T017](tasks/P5-T017-review-current-content.md) AI 校稿只看目前的文章（D-021）：實作完成、verify 綠，
 job 2 已唯讀確認；**還沒 commit**，等使用者看過。

@@ -58,6 +58,8 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
   const [editing, setEditing] = useState<ProofEditRequest | null>(null);
   const [editNotice, setEditNotice] = useState<string | null>(null);
   const [imagesOpen, setImagesOpen] = useState<boolean | null>(null);
+  /** 剛在文章上「請 AI 配一張」建出來的配圖需求（P5-T018）：右欄捲到那張卡片。 */
+  const [focusBriefId, setFocusBriefId] = useState<number | null>(null);
   /** 頂端長條上的「停止」按下之後，避免連按。 */
   const [cancelling, setCancelling] = useState(false);
   const confirm = useConfirm();
@@ -104,6 +106,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     setSheet(null);
     setEditing(null);
     setEditNotice(null);
+    setFocusBriefId(null);
     setView('article');
   }, [uuid]);
 
@@ -371,6 +374,13 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                         await refresh();
                       }}
                       onClose={close}
+                      onAiStarted={async (briefId) => {
+                        // 生圖在背後跑：面板關掉，進度在右欄那張卡片與頂端長條（重讀之後開始輪詢）。
+                        close();
+                        setImagesOpen(true);
+                        setFocusBriefId(briefId);
+                        await refresh();
+                      }}
                     />
                   )
                 : null
@@ -449,7 +459,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                   {job.target.requireFeaturedImage && job.featuredMediaId === null
                     ? '還缺封面圖'
                     : job.imageBriefs.some((brief) => !brief.fulfilled)
-                      ? `AI 建議 ${job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張`
+                      ? `配圖 ${job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張待處理`
                       : job.media.length > 0
                         ? `${job.media.length} 張`
                         : ''}
@@ -459,7 +469,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
             </h2>
             {showImages && (
               <div className="margin-section-body">
-                <MediaPanel job={job} refresh={refresh} blocks={blocks} />
+                <MediaPanel job={job} refresh={refresh} blocks={blocks} focusBriefId={focusBriefId} />
               </div>
             )}
           </section>

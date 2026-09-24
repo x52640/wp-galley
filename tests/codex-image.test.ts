@@ -227,3 +227,28 @@ describe('CodexAdapter.generateImage', () => {
     if (!result.ok) expect(result.reason).toBe('cancelled');
   });
 });
+
+describe('在文章上請 AI 配一張（P5-T018）', () => {
+  it('使用者那句話與前後段落只走 stdin，不進命令列', async () => {
+    const { buildPositionImagePrompt } = await import('../src/core/image-generation.js');
+    const { adapter, codexHome, request } = setup(`
+      emit({ type: 'thread.started', thread_id: 't1' });
+      writeImage('t1', 'exec-1.png');
+    `);
+    const prompt = buildPositionImagePrompt({
+      before: ['巷口的早餐店排了隊'],
+      after: ['雨下得很急'],
+      note: '水彩風 --dangerously-bypass-approvals-and-sandbox',
+      aspectRatio: '16:9',
+    });
+    const result = await adapter.generateImage({ ...request, prompt }, 'run-pos');
+    expect(result.ok).toBe(true);
+    const call = JSON.parse(readFileSync(join(codexHome, 'call.json'), 'utf8')) as { argv: string[]; stdin: string };
+    expect(call.stdin).toBe(prompt);
+    const argv = call.argv.join(' ');
+    for (const text of ['水彩風', '早餐店', '雨下得很急', 'bypass']) expect(argv).not.toContain(text);
+    expect(call.argv).toContain('read-only');
+    expect(call.argv).toContain('--ephemeral');
+    expect(call.argv).toContain('--ignore-user-config');
+  });
+});

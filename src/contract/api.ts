@@ -267,6 +267,15 @@ export interface ImageBrief {
   readonly isFeatured: boolean;
   /** 最新一張還沒用掉的生成候選圖；沒有就是 null。**還沒上傳到 WordPress。** */
   readonly candidate: ImageCandidate | null;
+  /**
+   * 誰發起的（P5-T018）：`agent`＝一鍵配圖／校稿給的建議；`user`＝使用者在文章上「在這裡插圖」→
+   * 「請 AI 配一張」。`user` 那條的 key 以 `user-` 開頭、永遠不是封面，`prompt` 是系統組好的整份生圖指令。
+   */
+  readonly origin: 'agent' | 'user';
+  /** 圖放在錨點那段之後（`after`）或之前（`before`，只有文章最前面那個位置會用到）。 */
+  readonly anchorPosition: 'after' | 'before';
+  /** 使用者那句「想要什麼樣的圖」（選填）；Agent 的建議是 null。 */
+  readonly note: string | null;
 }
 
 /**
@@ -537,6 +546,28 @@ export interface PlaceMediaRequest {
   readonly afterBlockIndex: number;
 }
 
+/**
+ * 在文章上「請 AI 配一張」（P5-T018，`POST /api/jobs/:uuid/briefs`）。
+ *
+ * 只收位置與使用者那句話；prompt 由後端用固定程式組（前後段落＋那句話＋固定約束），前端給不了。
+ * `contentHash` 是畫面上那一版：位置是照它數的，後端的目前版本不是它就拒絕（409），不然會指到別段。
+ */
+export interface ImageAtPositionRequest {
+  /** 插在第幾個頂層區塊之後；-1＝最前面。跟 `PlaceMediaRequest` 同一套索引。 */
+  readonly afterBlockIndex: number;
+  readonly contentHash: string;
+  /** 想要什麼樣的圖，一句話，選填。上限 200 字：摺疊空白之後數 code point（`contract/user-note.ts`）。 */
+  readonly note?: string;
+}
+
+/**
+ * 「用這張」（`POST /api/jobs/:uuid/candidates/:id/use`）可以帶的東西。body 可以整個不給（舊前端）。
+ * `altText`：卡片上填的替代文字（P5-T018，使用者在文章上請 AI 配的那條預設是空的），沒給就用需求上的。
+ */
+export interface UseCandidateRequest {
+  readonly altText?: string;
+}
+
 export interface ResolveReviewRequest {
   readonly itemIds: number[];
   readonly decision: 'apply' | 'skip';
@@ -637,6 +668,10 @@ export interface AutoFeatureResult {
 }
 export interface ImageCandidateResponse {
   readonly candidate: ImageCandidate;
+}
+/** `POST /api/jobs/:uuid/briefs`（202）：建好的那條需求；生圖在背後跑，進度看 `JobDetail.agentRun`。 */
+export interface ImageBriefResponse {
+  readonly brief: ImageBrief;
 }
 export interface ApprovalResponse {
   readonly approval: Approval;

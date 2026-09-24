@@ -11,6 +11,7 @@ import { WordPressError } from '../../wordpress/errors.js';
 import { TemplateLoadError } from '../../templates/registry.js';
 import { WorkspaceError } from '../../agents/workspace.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
+import { USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 import { BlockConversionError } from '../../wordpress/block-types.js';
 import type {
   AgentRunRequest,
@@ -24,6 +25,9 @@ import type {
   DiscardReviewRequest,
   DiscardedResponse,
   DismissedResponse,
+  ImageAtPositionRequest,
+  ImageBriefResponse,
+  UseCandidateRequest,
   ImageCandidateResponse,
   JobDetail,
   JobResponse,
@@ -99,6 +103,26 @@ const MediaBody = z.object({
 const PlaceBody = z.object({ afterBlockIndex: z.number().int().min(-1).max(10_000) });
 
 /**
+ * 在文章上請 AI 配一張（P5-T018）。`.strict()`：這條路由的重點就是 prompt 只能由後端組，
+ * 前端多送一個 `prompt` 之類的欄位要當場擋下，而不是被 zod 默默丟掉、讓人以為有效。
+ */
+const ImageAtPositionBody = z
+  .object({
+    afterBlockIndex: z.number().int().min(-1).max(10_000),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
+    // 上限跟前端計數、CoreService 同一套：摺疊空白之後數 code point。另有一個寬鬆的原始長度上限擋超大 body。
+    note: z
+      .string()
+      .max(4_000)
+      .refine((value) => userNoteLength(value) <= USER_NOTE_MAX, `想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`)
+      .optional(),
+  })
+  .strict();
+
+/** 「用這張」可以帶卡片上填的替代文字（P5-T018）；body 可以整個不給。 */
+const UseCandidateBody = z.object({ altText: z.string().max(300).optional() }).strict().optional();
+
+/**
  * 逐項處理校稿建議。
  *
  * 上限 500 是配合 `changes` 的 maxItems 300 加上 `observations` 的 50 再留餘裕——
@@ -144,6 +168,8 @@ export const REQUEST_CONTRACT_CHECK: {
   readonly agent: Accepts<typeof AgentBody, AgentRunRequest>;
   readonly media: Accepts<typeof MediaBody, MediaUploadRequest>;
   readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
+  readonly imageAtPosition: Accepts<typeof ImageAtPositionBody, ImageAtPositionRequest>;
+  readonly useCandidate: Accepts<typeof UseCandidateBody, UseCandidateRequest>;
   readonly resolve: Accepts<typeof ResolveReviewBody, ResolveReviewRequest>;
   readonly proposalRef: Accepts<typeof ProposalRefBody, ProposalRefRequest>;
   readonly discard: Accepts<typeof DiscardReviewBody, DiscardReviewRequest>;
@@ -156,6 +182,8 @@ export const REQUEST_CONTRACT_CHECK: {
   agent: true,
   media: true,
   place: true,
+  imageAtPosition: true,
+  useCandidate: true,
   resolve: true,
   proposalRef: true,
   discard: true,
@@ -448,6 +476,28 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /**
+   * 在文章上「請 AI 配一張」（D-022，P5-T018）：建一條使用者發起的配圖需求，同一趟開始用 Codex 生圖。
+   *
+   * 跟 `generate` 不同，這條**不等畫完**就回 202：畫面要能馬上關掉插圖面板，進度看 `GET /api/jobs/:uuid`
+   * 的 agentRun（task `generate-image`、briefId 就是這條），取消走 `DELETE /agent`；失敗記在那一趟上。
+   * 沒有能用的 Codex 回 503、有別的 Agent 動作在跑回 502（跟 `generate` 一樣）、畫面那一版不是目前這一版回 409，
+   * 這些情況都不建需求。
+   */
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/briefs', async (request, reply): Promise<ImageBriefResponse> => {
+    const { uuid } = parse(UuidParams, request.params);
+    const body = parse(ImageAtPositionBody, request.body);
+    const { brief } = await guard(() =>
+      core().requestImageAtPosition(uuid, {
+        afterBlockIndex: body.afterBlockIndex,
+        contentHash: body.contentHash,
+        ...(body.note === undefined ? {} : { note: body.note }),
+      }),
+    );
+    reply.status(202);
+    return { brief };
+  });
+
+  /**
    * 候選圖本體。只在本機，**還沒上傳到 WordPress**。檔案路徑由資料庫決定，
    * 呼叫端只給得了編號，碰不到任意路徑。
    */
@@ -473,7 +523,10 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply): Promise<MediaResponse> => {
       const { uuid } = parse(UuidParams, request.params);
       const candidateId = parseId(request.params.id, '候選圖');
-      const result = await guard(() => core().useImageCandidate(uuid, candidateId));
+      const body = parse(UseCandidateBody, request.body ?? undefined);
+      const result = await guard(() =>
+        core().useImageCandidate(uuid, candidateId, body?.altText === undefined ? {} : { altText: body.altText }),
+      );
       reply.status(201);
       return result;
     },

@@ -5,13 +5,17 @@ import { Icon } from '../icons.js';
 import { formatBytes } from '../lib/format.js';
 import { prepareForUpload } from '../lib/svg-to-png.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
-import { assetLabel } from './panels/MediaPanel.js';
+import { assetLabel, useImageGenerationStatus } from './panels/MediaPanel.js';
+import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 
 /**
  * 「在這裡插圖」打開的小面板（D-020，P5-T016）。
  *
- * 兩條路，選定之後都走既有的 `placeMedia`：
- * - 挑一張已經上傳、還沒放進正文的圖。
+ * 三條路：
+ * - 挑一張已經上傳、還沒放進正文的圖（`placeMedia`）。
+ * - 請 AI 配一張（D-022，P5-T018）：選填一句想要的樣子，後端建一條使用者發起的配圖需求、同一趟開始
+ *   用 Codex 生圖，**不等畫完**就回來。面板隨即關掉，進度在右欄那張卡片與頂端長條；生好之後照一般的
+ *   「用這張」上傳並放回這個位置。Codex 不能用、或有 Agent 動作在跑時停用並講原因。
  * - 直接上傳新圖：先進 WordPress 媒體庫（`addMedia`），再放到這裡。上傳本身不會發布文章，
  *   但圖會留在媒體庫——這件事要在按下去之前講清楚。
  *
@@ -40,6 +44,7 @@ export function InsertImagePanel({
   onPlaced,
   onRefresh,
   onClose,
+  onAiStarted,
 }: {
   job: LoadedJob;
   /** 插在第幾個頂層區塊之後；-1＝最前面。跟 `placeMedia` 同一套索引。 */
@@ -51,22 +56,57 @@ export function InsertImagePanel({
   /** 只重新讀取、不關面板（上傳成功但沒放進去時，讓新圖出現在清單上）。 */
   onRefresh: () => Promise<void>;
   onClose: () => void;
+  /** 「請 AI 配一張」已經開始生圖：上層關掉面板、打開右欄圖片區並捲到那張卡片。 */
+  onAiStarted: (briefId: number) => Promise<void>;
 }): JSX.Element {
   const place = useAction();
   const pick = useAction();
+  const ai = useAction();
   const [pending, setPending] = useState<Pending | null>(null);
   const [alt, setAlt] = useState('');
+  const [note, setNote] = useState('');
+  const generation = useImageGenerationStatus(true);
   const choices = insertableMedia(job);
-  const busy = place.busy || pick.busy;
+  const busy = place.busy || pick.busy || ai.busy;
+  // 另一個 Agent 動作在跑（沿用配圖卡片 runningElsewhere 的規則）：同一篇一次只跑一個。
+  const agentRunning = job.agentRun?.status === 'running';
+  // 確定不能用（Codex 沒裝／沒登入、Agent 在跑）才把輸入格一起鎖住；還在確認時只鎖按鈕，
+  // 輸入格照樣可以打字、打開面板時焦點也能落在這裡。
+  const aiUnavailableReason =
+    generation !== null && !generation.available
+      ? (generation.reason ?? '現在不能生圖')
+      : agentRunning
+        ? '另一個 Agent 動作還在跑，跑完才能請 AI 配圖（同一篇一次只跑一個）。'
+        : null;
+  // 跟後端同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。
+  const noteLength = userNoteLength(note);
+  const noteTooLong = noteLength > NOTE_MAX;
+  const canAskAi = aiUnavailableReason === null && generation !== null && !busy && !noteTooLong;
+
+  const askAi = (): void => {
+    if (!canAskAi) return;
+    const contentHash = job.currentRevision?.contentHash;
+    void ai.run(async () => {
+      if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法指定位置');
+      const trimmed = note.trim();
+      const brief = await api.requestImageAtPosition(job.uuid, {
+        afterBlockIndex,
+        contentHash,
+        ...(trimmed === '' ? {} : { note: trimmed }),
+      });
+      await onAiStarted(brief.id);
+    });
+  };
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // 打開就把焦點移進來（第一張可選的圖，沒有就「選擇圖片」），Escape 才關得掉、鍵盤才接得下去。
+  // 打開就把焦點移進來（第一張可選的圖，沒有就「請 AI 配一張」那一格，再沒有就「選擇圖片」），Escape 才關得掉、鍵盤才接得下去。
   // 關掉時焦點回到「在這裡插圖」那顆按鈕，由 ProofView 負責。
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const first =
       root.querySelector<HTMLElement>('.insert-choice:not(:disabled)') ??
+      root.querySelector<HTMLElement>('.insert-ai-note:not(:disabled)') ??
       root.querySelector<HTMLElement>('input[type="file"]:not(:disabled)') ??
       root;
     first.focus({ preventScroll: true });
@@ -130,7 +170,7 @@ export function InsertImagePanel({
         </p>
       )}
 
-      <ErrorNote message={place.error ?? pick.error} />
+      <ErrorNote message={place.error ?? pick.error ?? ai.error} />
 
       {!pending && (
         <section className="insert-panel-section" aria-label="已上傳的圖">
@@ -165,6 +205,64 @@ export function InsertImagePanel({
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+      )}
+
+      {!pending && (
+        <section className="insert-panel-section" aria-label="請 AI 配一張">
+          <h3 className="insert-panel-label">請 AI 配一張</h3>
+          <div className="insert-ai-row">
+            <label className="sr-only" htmlFor={`insert-ai-note-${afterBlockIndex}`}>
+              想要什麼樣的圖（選填）
+            </label>
+            <input
+              id={`insert-ai-note-${afterBlockIndex}`}
+              className="input insert-ai-note"
+              value={note}
+              disabled={busy || aiUnavailableReason !== null}
+              aria-invalid={noteTooLong}
+              placeholder="想要什麼樣的圖？選填，例如：水彩風、黃昏的街角"
+              onChange={(event) => setNote(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  askAi();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-tiny"
+              disabled={!canAskAi}
+              title={
+                aiUnavailableReason ??
+                (generation === null ? '正在確認 Codex 能不能用…' : '用 Codex 的訂閱，讀這裡前後的段落配一張圖')
+              }
+              onClick={askAi}
+            >
+              {ai.busy ? <Spinner /> : <Icon name="sparkles" size={13} />}
+              請 AI 配一張
+            </button>
+          </div>
+          {aiUnavailableReason !== null ? (
+            <p className="field-hint insert-ai-blocked">
+              <Icon name="alert" size={13} />
+              {aiUnavailableReason}
+            </p>
+          ) : (
+            <p className="field-hint">
+              {noteLength > 0 && (
+                <span className={noteTooLong ? 'mono insert-ai-over' : 'mono'}>
+                  {noteLength}／{NOTE_MAX}
+                  {noteTooLong && '（太長了，刪短一點）'}　
+                </span>
+              )}
+              {generation === null && '正在確認 Codex 能不能用…　'}
+              Codex 讀這裡前後的段落自己決定畫面，一分鐘左右；面板可以關，進度看右欄「圖片」那張卡片。
+              生好先給你看，按「用這張」才會上傳到 WordPress 媒體庫並放到這裡。
+              {job.approval?.valid !== true && '放進正文會建立新版本。'}
+            </p>
           )}
         </section>
       )}

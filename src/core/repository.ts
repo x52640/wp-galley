@@ -167,6 +167,12 @@ export interface ImageBriefRow {
   readonly anchor: string | null;
   readonly created_at: string;
   readonly dismissed_at: string | null;
+  /** migration 008（P5-T018）：`agent`＝Agent 建議的；`user`＝使用者在文章上請 AI 配的。 */
+  readonly origin: 'agent' | 'user';
+  /** 圖放在錨點那段之後（`after`，舊資料都是）或之前（`before`，只給文章最前面用）。 */
+  readonly anchor_position: 'after' | 'before';
+  /** 使用者那句「想要什麼樣的圖」；沒寫或 Agent 的是 null。 */
+  readonly user_note: string | null;
 }
 
 export interface PublishEventRow {
@@ -887,6 +893,42 @@ export class Repository {
         input.placement,
         input.anchor,
       );
+  }
+
+  /**
+   * 使用者在文章上請 AI 配一張（P5-T018）。key 每次都是新的（`user-` 開頭、亂數），所以直接 INSERT，
+   * 不走 upsert；Agent 的建議碰不到它（Agent 給的 `user-` 開頭 key 在 service 裡就被改名了）。
+   */
+  insertUserImageBrief(input: {
+    jobId: number;
+    briefKey: string;
+    purpose: string;
+    prompt: string;
+    aspectRatio: string;
+    altText: string;
+    anchor: string | null;
+    anchorPosition: 'after' | 'before';
+    userNote: string | null;
+  }): ImageBriefRow {
+    const result = this.db
+      .prepare(`
+        INSERT INTO image_briefs
+          (job_id, agent_run_id, brief_key, purpose, prompt, aspect_ratio, alt_text, caption, placement, anchor,
+           origin, anchor_position, user_note)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, 'user', ?, ?)
+      `)
+      .run(
+        input.jobId,
+        input.briefKey,
+        input.purpose,
+        input.prompt,
+        input.aspectRatio,
+        input.altText,
+        input.anchor,
+        input.anchorPosition,
+        input.userNote,
+      );
+    return this.imageBriefById(Number(result.lastInsertRowid))!;
   }
 
   listImageBriefs(jobId: number): ImageBriefRow[] {

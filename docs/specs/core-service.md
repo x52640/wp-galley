@@ -38,8 +38,18 @@ interface CoreService {
   /** 生一張候選圖，只存本機。跟校稿共用「一次一個」；不是內容改動。 */
   generateBriefImage(uuid: string, briefId: number, input?: { timeoutMs?: number }): Promise<ImageCandidate>;
   imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string };
+  /**
+   * 在文章上「請 AI 配一張」（D-022，P5-T018）：先擋（稿件、Agent 在跑、Codex 沒裝或沒登入、contentHash、
+   * 位置、note 長度），再建一條 origin='user' 的配圖需求，同步開始 generateBriefImage，不等它畫完。
+   * `generation` 已由 service 接住，呼叫端不 await 也不會變成沒人接的 rejection。
+   */
+  requestImageAtPosition(
+    uuid: string,
+    input: { afterBlockIndex: number; contentHash: string; note?: string | null; timeoutMs?: number },
+  ): Promise<{ brief: ImageBrief; generation: Promise<ImageCandidate> }>;
   /** 「用這張」：先同步搶下候選圖，再走 addMediaWithOutcome 上傳。 */
-  useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadOutcome>;
+  /** `altText`：卡片上填的替代文字（P5-T018），沒給就用需求上的。使用者那條的檔名用文章 slug／標題（userImageFilename）。 */
+  useImageCandidate(uuid: string, candidateId: number, input?: { altText?: string }): Promise<MediaUploadOutcome>;
 
   // --- 媒體 ---
   /** 帶的 briefKey 對上封面那條、且沒有別的封面時，上傳後自動 setFeaturedMedia（D-017）。 */

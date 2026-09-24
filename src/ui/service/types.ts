@@ -26,6 +26,8 @@ import type {
   JobTemplate,
   AutoFeatureResult,
   AutoPlaceResult,
+  ImageAtPositionRequest,
+  ImageBrief,
   ImageCandidate,
   ImageGenerationStatus,
   MediaAsset,
@@ -203,8 +205,17 @@ export interface PublisherApi {
    * 候選圖**只在本機**，不上傳、不動內容。
    */
   generateBriefImage(uuid: string, briefId: number): Promise<ImageCandidate>;
-  /** 「用這張」：上傳到 WordPress 媒體庫。封面那條會自動設成精選。 */
-  useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadResult>;
+  /**
+   * 在文章上「請 AI 配一張」（P5-T018）：建一條使用者發起的配圖需求，同一趟開始用 Codex 生圖。
+   * **不等畫完**就回來（回的是那條需求）；進度看 `agentRun`（task `generate-image`、briefId），
+   * 生好的候選圖出現在那條需求上，之後照一般的「用這張／再生一張」。
+   */
+  requestImageAtPosition(uuid: string, input: ImageAtPositionRequest): Promise<ImageBrief>;
+  /**
+   * 「用這張」：上傳到 WordPress 媒體庫。封面那條會自動設成精選。`altText`：卡片上填的替代文字
+   * （P5-T018），不給就用需求上的。
+   */
+  useImageCandidate(uuid: string, candidateId: number, altText?: string): Promise<MediaUploadResult>;
 
   /** 帶封面那條的 briefKey 時，後端會在沒有別的封面時自動設精選，結果在 `autoFeature`。 */
   addMedia(uuid: string, input: AddMediaInput): Promise<MediaUploadResult>;

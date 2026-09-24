@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 import { api, describeError } from '../../service/client.js';
 import type {
   AutoFeatureResult,
@@ -53,10 +53,13 @@ export function MediaPanel({
   job,
   refresh,
   blocks,
+  focusBriefId = null,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
   blocks: Block[];
+  /** 剛在文章上「請 AI 配一張」建出來的那條（P5-T018）：捲到它，讓人看得到計時器。 */
+  focusBriefId?: number | null;
 }): JSX.Element {
   const [pending, setPending] = useState<Pending | null>(null);
   const [alt, setAlt] = useState('');
@@ -105,11 +108,18 @@ export function MediaPanel({
         <section className="briefs" aria-label="配圖需求">
           <h3 className="briefs-head">
             <Icon name="image-plus" size={14} />
-            Agent 建議的配圖（{job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張待處理）
+            配圖需求（{job.imageBriefs.filter((brief) => !brief.fulfilled).length} 張待處理）
           </h3>
           <ul className="brief-list">
             {job.imageBriefs.map((brief) => (
-              <BriefCard key={brief.id} job={job} brief={brief} refresh={refresh} generation={generation} />
+              <BriefCard
+                key={brief.id}
+                job={job}
+                brief={brief}
+                refresh={refresh}
+                generation={generation}
+                focused={brief.id === focusBriefId}
+              />
             ))}
           </ul>
         </section>
@@ -217,7 +227,7 @@ export function MediaPanel({
  * 能不能生圖。有配圖需求時才去問（後端要跑一次 `codex login status`）。
  * 問不到就當作不能生，原因照實講——不要讓按鈕看起來能按、按下去才失敗。
  */
-function useImageGenerationStatus(wanted: boolean): ImageGenerationStatus | null {
+export function useImageGenerationStatus(wanted: boolean): ImageGenerationStatus | null {
   const [status, setStatus] = useState<ImageGenerationStatus | null>(null);
   useEffect(() => {
     if (!wanted) return;
@@ -251,12 +261,22 @@ function BriefCard({
   brief,
   refresh,
   generation,
+  focused,
 }: {
   job: LoadedJob;
   brief: ImageBrief;
   refresh: () => Promise<void>;
   generation: ImageGenerationStatus | null;
+  focused: boolean;
 }): JSX.Element {
+  const rootRef = useRef<HTMLLIElement>(null);
+  // 從文章上「請 AI 配一張」過來的：捲到這張卡片（右欄可能很長，計時器要看得到）。
+  useEffect(() => {
+    if (focused) rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [focused]);
+  /** 使用者在文章上請 AI 配的（P5-T018）：沒有 AI 寫的描述，位置是使用者選的。 */
+  const mine = brief.origin === 'user';
+  const where = brief.anchor === null ? null : `「${brief.anchor}」那段${brief.anchorPosition === 'before' ? '之前' : '之後'}`;
   const [copied, setCopied] = useState(false);
   const [localStart, setLocalStart] = useState<string | undefined>(undefined);
   const action = useAction();
@@ -269,6 +289,12 @@ function BriefCard({
   const [placeNote, setPlaceNote] = useState<{ result: AutoPlaceResult; approvalLost: boolean } | null>(null);
   /** 使用者按了停止：那一趟的 POST 會以錯誤結束，但那不是錯誤。 */
   const [stopped, setStopped] = useState(false);
+  /**
+   * 「用這張」時一起送的替代文字（P5-T018）。使用者在文章上請 AI 配的那條沒有替代文字
+   * （那句話是風格，不是圖的描述），在候選圖底下請人寫一句；選填。
+   */
+  const [candidateAlt, setCandidateAlt] = useState('');
+  const askAlt = brief.altText === '';
 
   const run = job.agentRun;
   const runningHere = run?.status === 'running' && run.task === 'generate-image' && run.briefId === brief.id;
@@ -346,9 +372,16 @@ function BriefCard({
   };
 
   return (
-    <li className="brief" data-fulfilled={brief.fulfilled ? 'yes' : 'no'}>
+    <li ref={rootRef} className="brief" data-fulfilled={brief.fulfilled ? 'yes' : 'no'} data-focused={focused ? 'yes' : 'no'}>
       <div className="brief-head">
-        <span className="brief-key mono">{brief.key}</span>
+        {mine ? (
+          <span className="brief-mine">
+            <Icon name="sparkles" size={12} />
+            你請 AI 配的
+          </span>
+        ) : (
+          <span className="brief-key mono">{brief.key}</span>
+        )}
         {brief.isFeatured && (
           <span className="brief-cover">
             <Icon name="star" size={12} />
@@ -365,18 +398,27 @@ function BriefCard({
         )}
       </div>
 
-      <p className="brief-purpose">{brief.purpose}</p>
-      {!brief.isFeatured && brief.anchor !== null && (
+      {mine ? (
+        <p className="brief-purpose">
+          {brief.note !== null ? `想要：${brief.note}` : '沒有特別要求：Codex 讀前後段落自己決定畫面'}
+        </p>
+      ) : (
+        <p className="brief-purpose">{brief.purpose}</p>
+      )}
+      {!brief.isFeatured && where !== null && (
         <p className="brief-anchor">
           <span className="brief-alt-tag">放在</span>
-          <span>「{brief.anchor}」那段之後</span>
+          <span>{where}</span>
         </p>
       )}
-      <p className="brief-prompt">{brief.prompt}</p>
-      <p className="brief-alt">
-        <span className="brief-alt-tag">alt</span>
-        {brief.altText}
-      </p>
+      {/* 使用者那條的 prompt 是系統組的整份指令（含前後段落），很長；要看就按「複製 prompt」。 */}
+      {!mine && <p className="brief-prompt">{brief.prompt}</p>}
+      {brief.altText !== '' && (
+        <p className="brief-alt">
+          <span className="brief-alt-tag">alt</span>
+          {brief.altText}
+        </p>
+      )}
 
       {generating && (
         <div className="brief-generating" role="status" aria-live="polite">
@@ -424,12 +466,26 @@ function BriefCard({
               ? '按「用這張」會上傳到 WordPress 媒體庫；還沒有別的封面時會自動設成精選圖片。'
               : brief.fulfilled
                 ? '按「用這張」會上傳到 WordPress 媒體庫；原本那張在正文裡的話，新圖放到它的位置。'
-                : brief.anchor !== null
-                ? '按「用這張」會上傳到 WordPress 媒體庫，並自動放進正文上面那段之後（找不到那段就不放）。'
+                : where !== null
+                ? mine
+                  ? `按「用這張」會上傳到 WordPress 媒體庫，並放回你選的位置（${where}；找不到那段就不放）。不滿意就再生一張，不用它也沒關係。`
+                  : '按「用這張」會上傳到 WordPress 媒體庫，並自動放進正文上面那段之後（找不到那段就不放）。'
                 : '按「用這張」會上傳到 WordPress 媒體庫，位置要自己選。不滿意就再生一張，不用它也沒關係。'}
             {brief.isFeatured && job.approval?.valid === true && ' 換封面會讓目前的核准失效。'}
             {!brief.isFeatured && (brief.anchor !== null || brief.fulfilled) && job.approval?.valid === true && ' 放進正文會讓目前的核准失效。'}
           </p>
+          {askAlt && (
+            <Field label="替代文字（選填）" hint="用一句話講圖裡有什麼，給讀不到圖的人與搜尋引擎。跟著「用這張」一起送出。">
+              <input
+                className="input"
+                value={candidateAlt}
+                maxLength={300}
+                disabled={busy}
+                onChange={(event) => setCandidateAlt(event.target.value)}
+                placeholder="例如：雨後路口的積水映著紅燈"
+              />
+            </Field>
+          )}
           <div className="brief-actions">
             <button
               type="button"
@@ -440,7 +496,13 @@ function BriefCard({
                   setFeatureNote(null);
                   setPlaceNote(null);
                   const approved = job.approval?.valid === true;
-                  const { autoFeature, autoPlace } = await api.useImageCandidate(job.uuid, candidate.id);
+                  const typed = candidateAlt.trim();
+                  const { autoFeature, autoPlace } = await api.useImageCandidate(
+                    job.uuid,
+                    candidate.id,
+                    askAlt && typed !== '' ? typed : undefined,
+                  );
+                  setCandidateAlt('');
                   setFeatureNote(autoFeature);
                   if (autoPlace) {
                     setPlaceNote({ result: autoPlace, approvalLost: approved && changedBody(autoPlace) });
@@ -493,7 +555,7 @@ function BriefCard({
       )}
       {!brief.isFeatured && brief.anchor !== null && !brief.fulfilled && candidate === null && !generating && (
         <p className="field-hint">
-          上傳（或生圖後「用這張」）的圖會自動放進正文上面那段之後。
+          {mine ? `上傳（或生圖後「用這張」）的圖會放回你選的位置。` : '上傳（或生圖後「用這張」）的圖會自動放進正文上面那段之後。'}
           {job.approval?.valid === true && ' 放進正文會讓目前的核准失效。'}
         </p>
       )}
@@ -544,8 +606,9 @@ function BriefCard({
             accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
             onChange={upload}
             // 另一個 Agent 動作在跑時不給上傳：上傳完會自動放進正文或設精選，那會讓跑到一半的結果作廢
-            // （後端也會擋下自動放，這裡先不讓人按，跟「用這張」一樣）。
-            disabled={busy || runningElsewhere}
+            // （後端也會擋下自動放，這裡先不讓人按，跟「用這張」一樣）。這張卡片自己在生圖時也不給：
+            // 從文章上「請 AI 配一張」開始的那趟不經過這張卡片的 generate，busy 看不到它。
+            disabled={busy || runningElsewhere || generating}
           />
         </label>
 
@@ -557,7 +620,12 @@ function BriefCard({
             confirm({
               title: '不要這張配圖？',
               danger: true,
-              body: (
+              body: mine ? (
+                <p>
+                  這條會從清單上消失，還沒用的候選圖也不會再出現。已經上傳的圖片不受影響。
+                  要再配，在文章上那個位置按「在這裡插圖」→「請 AI 配一張」。
+                </p>
+              ) : (
                 <p>
                   「{brief.key}」這條建議會從清單上消失。已經上傳的圖片不受影響。
                   要再拿到建議只能重跑一次「一鍵配圖」。
@@ -584,8 +652,11 @@ function changedBody(result: AutoPlaceResult): boolean {
 }
 
 export function assetLabel(asset: MediaAsset): string {
-  if (asset.briefKey) return asset.briefKey;
+  // 使用者在文章上請 AI 配的（key `user-…`，P5-T018）：key 是亂數，給人看的是替代文字。
+  const mine = asset.briefKey?.startsWith('user-') === true;
+  if (asset.briefKey && !mine) return asset.briefKey;
   if (asset.altText) return asset.altText;
+  if (mine) return `AI 配的圖 #${asset.id}`;
   return `圖片 #${asset.id}`;
 }
 

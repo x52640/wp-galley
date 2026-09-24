@@ -1,5 +1,6 @@
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { hasWpImageClass } from '../../contract/media-marker.js';
+import { normalizeUserNote, USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 import type {
   AddMediaInput,
   AutoPlaceResult,
@@ -397,6 +398,9 @@ function diaryBriefs(): ImageBrief[] {
       createdAt: '2026-08-28T09:41:00Z',
       isFeatured: false,
       candidate: null,
+      origin: 'agent',
+      anchorPosition: 'after',
+      note: null,
     },
     {
       id: 602,
@@ -416,6 +420,9 @@ function diaryBriefs(): ImageBrief[] {
       createdAt: '2026-08-28T09:41:00Z',
       isFeatured: false,
       candidate: null,
+      origin: 'agent',
+      anchorPosition: 'after',
+      note: null,
     },
   ];
 }
@@ -443,6 +450,9 @@ function longformBriefs(): ImageBrief[] {
       createdAt: '2026-08-28T10:05:00Z',
       isFeatured: true,
       candidate: null,
+      origin: 'agent',
+      anchorPosition: 'after',
+      note: null,
     },
     {
       id: 612,
@@ -459,6 +469,9 @@ function longformBriefs(): ImageBrief[] {
       createdAt: '2026-08-28T10:05:00Z',
       isFeatured: false,
       candidate: null,
+      origin: 'agent',
+      anchorPosition: 'after',
+      note: null,
     },
   ];
 }
@@ -891,29 +904,98 @@ async function fixtureAutoPlace(job: FixtureJob, asset: MediaAsset, brief: Image
       afterBlockIndex: at,
     };
   }
+  const mine = brief.origin === 'user';
+  const side = brief.anchorPosition === 'before' ? '後面' : '前面';
   const why = (text: string): string =>
-    `找不到建議的位置，請自己放：${text}在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。`;
+    `找不到${mine ? '你選的' : '建議的'}位置，請自己放：${text}在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。`;
   const anchor = brief.anchor?.trim() ?? '';
-  if (anchor === '') return { outcome: 'not-found', message: why('AI 沒有指定要放在哪一段。'), afterBlockIndex: null };
+  if (anchor === '') {
+    return {
+      outcome: 'not-found',
+      message: why(mine ? '你選的位置前後都沒有文字可以對照。' : 'AI 沒有指定要放在哪一段。'),
+      afterBlockIndex: null,
+    };
+  }
+  const quoted = mine ? `你選的位置${side}那段「${anchor}」` : `AI 引用的「${anchor}」`;
   const hits = bodyBlocks(readBody(job)).flatMap((html, index) =>
     findIgnoringSpaces(blockText(html), anchor) === null ? [] : [index],
   );
   if (hits.length === 0) {
-    return {
-      outcome: 'not-found',
-      message: why(`AI 引用的「${anchor}」在目前的文章裡找不到（可能改過了）。`),
-      afterBlockIndex: null,
-    };
+    return { outcome: 'not-found', message: why(`${quoted}在目前的文章裡找不到（可能改過了）。`), afterBlockIndex: null };
   }
   if (hits.length > 1) {
     return {
       outcome: 'ambiguous',
-      message: why(`AI 引用的「${anchor}」在文章裡出現在 ${hits.length} 段，不確定是哪一段。`),
+      message: why(`${quoted}在文章裡出現在 ${hits.length} 段，不確定是哪一段。`),
       afterBlockIndex: null,
     };
   }
-  await fixtureApi.placeMedia(job.uuid, asset.id, hits[0]!);
-  return { outcome: 'placed', message: `已放進正文第 ${hits[0]! + 1} 段之後。`, afterBlockIndex: hits[0]! };
+  const at = brief.anchorPosition === 'before' ? hits[0]! - 1 : hits[0]!;
+  await fixtureApi.placeMedia(job.uuid, asset.id, at);
+  return {
+    outcome: 'placed',
+    message: at < 0 ? '已放進正文最前面。' : `已放進正文第 ${at + 1} 段之後。`,
+    afterBlockIndex: at,
+  };
+}
+
+/**
+ * 「請 AI 配一張」的錨點（跟後端 positionAnchor 同一套規則的簡化版）：前面那段有字就引用它、放在它之後；
+ * 沒有（文章最前面、前一塊是圖）就引用後面那段、放在它之前。取開頭 20 字起、整篇唯一為止。
+ */
+function fixtureAnchor(texts: string[], afterBlockIndex: number): { anchor: string | null; position: 'after' | 'before' } {
+  // 那一段開頭、整篇只對得上這一段的最短引用；沒字或整段都不唯一（例如被別段包住的「晚安。」）就是 null。
+  const pick = (index: number): string | null => {
+    const text = (texts[index] ?? '').trim();
+    if (text === '') return null;
+    const chars = Array.from(text);
+    const lengths: number[] = [];
+    for (let length = 20; length < chars.length; length += 10) lengths.push(length);
+    lengths.push(chars.length);
+    for (const length of lengths) {
+      const candidate = chars.slice(0, length).join('').trim();
+      if (texts.filter((other) => findIgnoringSpaces(other, candidate) !== null).length === 1) return candidate;
+    }
+    return null;
+  };
+  const before = afterBlockIndex >= 0 ? pick(afterBlockIndex) : null;
+  if (before !== null) return { anchor: before, position: 'after' };
+  const after = pick(afterBlockIndex + 1);
+  if (after !== null) return { anchor: after, position: 'before' };
+  return { anchor: null, position: 'after' };
+}
+
+/** 示範資料模式加 `&codex=off`：模擬 Codex 沒登入，練「請 AI 配一張」停用的樣子。 */
+function fixtureCodexOff(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('codex') === 'off';
+}
+
+/** 假的生圖：等幾秒（練計時器），沒被停止就給一張灰色的候選圖。跟後端一樣不上傳、不動內容。 */
+async function fixtureGenerate(job: FixtureJob, briefId: number): Promise<ImageCandidate> {
+  job.agentRun = {
+    status: 'running',
+    provider: 'codex',
+    task: 'generate-image',
+    briefId,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    errorMessage: null,
+  };
+  await delay(3200);
+  if (job.agentRun.status === 'cancelled') throw new Error('執行已取消');
+  const candidate: ImageCandidate = {
+    id: Math.floor(Math.random() * 90_000) + 10_000,
+    briefId,
+    url: GREY_PNG,
+    mimeType: 'image/png',
+    byteSize: 1_742_336,
+    width: 1672,
+    height: 941,
+    createdAt: new Date().toISOString(),
+  };
+  job.agentRun = { ...job.agentRun, status: 'succeeded', finishedAt: new Date().toISOString() };
+  job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? { ...row, candidate } : row));
+  return clone(candidate);
 }
 
 const delay = (ms = 220): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1137,6 +1219,13 @@ export const fixtureApi: PublisherApi = {
 
   async getImageGenerationStatus(): Promise<ImageGenerationStatus> {
     await delay(120);
+    if (fixtureCodexOff()) {
+      return {
+        available: false,
+        provider: 'codex',
+        reason: '只有 Codex 能生圖，但它現在不能用：尚未登入，請在終端機執行 `codex login`',
+      };
+    }
     return { available: true, provider: 'codex', reason: null };
   },
 
@@ -1149,44 +1238,60 @@ export const fixtureApi: PublisherApi = {
     if (job.agentRun?.status === 'running') throw new Error('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     const brief = job.imageBriefs.find((row) => row.id === briefId);
     if (!brief) throw new Error(`找不到這個工作項目的配圖需求 ${briefId}`);
-
-    const startedAt = new Date().toISOString();
-    job.agentRun = {
-      status: 'running',
-      provider: 'codex',
-      task: 'generate-image',
-      briefId,
-      startedAt,
-      finishedAt: null,
-      errorMessage: null,
-    };
-    await delay(3200);
-    if (job.agentRun.status === 'cancelled') throw new Error('執行已取消');
-
-    const candidate: ImageCandidate = {
-      id: Math.floor(Math.random() * 90_000) + 10_000,
-      briefId,
-      url: GREY_PNG,
-      mimeType: 'image/png',
-      byteSize: 1_742_336,
-      width: 1672,
-      height: 941,
-      createdAt: new Date().toISOString(),
-    };
-    job.agentRun = { ...job.agentRun, status: 'succeeded', finishedAt: new Date().toISOString() };
-    job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? { ...row, candidate } : row));
-    return clone(candidate);
+    return fixtureGenerate(job, briefId);
   },
 
-  async useImageCandidate(uuid: string, candidateId: number): Promise<MediaUploadResult> {
+  /**
+   * 「請 AI 配一張」（P5-T018）：建一條使用者發起的配圖需求，馬上回來，生圖在背後跑（跟後端一樣不等）。
+   */
+  async requestImageAtPosition(uuid, input): Promise<ImageBrief> {
+    await delay(200);
+    const job = mustGet(uuid);
+    if (fixtureCodexOff()) throw new Error('只有 Codex 能生圖，但它現在不能用：尚未登入，請在終端機執行 `codex login`');
+    if (job.agentRun?.status === 'running') throw new Error('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    if (input.contentHash !== job.currentRevision?.contentHash) {
+      throw new Error('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。');
+    }
+    const texts = bodyBlocks(readBody(job)).map((html) => blockText(html).replace(/\s+/g, ' ').trim());
+    if (input.afterBlockIndex < -1 || input.afterBlockIndex > texts.length - 1) {
+      throw new Error(`插入位置 ${input.afterBlockIndex} 超出範圍`);
+    }
+    const note = normalizeUserNote(input.note);
+    if (userNoteLength(note) > USER_NOTE_MAX) throw new Error(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
+    const { anchor, position } = fixtureAnchor(texts, input.afterBlockIndex);
+    const brief: ImageBrief = {
+      id: Math.floor(Math.random() * 90_000) + 10_000,
+      key: `user-${Math.random().toString(16).slice(2, 10)}`,
+      purpose: '你在文章上指定位置、請 AI 配的圖',
+      prompt: '（示範資料：後端會用前後段落與你的那句話組成生圖指令）',
+      aspectRatio: '16:9',
+      altText: '',
+      caption: null,
+      placement: null,
+      anchor,
+      fulfilled: false,
+      dismissed: false,
+      createdAt: new Date().toISOString(),
+      isFeatured: false,
+      candidate: null,
+      origin: 'user',
+      anchorPosition: position,
+      note,
+    };
+    job.imageBriefs = [...job.imageBriefs, brief];
+    void fixtureGenerate(job, brief.id).catch(() => undefined);
+    return clone(brief);
+  },
+
+  async useImageCandidate(uuid: string, candidateId: number, altText?: string): Promise<MediaUploadResult> {
     const job = mustGet(uuid);
     const brief = job.imageBriefs.find((row) => row.candidate?.id === candidateId);
     if (!brief || !brief.candidate) throw new Error(`找不到這個工作項目的候選圖 ${candidateId}`);
     const result = await fixtureApi.addMedia(uuid, {
       file: new Blob([new Uint8Array(brief.candidate.byteSize)], { type: brief.candidate.mimeType }),
-      filename: brief.key,
+      filename: brief.origin === 'user' ? `illustration-${brief.key.slice(5, 11)}` : brief.key,
       mimeType: brief.candidate.mimeType,
-      altText: brief.altText,
+      altText: altText?.trim() || brief.altText,
       briefKey: brief.key,
       ...(brief.caption === null ? {} : { caption: brief.caption }),
     });

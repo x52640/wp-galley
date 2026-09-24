@@ -63,6 +63,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   `PRAGMA foreign_keys = OFF` 無效，`DROP TABLE` 會觸發子表的 `ON DELETE SET NULL`——先把子表欄位抄到
   暫存表、重建後寫回去。先在記憶體 DB 與 `data/publisher.sqlite` 的**副本**上驗過再註冊：
   dev server 一重載就會套到真的 DB。
+- 單純 `ADD COLUMN` 的 migration 也一樣：`index.ts` 一存檔，`tsx watch` 就重載並套到真的 DB，之後 SQL 一個字都
+  不能再改（checksum）。所以**先寫測試、在副本上驗完、SQL 定稿，最後才註冊**（P5-T018 踩過：註冊當下就套上去了）。
 - Agent 各家怪癖的放置規則見 [agent-cli.md](agent-cli.md)。
 
 ## 本機資料

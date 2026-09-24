@@ -1,5 +1,7 @@
 import type {
   ApprovalResponse,
+  ImageAtPositionRequest,
+  ImageBriefResponse,
   ImageCandidateResponse,
   ImageGenerationStatus,
   JobResponse,
@@ -16,6 +18,7 @@ import type {
   SetupSaveResponse,
   SetupStatus,
   TermsResponse,
+  UseCandidateRequest,
 } from '../../contract/api.js';
 import type {
   AddMediaInput,
@@ -261,8 +264,14 @@ const httpApi: PublisherApi = {
     return body.candidate;
   },
 
-  async useImageCandidate(uuid: string, candidateId: number) {
-    const body = await sendJson<MediaResponse>(`/api/jobs/${uuid}/candidates/${candidateId}/use`, 'POST');
+  async requestImageAtPosition(uuid: string, input: ImageAtPositionRequest) {
+    const body = await sendJson<ImageBriefResponse>(`/api/jobs/${uuid}/briefs`, 'POST', input);
+    return body.brief;
+  },
+
+  async useImageCandidate(uuid: string, candidateId: number, altText?: string) {
+    const request: UseCandidateRequest | undefined = altText === undefined ? undefined : { altText };
+    const body = await sendJson<MediaResponse>(`/api/jobs/${uuid}/candidates/${candidateId}/use`, 'POST', request);
     return { media: body.media, autoFeature: body.autoFeature ?? null, autoPlace: body.autoPlace ?? null };
   },
 

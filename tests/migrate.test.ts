@@ -183,3 +183,33 @@ describe('007：內容類型多一個 article（P8-T001）', () => {
     }
   });
 });
+
+describe('008：使用者在文章上請 AI 配的圖（P5-T018）', () => {
+  it('舊的配圖需求補上預設值：origin=agent、anchor_position=after、user_note=NULL', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-publisher-m008-'));
+    const handle = openDatabase(join(dir, 'test.sqlite'));
+    try {
+      runMigrations(handle, migrations.slice(0, 7));
+      handle.exec(`
+        INSERT INTO jobs (id, uuid, state) VALUES (1, 'j', 'SOURCE');
+        INSERT INTO image_briefs (id, job_id, brief_key, purpose, prompt, aspect_ratio, alt_text, anchor)
+          VALUES (1, 1, 'rainy', 'p', 'q', '4:3', 'a', '路口');
+      `);
+      runMigrations(handle);
+      expect(listAppliedMigrations(handle).map((row) => row.id)).toContain('008');
+      expect(
+        handle.prepare('SELECT brief_key, anchor, origin, anchor_position, user_note FROM image_briefs').get(),
+      ).toEqual({ brief_key: 'rainy', anchor: '路口', origin: 'agent', anchor_position: 'after', user_note: null });
+
+      const insert = handle.prepare(
+        'INSERT INTO image_briefs (job_id, brief_key, purpose, prompt, aspect_ratio, alt_text, origin, anchor_position) VALUES (1, ?, ?, ?, ?, ?, ?, ?)',
+      );
+      expect(() => insert.run('user-a', 'p', 'q', '16:9', '', 'user', 'before')).not.toThrow();
+      expect(() => insert.run('user-b', 'p', 'q', '16:9', '', 'robot', 'after')).toThrow();
+      expect(() => insert.run('user-c', 'p', 'q', '16:9', '', 'user', 'inside')).toThrow();
+    } finally {
+      handle.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -33,10 +33,11 @@
 | `POST` | `/api/jobs/:uuid/review/accept-all` | 採用整份稿 | `ProposalRefRequest` → `ReviewResolveResult` |
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
 | `GET` | `/api/jobs/:uuid/compare` | 對照（逐段差異＋正文以外的欄位差異），`?against=proposal\|previous` | → `Comparison` |
+| `POST` | `/api/jobs/:uuid/briefs` | 在文章上「請 AI 配一張」：建使用者發起的配圖需求並開始生圖（**不等畫完**） | `ImageAtPositionRequest` → `ImageBriefResponse`（202） |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
 | `GET` | `/api/jobs/:uuid/candidates/:id` | 候選圖本體（`image/*`，`no-store`），只在本機 | → 圖檔 |
-| `POST` | `/api/jobs/:uuid/candidates/:id/use` | 「用這張」：上傳到 WordPress 媒體庫 | → `MediaResponse`（201，含 `autoFeature`、`autoPlace`） |
+| `POST` | `/api/jobs/:uuid/candidates/:id/use` | 「用這張」：上傳到 WordPress 媒體庫 | `UseCandidateRequest`（可省略）→ `MediaResponse`（201，含 `autoFeature`、`autoPlace`） |
 | `POST` | `/api/jobs/:uuid/media` | 上傳圖片（base64 JSON） | `MediaUploadRequest` → `MediaResponse`（201，含 `autoFeature`、`autoPlace`） |
 | `PUT` | `/api/jobs/:uuid/media/:id` | 換圖 | `MediaUploadRequest` → `MediaResponse` |
 | `DELETE` | `/api/jobs/:uuid/media/:id` | 移除 | → `RemovedResponse` |
@@ -97,6 +98,14 @@
   [review-proposals.md](review-proposals.md)「對照畫面長什麼樣」。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
   [review-proposals.md](review-proposals.md)。`blockIndex` 的語意見 review-proposals.md。
+- 在文章上請 AI 配一張（D-022，P5-T018）：`POST /briefs` 只收位置（`afterBlockIndex`，跟 `place` 同一套索引）、
+  畫面上那一版的 `contentHash` 與選填的 `note`（上限 200 字，摺疊空白後數 code point，跟畫面計數同一套）；body 是 `.strict()`，多送欄位（例如 `prompt`）回 400——
+  prompt 只能由後端組。建好就回 202，生圖在背後跑，進度看 `JobDetail.agentRun`（`generate-image`、`briefId`），
+  取消走 `DELETE /agent`。擋下來時不建需求：沒有能用的 Codex（沒裝或沒登入）503、另一個 Agent 動作在跑 502
+  （跟 `generate` 一樣是 `AGENT_ERROR`）、`contentHash` 不是目前這一版 409、位置超出範圍 400。
+  `candidates/:id/use` 可以帶 `{ altText }`（`.strict()`，上限 300）：卡片上填的替代文字，沒帶就用需求上的。
+  `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
+  規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
 - 設定精靈（P8-T002）：規則在 [security.md](security.md)「設定精靈寫入的秘密」與
   [wordpress-site.md](wordpress-site.md)「設定精靈」。
   - **任何回應都不含密碼**。密碼只出現在 `wordpress/test` 的請求裡；`wordpress` 只收 `testId`
