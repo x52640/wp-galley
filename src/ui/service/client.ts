@@ -1,5 +1,6 @@
 import type {
   ApprovalResponse,
+  AuthorsResponse,
   ImageAtPositionRequest,
   ImageBriefResponse,
   ImageCandidateResponse,
@@ -12,6 +13,7 @@ import type {
   PublishTargetSummary,
   RevisionResponse,
   RevisionsResponse,
+  SetDefaultAuthorRequest,
   SetupAgentsResponse,
   SetupConnectionResult,
   SetupDestinationsResponse,
@@ -342,6 +344,11 @@ const httpApi: PublisherApi = {
 
   createTerm: (taxonomy: string, name: string) =>
     sendJson<Term>('/api/wordpress/terms', 'POST', { taxonomy, name }),
+
+  listAuthors: () => getJson<AuthorsResponse>('/api/wordpress/authors'),
+
+  setDefaultAuthor: (authorId) =>
+    sendJson<AuthorsResponse>('/api/setup/default-author', 'POST', { authorId } satisfies SetDefaultAuthorRequest),
 
   async listTargets() {
     const body = await getJson<{ publishTargets?: PublishTargetSummary[] }>('/api/wordpress');

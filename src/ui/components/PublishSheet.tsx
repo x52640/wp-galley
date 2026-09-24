@@ -6,6 +6,7 @@ import { shortHash } from '../lib/format.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
 import { ErrorNote, Spinner, useAction } from './panels/shared.js';
+import { AuthorPicker, authorBlocker, useAuthors } from './AuthorPicker.js';
 
 /**
  * 發布面板（B2，決策 D-013）。從右邊滑出，左邊的文章切到「成品」。
@@ -50,6 +51,9 @@ export function PublishSheet({
   const [understood, setUnderstood] = useState(false);
   const [result, setResult] = useState<PublishResult | null>(null);
   const [step, setStep] = useState<string | null>(null);
+  // 作者是發布選項（P5-T024）：null＝用這個站的預設作者（後端決定），改了只影響這一篇。
+  const [authorId, setAuthorId] = useState<number | null>(null);
+  const authors = useAuthors();
   const prepare = useAction();
   const go = useAction();
 
@@ -73,7 +77,7 @@ export function PublishSheet({
     );
   }
 
-  if (job.published) return <Published job={job} result={result} />;
+  if (job.published) return <Published job={job} result={result} account={authors.data?.currentUser.name ?? null} />;
 
   const hash = job.currentRevision?.contentHash ?? null;
   const pending = job.review?.pendingCount ?? 0;
@@ -99,7 +103,7 @@ export function PublishSheet({
             : `目前狀態是「${job.state}」，這一步不能發布。`
           : status === 'publish' && !understood
             ? '要先勾上面的「我知道」。'
-            : null;
+            : authorBlocker(authors, authorId);
 
   const publish = (): void =>
     void go.run(async () => {
@@ -112,7 +116,9 @@ export function PublishSheet({
         setStep('送去 WordPress…');
         // confirm: true 就是「使用者剛剛在這個面板按了發布」。設了
         // requireSecondConfirmation 的目標，後端只認這個旗標。
-        setResult(await api.publish(job.uuid, { status, confirm: true }));
+        setResult(
+          await api.publish(job.uuid, { status, confirm: true, ...(authorId === null ? {} : { authorId }) }),
+        );
       } finally {
         setStep(null);
         await refresh();
@@ -123,7 +129,7 @@ export function PublishSheet({
     <div className="publish">
       <section className="p-section">
         <h3 className="p-label">
-          <span className="p-num">1</span>發到哪裡
+          <span className="p-num">1</span>發到哪裡・作者
         </h3>
         <div className="p-dest">
           <Icon name="globe" size={18} />
@@ -136,6 +142,7 @@ export function PublishSheet({
           </span>
         </div>
         <p className="field-hint">類型在建稿時就決定了，發布時不用再選。</p>
+        <AuthorPicker state={authors} chosen={authorId} onChoose={setAuthorId} />
       </section>
 
       {(pending > 0 || briefsLeft > 0 || needsCover || otherBlockers.length > 0) && (
@@ -311,7 +318,16 @@ export function PublishSheet({
   );
 }
 
-function Published({ job, result }: { job: LoadedJob; result: PublishResult | null }): JSX.Element {
+function Published({
+  job,
+  result,
+  account,
+}: {
+  job: LoadedJob;
+  result: PublishResult | null;
+  /** 發布台登入的帳號名稱；沒送作者時 WordPress 記成它，要寫出來（P5-T024 審查）。 */
+  account: string | null;
+}): JSX.Element {
   const published = job.published!;
   return (
     <div className="publish">
@@ -320,6 +336,11 @@ function Published({ job, result }: { job: LoadedJob; result: PublishResult | nu
         <span>
           已送到「{job.target.displayName}」，狀態是{published.status === 'publish' ? '公開' : '草稿'}
           <span className="mono"> #{published.wordpressId}</span>
+          {result === null
+            ? ''
+            : result.author
+              ? `，作者是 ${result.author.name}`
+              : `，作者是發布台的帳號${account ? `（${account}）` : ''}`}
         </span>
       </p>
       {result && result.unknownTerms.length > 0 && (

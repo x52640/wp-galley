@@ -2,7 +2,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type {
+  AuthorsResponse,
   PublishTargetSummary,
+  SetDefaultAuthorRequest,
   SetupAgentsResponse,
   SetupConnectionRequest,
   SetupConnectionResult,
@@ -29,7 +31,12 @@ import {
   type VerifiedCredentials,
 } from '../../wordpress/setup.js';
 import { fetchIdentity, fetchPostTypes, fetchTaxonomies } from '../../wordpress/site.js';
-import { loadPublishTargets, PublishTargetError, PublishTargetSchema } from '../../wordpress/targets.js';
+import {
+  loadPublishTargets,
+  PublishTargetError,
+  PublishTargetSchema,
+  writeDefaultAuthor,
+} from '../../wordpress/targets.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import type { SetupFiles } from '../app.js';
 import { applyTargets, applyWordPressConfig } from '../reconfigure.js';
@@ -63,6 +70,10 @@ const ConnectionBody = z
 const SaveWordPressBody = z
   .object({ testId: z.string().min(1).max(100), confirmSiteChange: z.boolean().optional() })
   .strict() satisfies z.ZodType<SetupSaveWordPressRequest>;
+
+const DefaultAuthorBody = z
+  .object({ authorId: z.number().int().positive().nullable() })
+  .strict() satisfies z.ZodType<SetDefaultAuthorRequest>;
 
 /** 讀取但有副作用的路由（打真的站、跑 CLI）也走 POST＋JSON，吃同一套守門。body 一律是空物件。 */
 const EmptyBody = z.object({}).strict();
@@ -314,6 +325,7 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
         backupsDir: files.backupsDir,
         rootDir: files.rootDir,
         hadFile: current.exists,
+        defaultAuthorId: current.defaultAuthorId,
       });
       applyTargets(app, await loadPublishTargets(files.siteConfigFile));
       return backup;
@@ -321,5 +333,28 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
 
     request.log.info({ include, replace: body.replace, backupFile }, '設定精靈：已寫入站台設定檔並當場套用');
     return { saved: true, restartRequired: false, backupFile, status: status(app) };
+  });
+
+  /**
+   * 發布面板的「設為預設」（P5-T024，D-024）：把這個站的預設作者寫進站台設定檔，當場生效。
+   * 跟精靈一樣是寫檔的路由，吃同一套守門（JSON＋同源、沒給檔案路徑就不能寫、發布或上傳在跑就等）。
+   * 先確認這個人在站上可以當作者的名單裡，不在就 400、檔案不動。
+   */
+  app.post('/api/setup/default-author', async (request): Promise<AuthorsResponse> => {
+    requireSetupWrite(request);
+    const body = parseBody(DefaultAuthorBody, request.body);
+    const files = requireFiles(app);
+    if (body.authorId !== null) {
+      const authorId = body.authorId;
+      await translate(() => app.ctx.core.assertAuthorChoosable(authorId));
+    }
+    await withReconfigure(app, () =>
+      translate(async () => {
+        await writeDefaultAuthor(files.siteConfigFile, body.authorId);
+        applyTargets(app, await loadPublishTargets(files.siteConfigFile));
+      }),
+    );
+    request.log.info({ authorId: body.authorId }, '已設定預設作者');
+    return translate(() => app.ctx.core.listAuthors());
   });
 }

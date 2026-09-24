@@ -4,7 +4,7 @@ import { probeSite, unconfiguredProbe } from '../../wordpress/site.js';
 import { fetchPostTypes, fetchTaxonomies } from '../../wordpress/site.js';
 import { taxonomyRestBaseOf, validateTargetsAgainstSite, type PublishTarget } from '../../wordpress/targets.js';
 import { listTerms, resolveTerms } from '../../wordpress/terms.js';
-import type { CreateTermRequest, PublishTargetSummary, Term, TermsResponse } from '../../contract/api.js';
+import type { AuthorsResponse, CreateTermRequest, PublishTargetSummary, Term, TermsResponse } from '../../contract/api.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import { AppError, errorCodes } from '../errors.js';
 import { mapCoreError } from './jobs.js';
@@ -57,6 +57,15 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
     const restBase = requireKnownTaxonomy(app, request.query.taxonomy);
     const client = requireClient(app);
     return guard(async () => ({ terms: await listTerms(client, restBase) }));
+  });
+
+  /**
+   * 可以當作者的人（P5-T024，D-024）。只有 id 與顯示名稱；所有回應送出前還會再過一次遮蔽器（app.ts）。
+   * 設預設作者走 `POST /api/setup/default-author`（寫檔的路由都在 setup 那一組）。
+   */
+  app.get('/api/wordpress/authors', async (): Promise<AuthorsResponse> => {
+    requireClient(app);
+    return guard(() => app.ctx.core.listAuthors());
   });
 
   /**

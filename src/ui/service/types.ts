@@ -14,6 +14,7 @@
 
 import type {
   AgentRunRequest,
+  AuthorsResponse,
   Approval,
   AgentRunResult,
   Comparison,
@@ -55,6 +56,8 @@ export type {
   AgentRunTask,
   AgentTask,
   Approval,
+  AuthorOption,
+  AuthorsResponse,
   AutoFeatureResult,
   AutoPlaceResult,
   CompareRow,
@@ -224,6 +227,14 @@ export interface PublisherApi {
   createTerm(taxonomy: string, name: string): Promise<Term>;
 
   listTargets(): Promise<PublishTargetSummary[]>;
+
+  /**
+   * 站上可以當作者的人與預設作者（P5-T024）。只有 id 與顯示名稱。
+   * 帳號只能用自己時 `canChooseOthers` 是 false，`notice` 講怎麼改。
+   */
+  listAuthors(): Promise<AuthorsResponse>;
+  /** 「設為預設」：寫進這個站的站台設定檔，之後每篇不用再選。null＝清掉。 */
+  setDefaultAuthor(authorId: number | null): Promise<AuthorsResponse>;
 
   // --- 首次設定精靈（P8-T002）---------------------------------------------
   /** 要不要跑精靈、目前設定了什麼。不含密碼。 */

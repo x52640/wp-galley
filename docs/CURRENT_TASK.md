@@ -4,14 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **58 檔 / 1030 測試**全綠（2026-09-24，P5-T023 之後）
+- `npm run verify`：typecheck 通過；Vitest **59 檔 / 1061 測試**全綠（2026-09-24，P5-T024 實作後、未 commit）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-無。D-023（Codex 全 repo 審查 16 條）已全部完成：P5-T019～P5-T023。使用者要求做完先停，等指示再開工。
+無。P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。D-023 審查 16 條已全部完成（P5-T019～P5-T023）。
 
 ## 上次停在哪（2026-09-24 收官）
 
@@ -28,7 +28,6 @@
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P5-T024](tasks/P5-T024-choose-author.md) | 發布時指定作者，預設是本人 | D-024，使用者實測發現；等使用者說開工 |
 | [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 

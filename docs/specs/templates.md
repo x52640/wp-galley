@@ -74,7 +74,13 @@ target 的 `postType` 叫「文章」（post）或「頁面」（page），同�
 | 檔案 | 內容 |
 | --- | --- |
 | `config/publish-targets.example.json` | 通用：`post`（文章，分類法 `category`）＋ `page`（頁面，沒有分類法），都用 `article-v1` |
-| `config/examples/remusplus.json` | 作者站台：`read-think`＋`diary`，跟作者本機那份逐字相同 |
+| `config/examples/remusplus.json` | 作者站台：`read-think`＋`diary`，跟作者本機那份的 targets 逐字相同（本機那份在設了預設作者之後多一個 `defaultAuthorId`） |
+| `config/examples/default-author.json` | 通用範例加上頂層 `defaultAuthorId`，示範預設作者怎麼寫（P5-T024） |
+
+**頂層 `defaultAuthorId`（選填，P5-T024，D-024）**：整個站共用的預設作者，值是 WordPress 使用者 id（正整數）。
+不寫＝發布不送 `author`，WordPress 把作者記成發布台登入的帳號（原本的行為）。通常不用手寫：發布面板按
+「設為預設」會寫進來（`writeDefaultAuthor`，只動這一個欄位，其他原樣保留）；設定精靈重寫這個檔時也會原樣帶著它。
+行為見 [state-machine.md](state-machine.md)「發布選項」、[wordpress-site.md](wordpress-site.md)「作者」。
 
 **找不到本機檔不是錯誤**：`loadPublishTargets` 回一個空的 registry，`setupRequired` 帶著
 「還沒有站台設定：先跑設定精靈，或複製 config/publish-targets.example.json」。伺服器照樣啟動，

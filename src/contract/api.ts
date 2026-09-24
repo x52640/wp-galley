@@ -473,6 +473,43 @@ export interface PublishResult {
   readonly unknownTerms: string[];
   /** 落到 wp:html 逃生門的區塊數，大於 0 值得提醒使用者。 */
   readonly fallbackBlocks: number;
+  /**
+   * 這次實際送出的作者（P5-T024）。null＝沒送 author，WordPress 用發布台登入的帳號
+   * （沒設預設作者、或帳號只能用自己）。
+   */
+  readonly author: AuthorOption | null;
+}
+
+// --- 作者（P5-T024，D-024）------------------------------------------------------
+
+/** 站上一個可以當作者的人。只有 id 與顯示名稱，不帶 email、帳號名稱等個資。 */
+export interface AuthorOption {
+  readonly id: number;
+  readonly name: string;
+}
+
+/** `GET /api/wordpress/authors`、`POST /api/setup/default-author` 的回應。 */
+export interface AuthorsResponse {
+  /** 可以選的人。`canChooseOthers` 是 false 時只有發布台自己的帳號。 */
+  readonly authors: AuthorOption[];
+  /** 發布台登入的帳號（沒送 author 時 WordPress 用它）。 */
+  readonly currentUser: AuthorOption;
+  /** 這個帳號能不能指定別人當作者（WordPress 的 edit_others_posts；Author 角色沒有）。 */
+  readonly canChooseOthers: boolean;
+  /** 站台設定檔的預設作者 id；沒設是 null。 */
+  readonly defaultAuthorId: number | null;
+  /**
+   * 預設作者在可選名單裡時是那個人；沒設、或不在名單（換過站）是 null。
+   * 帳號只能用自己時，預設是別人也是 null（發布時不會送）。
+   */
+  readonly defaultAuthor: AuthorOption | null;
+  /** 要讓使用者知道的事（只能用自己當作者、預設作者不在這個站…）；沒有是 null。 */
+  readonly notice: string | null;
+  /**
+   * 讀不到站上的作者清單（使用者端點被擋、限流、連不上）。這時 `authors` 只有發布台的帳號、不能選；
+   * 有預設作者或指定作者的發布會在送出前被擋下（不會靜默變成發布台的帳號），`notice` 講原因。
+   */
+  readonly listUnavailable: boolean;
 }
 
 // --- WordPress ----------------------------------------------------------------
@@ -602,6 +639,16 @@ export interface PublishRequest {
   readonly status: PublishStatus;
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
   readonly confirm?: boolean;
+  /**
+   * 這一篇的作者（P5-T024）。跟 status 一樣是**發布選項**，不是核准的內容：改它不讓核准失效。
+   * 不給就用站台設定的預設作者，都沒有就不送。後端驗證它在站上可當作者的名單裡。
+   */
+  readonly authorId?: number;
+}
+
+/** `POST /api/setup/default-author`：把這個站的預設作者寫進站台設定檔。null＝清掉。 */
+export interface SetDefaultAuthorRequest {
+  readonly authorId: number | null;
 }
 
 export interface CreateTermRequest {

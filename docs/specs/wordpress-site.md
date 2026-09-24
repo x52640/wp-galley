@@ -43,6 +43,42 @@
   省略空封面、空分類的話 WordPress 會留著舊的，線上跟核准的內容對不上。
   **建立新稿不變**：沒有就省略（新文章本來就沒有）。
 
+## 作者（P5-T024，D-024）
+
+程式：`src/wordpress/authors.ts`、`src/core/service.ts`（`listAuthors`、`resolvePublishAuthor`）、
+`src/ui/components/AuthorPicker.tsx`。發布選項的規則見 [state-machine.md](state-machine.md)「發布選項」。
+
+不送 `author` 時，WordPress 把作者記成**發布台登入的帳號**（作者站台是 AI 帳號 `ai_publisher`，不是使用者本人）。
+所以每個站可以設一個預設作者（站台設定檔頂層 `defaultAuthorId`，見 [templates.md](templates.md)「站台設定檔」），
+建稿與更新（`fixedObjectId`）都送 `author`。
+
+**誰可以當作者：`GET /wp/v2/users?who=authors&per_page=100&_fields=id,name`（view context）。**依據是 WordPress 核心
+`WP_REST_Users_Controller::get_items_permissions_check`（2026-09-24 對 wordpress-develop trunk 查證）：
+
+| 查法 | 需要的權限 | Editor 能不能用 |
+| --- | --- | --- |
+| `context=edit` | `list_users`（只有 Administrator） | ❌ 403 `rest_forbidden_context` |
+| `roles=…` | `list_users` | ❌ 403 `rest_user_cannot_view` |
+| `capabilities[]=edit_posts` | `list_users` | ❌ 403 `rest_user_cannot_view` |
+| `who=authors` | 能編輯任一個支援作者的內容類型（`edit_posts`） | ✅ |
+
+- `who=authors` 在 `WP_User_Query` 層從 5.9 起標成棄用（建議改 `capability`），但 **REST 的 `who` 參數還在、行為不變**，
+  區塊編輯器的作者下拉選單用的就是它；改用 `capabilities[]` 反而 Editor 用不了。回的是 `user_level != 0` 的人（投稿者以上）。
+- 帶 `who=authors` 時不套「只列發過文的人」（`has_published_posts`），還沒發過文的使用者本人也列得到。
+- 回應只留 `id`、`name`（zod 丟掉其他欄位；`_fields` 讓站台本來就少回）。email 在 view context 本來就不會出現。
+- **指定別人當作者要 `edit_others_posts`**（`create_item_permissions_check`／`update_item_permissions_check`，
+  否則 403 `rest_cannot_edit_others`）。Author 角色沒有。發布台看 `users/me?context=edit` 的 `capabilities`
+  （本人可以用 context=edit 看自己）。**只有 capabilities 在、而且確定沒有 edit_others_posts** 才當成「只能用自己」：
+  不列別人，清單只有自己，面板說「這個帳號只能用自己當作者，要改作者請在 WordPress 把它升成 Editor」。
+  capabilities 被外掛拿掉時不用角色猜，照樣去列清單；真的不行，WordPress 寫入時會 403（零寫入、會報錯，不靜默）。
+- **讀不到清單**（401／403——常見是安全外掛擋 `/wp/v2/users` 或限流——、伺服器錯誤、連不上）**不能**當成只能用自己：
+  那會不送 author，作者悄悄變成發布台的帳號（P5-T024 審查）。有要送的作者（指定或預設）時發布前拒絕、零寫入、記
+  `publish`／`rejected` 事件：「讀不到站上的作者清單，這次沒有發布，免得作者被記成發布台的帳號；稍後再試」。
+  沒有要送的作者時根本不問站台，照舊發。面板收到 `listUnavailable: true`，有預設作者就先擋住發布按鈕。
+- 內容類型不支援 `author`（`supports` 沒有 author）時，WordPress 的 schema 沒有 author 欄位，送了會被忽略、不報錯。
+  作者站台的 `read-think`／`diary` 支不支援 author **沒有實測過**。
+- 遠端快照多比一個 `author`（更新會送它，後台有人改了作者就算遠端被改過）；P5-T024 之前存的快照沒有這個欄位，不比。
+
 ## 設定精靈（P8-T002，D-016）
 
 程式：`src/wordpress/setup.ts`、`src/server/routes/setup.ts`、`src/ui/components/SetupWizard.tsx`。

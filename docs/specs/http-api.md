@@ -60,6 +60,8 @@
 | `GET` | `/api/wordpress` | 站台探查與發布目標；檢查的內容類型＝設定檔裡 target 的 `postType`（沒有站台設定時 `publishTargets` 是空陣列） | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
 | `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` 帶分類法 **slug**（跟 `taxonomy` 欄位一樣）；後端換成 REST 名稱去查（`category` → `/wp/v2/categories`） | → `TermsResponse` |
 | `POST` | `/api/wordpress/terms` | 建立分類項目（target 須 `allowCreateTerms`） | `CreateTermRequest` → `Term` |
+| `GET` | `/api/wordpress/authors` | 站上可以當作者的人、發布台的帳號、預設作者（P5-T024） | → `AuthorsResponse` |
+| `POST` | `/api/setup/default-author` | 設這個站的預設作者（寫站台設定檔，當場生效）；`null` 清掉 | `SetDefaultAuthorRequest` → `AuthorsResponse` |
 | `GET` | `/api/image-generation` | 能不能生圖（只有 Codex 能） | → `ImageGenerationStatus` |
 
 | `GET` | `/api/setup` | 設定精靈：要不要跑、目前設定了什麼（不含密碼） | → `SetupStatus` |
@@ -120,6 +122,14 @@
   `candidates/:id/use` 可以帶 `{ altText }`（`.strict()`，上限 300）：卡片上填的替代文字，沒帶就用需求上的。
   `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
   規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
+- 作者（P5-T024，D-024）：`PublishRequest.authorId`（選填正整數）是發布選項，不影響核准；不在站上可當作者的名單
+  回 409 `PUBLISH_BLOCKED`，一個寫入都不送。`PublishResult.author` 是實際送出的作者（沒送是 null）。
+  `GET /api/wordpress/authors` 只回 `id`、`name`；帳號只能用自己時 `authors` 只有自己、`canChooseOthers: false`、`notice` 講怎麼改。
+  讀不到站上的作者清單時仍回 200，`listUnavailable: true`、`notice` 講原因與「有預設作者的話發布會被擋」；這時
+  `POST /api/setup/default-author` 回 400。
+  `POST /api/setup/default-author` 跟設定精靈的寫入路由同一套守門（JSON＋同源，不是 JSON 回 415；沒給檔案路徑 503；
+  發布或上傳在跑 409）；id 不在名單 400、檔案不動。規則見 [state-machine.md](state-machine.md)「發布選項」、
+  [wordpress-site.md](wordpress-site.md)「作者」。都是新增的。
 - 設定精靈（P8-T002）：規則在 [security.md](security.md)「設定精靈寫入的秘密」與
   [wordpress-site.md](wordpress-site.md)「設定精靈」。
   - **任何回應都不含密碼**。密碼只出現在 `wordpress/test` 的請求裡；`wordpress` 只收 `testId`

@@ -719,6 +719,8 @@ export interface ExistingSiteConfig {
   readonly exists: boolean;
   /** 檔案裡的原樣（沒補預設值），寫回去時不會多出使用者沒寫過的欄位。 */
   readonly rawTargets: Record<string, unknown>[];
+  /** 站台共用的預設作者（P5-T024）。精靈重寫檔案時要原樣帶回去，不然會被洗掉。 */
+  readonly defaultAuthorId: number | null;
 }
 
 /** 讀現在磁碟上的站台設定檔。壞掉的檔不碰，丟錯讓使用者先處理。 */
@@ -727,7 +729,7 @@ export async function readSiteConfig(file: string): Promise<ExistingSiteConfig> 
   try {
     text = await readFile(file, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return { exists: false, rawTargets: [] };
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return { exists: false, rawTargets: [], defaultAuthorId: null };
     throw error;
   }
   let parsed: unknown;
@@ -743,7 +745,8 @@ export async function readSiteConfig(file: string): Promise<ExistingSiteConfig> 
       '現有的 config/publish-targets.json 格式不對。精靈不會覆寫壞掉的檔：先修好或把它移走，再回來設定。',
     );
   }
-  return { exists: true, rawTargets: (parsed as { targets: Record<string, unknown>[] }).targets };
+  const config = parsed as { targets: Record<string, unknown>[]; defaultAuthorId?: number };
+  return { exists: true, rawTargets: config.targets, defaultAuthorId: config.defaultAuthorId ?? null };
 }
 
 /**
@@ -779,9 +782,17 @@ export function mergeSiteTargets(
 export async function writeSiteConfig(
   file: string,
   targets: readonly Record<string, unknown>[],
-  options: { backupsDir: string; rootDir: string; hadFile: boolean; now?: Date },
+  options: {
+    backupsDir: string;
+    rootDir: string;
+    hadFile: boolean;
+    now?: Date;
+    /** 檔案裡原本的預設作者（readSiteConfig 讀到的）。null／不給＝不寫這個欄位。 */
+    defaultAuthorId?: number | null;
+  },
 ): Promise<string | null> {
-  const content = { targets };
+  const defaultAuthorId = options.defaultAuthorId ?? null;
+  const content = defaultAuthorId === null ? { targets } : { defaultAuthorId, targets };
   const check = PublishTargetsFileSchema.safeParse(content);
   if (!check.success) {
     const issues = check.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`);

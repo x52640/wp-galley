@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
+import { writeFileAtomic } from '../config/env-file.js';
 import { ContentTypeSchema } from '../templates/types.js';
 
 /**
@@ -98,8 +99,16 @@ export function taxonomyRestBaseOf(target: PublishTarget): string | null {
   return target.taxonomyRestBase ?? target.taxonomy;
 }
 
+/**
+ * 站台設定檔。除了 targets，還有**整個站共用**的設定：
+ * - `defaultAuthorId`（選填，P5-T024，D-024）：發布時預設送的 WordPress 使用者 id。不寫＝不送 author，
+ *   WordPress 用發布台登入的帳號當作者（原本的行為）。在發布面板按「設為預設」會寫進來。
+ */
 export const PublishTargetsFileSchema = z
-  .object({ targets: z.array(PublishTargetSchema).min(1) })
+  .object({
+    defaultAuthorId: z.number().int().positive().optional(),
+    targets: z.array(PublishTargetSchema).min(1),
+  })
   .strict()
   .superRefine((file, ctx) => {
     const seen = new Set<string>();
@@ -128,14 +137,17 @@ export interface PublishTargetRegistry {
    * 這時 list() 是空的；伺服器照樣啟動（健康檢查、診斷都要能用），只是建不了稿。
    */
   readonly setupRequired?: string;
+  /** 站台設定檔的 `defaultAuthorId`；沒設是 null（不送 author）。 */
+  readonly defaultAuthorId: number | null;
 }
 
 export function createTargetRegistry(
   targets: readonly PublishTarget[],
-  options: { setupRequired?: string } = {},
+  options: { setupRequired?: string; defaultAuthorId?: number | null } = {},
 ): PublishTargetRegistry {
   const byKey = new Map(targets.map((target) => [target.key, target]));
   return {
+    defaultAuthorId: options.defaultAuthorId ?? null,
     list: () => [...targets],
     has: (key) => byKey.has(key),
     get: (key) => {
@@ -183,7 +195,34 @@ export async function loadPublishTargets(file: string): Promise<PublishTargetReg
     throw new PublishTargetError(`${file} 設定不合法：\n- ${issues.join('\n- ')}`);
   }
 
-  return createTargetRegistry(result.data.targets);
+  return createTargetRegistry(result.data.targets, { defaultAuthorId: result.data.defaultAuthorId ?? null });
+}
+
+/**
+ * 只改站台設定檔的 `defaultAuthorId`（發布面板的「設為預設」）。null＝拿掉這個欄位。
+ *
+ * 其他內容原樣保留（照檔案裡寫的，不補預設值）；寫之前用正式 schema 驗一次，壞掉的檔不碰。
+ * 「這個 id 在不在站上可當作者的名單」由呼叫端先驗，這裡只管檔案。
+ */
+export async function writeDefaultAuthor(file: string, authorId: number | null): Promise<void> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+      throw new PublishTargetError(SITE_CONFIG_MISSING_MESSAGE);
+    }
+    throw new PublishTargetError(`${file} 讀不到或不是合法 JSON，沒有改動：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!PublishTargetsFileSchema.safeParse(parsed).success) {
+    throw new PublishTargetError(`${file} 格式不對，沒有改動。先修好站台設定檔再設預設作者。`);
+  }
+  // 欄位放在 targets 前面，打開檔案第一眼就看得到。
+  const { defaultAuthorId: _old, ...rest } = parsed as Record<string, unknown>;
+  const next = authorId === null ? rest : { defaultAuthorId: authorId, ...rest };
+  const check = PublishTargetsFileSchema.safeParse(next);
+  if (!check.success) throw new PublishTargetError('預設作者的編號不合法');
+  await writeFileAtomic(file, `${JSON.stringify(next, null, 2)}\n`, 0o644);
 }
 
 /**

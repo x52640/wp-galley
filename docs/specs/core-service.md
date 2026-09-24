@@ -94,7 +94,17 @@ interface CoreService {
    * 寫入欄位與遠端快照一律用分類法的 REST 名稱（`taxonomyRestBaseOf(target)`）。
    */
   /** 前置檢查與 PUBLISHING 期間的核准再確認見 state-machine.md；更新既有文章送哪些欄位見 wordpress-site.md。 */
+  /**
+   * `input.authorId`（P5-T024）是發布選項，不影響核准；沒給用站台設定的預設作者，都沒有就不送。
+   * 規則見 state-machine.md「發布選項」。
+   */
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
+
+  // --- 作者（P5-T024，D-024；站台規則見 wordpress-site.md「作者」） ---
+  /** 站上可以當作者的人（只有 id、名字）、發布台的帳號、預設作者與要提醒的事。 */
+  listAuthors(): Promise<AuthorsResponse>;
+  /** 設預設作者前的檢查：不在可選名單丟 InvalidInputError。寫檔在路由（writeDefaultAuthor）。 */
+  assertAuthorChoosable(authorId: number): Promise<void>;
 }
 ```
 

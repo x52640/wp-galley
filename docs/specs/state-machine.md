@@ -96,6 +96,25 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
 落在 `FAILED` 是因為 PUBLISHING 只能到 `PUBLISHED` 或 `FAILED`，而 `PUBLISHED` 代表照核准發出去了，
 這裡不是。跟其他發布途中出錯一樣，那篇草稿不記進 `wordpress_objects`（錯誤訊息與事件裡有編號）。
 
+## 發布選項（不算核准的內容）
+
+發布請求裡的 `status`（草稿／公開）與 `authorId`（作者，P5-T024，D-024；2026-09-24 使用者同意）是**發布選項**：
+不進 `content_hash`、改了不讓核准失效，同一張核准可以換著試。
+
+作者怎麼決定（`resolvePublishAuthor`，在第一次前置檢查之後、讀遠端之前）：
+
+1. 請求有 `authorId` 用它；沒有用站台設定檔的 `defaultAuthorId`；都沒有就**不送 author、也不問站台**（原本的行為）。
+2. 要送的話問站台誰可以當作者（規則見 [wordpress-site.md](wordpress-site.md)「作者」）：
+   - 在名單裡 → 送。
+   - 帳號能指定別人、但這個 id 不在名單 → 拒絕（`publish`／`rejected` 事件、`PUBLISH_BLOCKED`），零寫入，工作維持 `APPROVED`。
+     預設作者不在名單（換過站）也拒絕，請使用者重選——不默默改用發布台的帳號。
+   - 帳號只能用自己（capabilities 確定沒有 edit_others_posts）：請求指定別人 → 拒絕；只是預設作者是別人 → 不送（反正只能是自己，面板已經講了）。
+   - **讀不到清單**（被擋、限流、連不上）→ 拒絕（`rejected` 事件），零寫入，工作維持 `APPROVED`。不當成「只能用自己」，
+     否則作者會靜默變成發布台的帳號。
+   - 等清單的期間核准被撤銷：後面的第二次前置檢查與寫入前的核准確認會擋下，零寫入。
+3. 完成畫面寫出作者；沒送 author 時寫「作者是發布台的帳號（名字）」。
+4. 實際送出的作者 id 記在 `publish` 的 `started` 與 `succeeded` 事件（`authorId`，沒送是 null），也回在 `PublishResult.author`。
+
 送出時只送允許變更的欄位，不順便覆蓋未知的 meta；建立或更新後記錄遠端快照
 （hash、modified time、內容），供下一次更新比對。更新時送哪些欄位見
 [wordpress-site.md](wordpress-site.md)「更新既有文章」。

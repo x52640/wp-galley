@@ -11,6 +11,8 @@ import type {
   Approval as ApprovalView,
   AutoFeatureResult,
   AutoPlaceResult,
+  AuthorOption,
+  AuthorsResponse,
   Comparison as ComparisonView,
   ImageBrief as ImageBriefView,
   ImageCandidate,
@@ -108,6 +110,14 @@ import { sha256Of, uploadMedia } from '../media/upload.js';
 import { inspectImage, MediaUploadError } from '../media/validate.js';
 import type { WordPressClient } from '../wordpress/client.js';
 import { toBlockMarkup } from '../wordpress/blocks.js';
+import { fetchIdentity } from '../wordpress/site.js';
+import {
+  AUTHOR_LIST_UNAVAILABLE_MESSAGE,
+  AuthorListUnavailableError,
+  fetchAuthorChoices,
+  ONLY_SELF_NOTICE,
+  type AuthorChoices,
+} from '../wordpress/authors.js';
 import { BlockDefaultsSchema } from '../wordpress/block-types.js';
 import {
   assertUnchanged,
@@ -237,6 +247,11 @@ export interface PublishInput {
   readonly status: 'draft' | 'publish';
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
   readonly confirm?: boolean | undefined;
+  /**
+   * 這一篇的作者（P5-T024）。發布選項，不進 content_hash、不影響核准。
+   * 不給用站台設定的預設作者；都沒有就不送 author。
+   */
+  readonly authorId?: number | undefined;
   /** 只有後端知道呼叫的是誰；HTTP 路由寫死 'ui'，MCP 另給。 */
   readonly actor?: EventActor | undefined;
 }
@@ -2673,6 +2688,9 @@ export class CoreService {
     // 檢查 1–4。全部是讀取，所以待會兒可以原封不動重跑一次。
     const planned = this.preflightPublish(uuid, target, input, actor);
 
+    // 4c. 作者（P5-T024）：發布選項，不是核准的內容。要送的話先確認站上允許，不行就在寫入前拒絕。
+    const author = await this.resolvePublishAuthor(planned.job, actor, client, input.authorId);
+
     // 5. 更新既有內容時，遠端不能在我們載入之後被改過。
     let expect: RemoteSnapshot | null = null;
     if (!planned.creating) {
@@ -2715,7 +2733,7 @@ export class CoreService {
       actor,
       eventType: 'publish',
       status: 'started',
-      detail: this.scrub({ status: input.status, targetKey: target.key, creating }),
+      detail: this.scrub({ status: input.status, targetKey: target.key, creating, authorId: author?.id ?? null }),
     });
 
     try {
@@ -2744,6 +2762,8 @@ export class CoreService {
         ...(termsField !== null && (terms.ids.length > 0 || (!creating && terms.unknown.length === 0))
           ? { terms: { [termsField]: terms.ids } }
           : {}),
+        // 建稿與更新（fixedObjectId）都送；沒有要送的作者就省略，WordPress 維持原本的作者。
+        ...(author === null ? {} : { authorId: author.id }),
       };
 
       // 查分類、讀遠端都要等網路，這段期間核准可能被撤銷（審查 #2）。每一個寫入請求送出前
@@ -2797,7 +2817,12 @@ export class CoreService {
         actor,
         eventType: 'publish',
         status: 'succeeded',
-        detail: this.scrub({ wordpressId: post.id, status: post.status, unknownTerms: terms.unknown }),
+        detail: this.scrub({
+          wordpressId: post.id,
+          status: post.status,
+          unknownTerms: terms.unknown,
+          authorId: author?.id ?? null,
+        }),
       });
 
       return {
@@ -2807,6 +2832,7 @@ export class CoreService {
         created: creating,
         unknownTerms: [...terms.unknown],
         fallbackBlocks: conversion.fallbackCount,
+        author,
       };
     } catch (error) {
       this.repo.updateJobState(job.id, 'FAILED');
@@ -2964,6 +2990,113 @@ export class CoreService {
   }
 
   /** 稽核紀錄。UI 的「這一步」面板與日後的除錯都靠它。 */
+  // --- 作者（P5-T024，D-024）-------------------------------------------------
+
+  /**
+   * 站上可以當作者的人、發布台自己的帳號、預設作者。發布面板靠它顯示「作者：某某」。
+   * 只有 id 與顯示名稱。規則見 wordpress/authors.ts。
+   */
+  async listAuthors(): Promise<AuthorsResponse> {
+    const client = this.requireWordPress();
+    try {
+      const choices = await this.trackWordPress(() => fetchAuthorChoices(client));
+      return this.describeAuthors(choices);
+    } catch (error) {
+      if (!(error instanceof AuthorListUnavailableError)) throw error;
+      // 面板照樣要畫得出來；但講清楚：有預設作者的發布會被擋，不會靜默改用發布台的帳號。
+      const me = await this.trackWordPress(() => fetchIdentity(client)).catch(() => null);
+      const currentUser = me === null ? { id: 0, name: '發布台的帳號' } : { id: me.user.id, name: me.user.name };
+      return {
+        authors: me === null ? [] : [currentUser],
+        currentUser,
+        canChooseOthers: false,
+        defaultAuthorId: this.targets.defaultAuthorId,
+        defaultAuthor: null,
+        notice:
+          `${error.message}。` +
+          (this.targets.defaultAuthorId === null
+            ? '現在不能選作者；沒選的話作者會是發布台的帳號。'
+            : '有設預設作者，所以現在發布會被擋下（免得作者被記成發布台的帳號），稍後再試。'),
+        listUnavailable: true,
+      };
+    }
+  }
+
+  /** 設預設作者之前的檢查：這個人在不在可選名單裡。不在就丟 InvalidInputError（400）。 */
+  async assertAuthorChoosable(authorId: number): Promise<void> {
+    const client = this.requireWordPress();
+    const choices = await this.trackWordPress(() => fetchAuthorChoices(client)).catch((error: unknown) => {
+      if (error instanceof AuthorListUnavailableError) throw new InvalidInputError(`${error.message}。稍後再試。`);
+      throw error;
+    });
+    if (choices.authors.some((author) => author.id === authorId)) return;
+    throw new InvalidInputError(
+      choices.canChooseOthers
+        ? `第 ${authorId} 號使用者不在這個站可以當作者的名單裡`
+        : (choices.notice ?? ONLY_SELF_NOTICE),
+    );
+  }
+
+  private describeAuthors(choices: AuthorChoices): AuthorsResponse {
+    const defaultAuthorId = this.targets.defaultAuthorId;
+    const defaultAuthor =
+      defaultAuthorId === null ? null : (choices.authors.find((author) => author.id === defaultAuthorId) ?? null);
+    const stale =
+      defaultAuthorId !== null && defaultAuthor === null && choices.canChooseOthers
+        ? `預設作者（第 ${defaultAuthorId} 號使用者）不在這個站可以當作者的名單裡，可能是換過站。請重新選一個並設為預設。`
+        : null;
+    return {
+      authors: choices.authors.map((author) => ({ id: author.id, name: author.name })),
+      currentUser: { id: choices.currentUser.id, name: choices.currentUser.name },
+      canChooseOthers: choices.canChooseOthers,
+      defaultAuthorId,
+      defaultAuthor,
+      notice: choices.notice ?? stale,
+      listUnavailable: false,
+    };
+  }
+
+  /**
+   * 這次發布要送哪個作者；null＝不送。沒指定也沒預設時**不問站台**，行為跟以前一模一樣。
+   *
+   * - 指定的（或預設的）人不在可選名單：拒絕，零寫入。預設作者不在名單不默默改用 AI 帳號——
+   *   那正是 D-024 要修的問題。
+   * - 帳號只能用自己（Author 角色）：指定別人就拒絕；預設是別人則不送（反正只能是自己，
+   *   面板也已經講了），不讓使用者卡住。
+   */
+  private async resolvePublishAuthor(
+    job: JobRow,
+    actor: EventActor,
+    client: WordPressClient,
+    requested: number | undefined,
+  ): Promise<AuthorOption | null> {
+    const wanted = requested ?? this.targets.defaultAuthorId;
+    if (wanted === null) return null;
+
+    let choices: AuthorChoices;
+    try {
+      choices = await fetchAuthorChoices(client);
+    } catch (error) {
+      // 讀不到清單（被擋、限流、連不上）就不發：不送 author 會讓作者悄悄變成發布台的帳號。
+      const why = error instanceof Error ? error.message : String(error);
+      throw this.rejectPublish(job, actor, `${AUTHOR_LIST_UNAVAILABLE_MESSAGE}（${why}）`);
+    }
+    const found = choices.authors.find((author) => author.id === wanted) ?? null;
+    if (found !== null) return { id: found.id, name: found.name };
+
+    if (!choices.canChooseOthers) {
+      if (requested === undefined) return null;
+      throw this.rejectPublish(job, actor, choices.notice ?? ONLY_SELF_NOTICE);
+    }
+    throw this.rejectPublish(
+      job,
+      actor,
+      requested === undefined
+        ? `預設作者（第 ${wanted} 號使用者）不在這個站可以當作者的名單裡，可能是換過站。請在發布面板重新選作者並設為預設。這次沒有送出任何內容。`
+        : `指定的作者（第 ${wanted} 號使用者）不在這個站可以當作者的名單裡。這次沒有送出任何內容。`,
+    );
+  }
+
   listEvents(uuid: string, limit = 50): {
     id: number;
     eventType: string;

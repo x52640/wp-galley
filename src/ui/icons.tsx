@@ -169,6 +169,12 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M2 12h20" />
     </>
   ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="5" />
+      <path d="M20 21a8 8 0 0 0-16 0" />
+    </>
+  ),
   'chevrons-up-down': (
     <>
       <path d="m7 15 5 5 5-5" />

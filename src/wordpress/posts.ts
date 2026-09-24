@@ -37,6 +37,11 @@ export interface RemoteSnapshot {
   readonly featuredMediaId: number;
   /** 這個 target 的分類法上掛了哪些 term id，排序過。null 代表這個 target 不用分類法。 */
   readonly terms: readonly number[] | null;
+  /**
+   * 作者的使用者 id（P5-T024：發布會送 author）。null＝回應裡沒有（內容類型不支援作者）。
+   * 選填：P5-T024 之前存進 DB 的快照沒有這個欄位，那種快照不比作者，免得每次更新都誤報衝突。
+   */
+  readonly author?: number | null;
 }
 
 /** 兩份快照差在哪。用欄位名稱回報，訊息才講得出「被改的是什麼」。 */
@@ -49,6 +54,7 @@ export function diffSnapshots(expected: RemoteSnapshot, actual: RemoteSnapshot):
   if (actual.slug !== expected.slug) changed.push('網址代稱');
   if (actual.featuredMediaId !== expected.featuredMediaId) changed.push('精選圖片');
   if (JSON.stringify(actual.terms) !== JSON.stringify(expected.terms)) changed.push('分類');
+  if (expected.author !== undefined && (actual.author ?? null) !== expected.author) changed.push('作者');
   return changed;
 }
 
@@ -75,6 +81,8 @@ export interface PostFields {
   readonly featuredMediaId?: number;
   /** 分類法 slug → term id 陣列。 */
   readonly terms?: Readonly<Record<string, readonly number[]>>;
+  /** 作者的使用者 id（P5-T024）。不給就不送，WordPress 維持原本的作者（建稿時是登入的帳號）。 */
+  readonly authorId?: number;
 }
 
 function hashContent(post: Post): string {
@@ -114,6 +122,7 @@ export function snapshotOf(post: Post, taxonomy: string | null): RemoteSnapshot 
     slug: post.slug,
     featuredMediaId: post.featured_media,
     terms: termsOf(post, taxonomy),
+    author: typeof post['author'] === 'number' ? post['author'] : null,
   };
 }
 
@@ -131,6 +140,7 @@ function buildPayload(target: PublishTarget, fields: PostFields): Record<string,
   if (fields.slug !== undefined) payload.slug = fields.slug;
   if (fields.excerpt !== undefined) payload.excerpt = fields.excerpt;
   if (fields.featuredMediaId !== undefined) payload.featured_media = fields.featuredMediaId;
+  if (fields.authorId !== undefined) payload.author = fields.authorId;
 
   const restBase = taxonomyRestBaseOf(target);
   for (const [taxonomy, ids] of Object.entries(fields.terms ?? {})) {

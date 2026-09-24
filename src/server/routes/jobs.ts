@@ -149,6 +149,8 @@ const RevokeBody = z.object({ reason: z.string().max(200).optional() }).optional
 const PublishBody = z.object({
   status: z.enum(['draft', 'publish']),
   confirm: z.boolean().optional(),
+  /** 發布選項（P5-T024），不是核准的內容；在不在可選名單由 CoreService 驗。 */
+  authorId: z.number().int().positive().optional(),
 });
 
 /**
@@ -641,6 +643,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       result: await core().publish(uuid, {
         status: body.status,
         ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
+        ...(body.authorId === undefined ? {} : { authorId: body.authorId }),
         actor: 'ui',
       }),
     }));
