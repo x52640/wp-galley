@@ -183,6 +183,8 @@ export interface CreateRevisionInput {
   readonly featuredMediaId?: number | null | undefined;
   /** 稽核用的說明，也會寫進核准撤銷的理由。 */
   readonly reason?: string | undefined;
+  /** 這次編輯根據的那一版 content hash；給了而目前版本不是它，就丟 ContentChangedError。 */
+  readonly expectedContentHash?: string | undefined;
 }
 
 /** 後端收到的是解碼後的位元組；線上的樣子是 MediaUploadRequest（base64）。 */
@@ -606,6 +608,17 @@ export class CoreService {
 
     const template = this.requireTemplate(job);
     const baseRow = this.repo.latestRevision(job.id);
+    // 呼叫端說「我是根據哪一版改的」，目前版本不是那一版就整個拒絕（P5-T005）：
+    // templateData 是整份取代，放行的話會把中間別人存進去的修改悄悄蓋掉。
+    // 比對放在任何寫入之前（核准也還沒撤銷）。不會被插隊：這個方法從這裡到
+    // insertRevision 都是同步的（node:sqlite 的 DatabaseSync），中間沒有 await，
+    // 別的請求進不來；呼叫端（包括 MCP）也不該在這中間加 await。
+    if (input.expectedContentHash !== undefined && input.expectedContentHash !== (baseRow?.content_hash ?? null)) {
+      throw new ContentChangedError(
+        '這一版在你編輯的期間被改過了，這次沒有存進去，也沒有蓋掉那些修改。重新讀取拿最新的內容，再改一次。',
+        { expected: input.expectedContentHash, current: baseRow?.content_hash ?? null },
+      );
+    }
     const base: RevisionPayload = baseRow
       ? this.payloadOf(baseRow)
       : { templateData: {}, featuredMediaAssetId: null };

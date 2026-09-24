@@ -4,15 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **51 檔 / 914 測試**全綠（2026-09-24，P5-T018 之後）
+- `npm run verify`：typecheck 通過；Vitest **52 檔 / 923 測試**全綠（2026-09-24，P5-T005 之後）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-無。下一個建議：[P5-T005](tasks/P5-T005-expected-content-hash.md)（後端真的檢查 expectedContentHash——
-前端以為兩處同時改文章時後到的會被擋，後端其實沒擋，後存的會悄悄蓋掉先存的）。
+無。P5-T005 已完成（後端檢查 expectedContentHash，不符回 409）。
 
 ## 上次停在哪（2026-09-24 收官）
 
@@ -30,7 +29,6 @@
 | Task | 內容 | 備註 |
 | --- | --- | --- |
 | [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
-| [P5-T005](tasks/P5-T005-expected-content-hash.md) | 後端真的檢查 expectedContentHash | 小；保護目前不存在 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 
 ## Blocked
@@ -46,7 +44,7 @@
 - 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
   `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
 
-- 前端以為建立 revision 有 `expectedContentHash` 保護，後端其實沒做 → P5-T005。
+- 直接在文章上改遇到 409 後按「重新讀取」，編輯框裡未存的字可能消失（P5-T005，少見）。
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
 - `core-service.md` 的方法清單是節錄 → P5-T004。
 - D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。

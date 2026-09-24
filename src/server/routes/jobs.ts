@@ -75,6 +75,7 @@ const CreateRevisionBody = z.object({
   featuredMediaId: z.number().int().positive().nullable().optional(),
   origin: z.enum(['source', 'agent_review', 'media', 'template_switch', 'chat', 'manual']).optional(),
   reason: z.string().max(200).optional(),
+  expectedContentHash: z.string().regex(/^[0-9a-f]{64}$/, 'expectedContentHash 必須是 64 位十六進位').optional(),
 });
 
 const AgentBody = z.object({
@@ -351,6 +352,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
         ...(body.featuredMediaId === undefined ? {} : { featuredMediaId: body.featuredMediaId }),
         ...(body.origin === undefined ? {} : { origin: body.origin }),
         ...(body.reason === undefined ? {} : { reason: body.reason }),
+        ...(body.expectedContentHash === undefined ? {} : { expectedContentHash: body.expectedContentHash }),
       }),
     );
     reply.status(201);

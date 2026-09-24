@@ -393,7 +393,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                 reason: '直接在文章上改',
                 // 從卡片進來改的：存成新版本時那張卡片一起結案，不用再按一次「不用改」。
                 ...(editing?.itemId == null ? {} : { resolveItemId: editing.itemId }),
-                // 後端還沒檢查這個（P5-T005），先帶上：做好之後編輯中被換版本就會被擋下來。
+                // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
               setEditing(null);

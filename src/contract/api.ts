@@ -520,6 +520,13 @@ export interface CreateRevisionRequest {
   readonly featuredMediaId?: number | null;
   /** 稽核用的說明，也會寫進核准撤銷的理由。 */
   readonly reason?: string;
+  /**
+   * 這次編輯是根據哪一版算出來的（那一版的 `contentHash`，P5-T005）。
+   *
+   * `templateData` 是整份取代，兩個面板各自送出時，晚到的那一份會把先到的欄位蓋掉。
+   * 帶上這個值，目前版本不是它就回 409 `CONTENT_CHANGED`，什麼都不寫。不給就不檢查。
+   */
+  readonly expectedContentHash?: string;
 }
 
 export interface AgentRunRequest {

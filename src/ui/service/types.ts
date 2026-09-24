@@ -108,18 +108,7 @@ export type CreateJobInput = CreateJobRequest;
 export type AgentReviewInput = AgentRunRequest;
 export type PublishInput = PublishRequest;
 
-export type CreateRevisionInput = CreateRevisionRequest & {
-  /**
-   * 這次編輯是根據哪一版算出來的（那一版的 content hash）。
-   *
-   * `templateData` 是**整份取代**，所以兩個面板各自送出時，晚到的那一份會把先
-   * 到的欄位蓋掉。帶上這個值，後端就能在對不上時直接拒絕，而不是默默覆蓋。
-   *
-   * ⚠️ **後端目前沒有實作這個檢查**，收到會被 zod 丟掉——保護還不存在。
-   * 補上它是 P5-T005；在那之前這個欄位不在共用契約裡，免得看起來像是已經有了。
-   */
-  readonly expectedContentHash?: string;
-};
+export type CreateRevisionInput = CreateRevisionRequest;
 
 /** 前端拿到的是 Blob；轉成 base64（MediaUploadRequest）是 client.ts 的事。 */
 export interface AddMediaInput {

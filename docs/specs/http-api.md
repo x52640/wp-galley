@@ -77,6 +77,10 @@
   不撤銷核准，回傳目前那一版。
   `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下
   `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。項目不屬於目前提案就整個拒絕。
+  `expectedContentHash`（選填，64 位十六進位，格式不對 400）：這次編輯是根據哪一版算出來的。目前 revision 的
+  `content_hash` 不是它就回 409 `CONTENT_CHANGED`，不建版本、不撤銷核准、不寫事件；訊息請使用者重新讀取再改。
+  不給就不檢查（照舊）。前端送整份 `templateData` 或 `editedBody` 時都帶它，免得晚到的一份把先到的修改蓋掉
+  （P5-T005）。比對與寫入在同一段同步程式裡，中間不會被別的請求插隊。
 - `ReviewItem.alreadyDone`（P5-T017）：原句找不到、要改成的字已經在文章裡，讀取時算出來的，此時 `state` 回
   `skipped`；`review/resolve` 的回應多 `alreadyDone`（這次按接受時碰到的這種項目，不建版本）。
   規則見 [review-proposals.md](review-proposals.md)「已經改好了」。都是新增欄位。
