@@ -129,9 +129,8 @@ adapter，介面不變。
   位置參數，以 security.md 為準）。
 - `--ephemeral`、`--ignore-user-config` 跟校稿（runStructured）一樣帶：stdin 裡有 Agent 寫的 brief 文字
   （不受信任），不能讓使用者 `config.toml` 裡的 MCP、網路搜尋、自訂指令套用到這一趟（D-009）。
-  ⚠️ **這兩個參數沒有在真實生圖上驗證過**（2026-09-23 實測那一次沒帶）。可能的風險是不讀設定檔就不生圖、
-  或圖不寫進 `generated_images/`。那種情況會回 `no-image`，訊息寫明「在 generated_images/<thread> 找不到圖」。
-  **使用者第一次真實生圖就是驗證**；失敗的話再回來決定要不要拿掉其中一個。
+  **已驗證（2026-09-24）**：使用者從插圖面板「請 AI 配一張」真實生圖、按「用這張」上傳並放進正文、
+  存成草稿，全程正常——帶著這兩個參數生圖沒有問題。
 - `CODEX_HOME`：沒設就是 `~/.codex`。process-runner 的環境變數 allowlist 不含它，所以用 `extraEnv`
   明確傳給子行程，確保子行程寫圖的位置跟我們讀圖的位置是同一個。
 - 讀圖：`thread_id` 只接受 `^[A-Za-z0-9][A-Za-z0-9-]{0,127}$`（拿去組路徑）；`generated_images/<thread>`

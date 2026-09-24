@@ -11,28 +11,18 @@
 
 ## 進行中
 
-[P5-T018](tasks/P5-T018-ai-image-at-position.md) 插圖面板直接請 AI 配一張（D-022）：實作完成、verify 綠、
-示範資料走完；**還沒 commit**，等使用者看過。真實 Codex 還沒用這個 prompt 跑過（耗額度）。
-migration 008 已被 dev server 套到本機 DB（SQL 已定稿，不能再改）。
+無。下一個建議：[P5-T005](tasks/P5-T005-expected-content-hash.md)（後端真的檢查 expectedContentHash——
+前端以為兩處同時改文章時後到的會被擋，後端其實沒擋，後存的會悄悄蓋掉先存的）。
 
-[P5-T017](tasks/P5-T017-review-current-content.md) AI 校稿只看目前的文章（D-021）：實作完成、verify 綠，
-job 2 已唯讀確認；**還沒 commit**，等使用者看過。
+## 上次停在哪（2026-09-24 收官）
 
-[P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016）已完成（2026-09-24，subagent），
-安全審查的十項已修（見 Task 完成結果）。**還沒用真實站台跑過**：等使用者用自己的站走一次（故意填錯密碼、填 http 各一次）。
-
-P5-T001 實測已結案（2026-09-23，使用者實測並發布）；實測中當場修的是 P5-T008～P5-T016，見該 Task 的完成結果。
-
-[P5-T013](tasks/P5-T013-codex-image-generation.md) 用 Codex 生圖（D-017）已完成，只走過示範資料；
-**真實 Codex 生圖與「用這張」的真實上傳還沒跑過**（耗額度、會寫進媒體庫），留給使用者在實測時做。
-生圖帶了 `--ephemeral`／`--ignore-user-config`，這兩個在生圖上沒驗證過：第一次真實生圖若回「在 generated_images/… 找不到圖」，
-先懷疑它們（見 `docs/specs/agent-cli.md`「Codex 生圖」）。
-
-## 上次停在哪（2026-09-23）
-
-B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真實後端只測到發布按鈕可以按，
-沒有真的發布（會在正式站建草稿，要使用者決定）。畫面行為跟以前最大的不同：還有未處理的建議時
-只提醒、不擋發布（Q-1）。
+- 5.5 實測已結案（P5-T001），實測中當場修 P5-T008～P5-T018，都已 commit。
+- **使用者 2026-09-24 已真實驗證**：Codex 生圖（帶 `--ephemeral`／`--ignore-user-config`）→「用這張」上傳
+  → 自動放進正文 → 存成草稿，全程正常。
+- 第 8 階段：P8-T001（通用文章類型、本機站台設定檔）、P8-T002（首次設定精靈）已完成並 commit。
+  精靈是否已用作者本人的站完整跑過（含故意填錯密碼、填 http），使用者沒有明確回報——下次開工先問。
+- 工作方式：使用者要求實作派 subagent、主 session 監工（驗證 → 另派 subagent 審查 → 修 → commit）。
+- dev server（`npm run dev`）可能還在背景跑；資料庫 migration head 008。
 
 ## Ready
 
