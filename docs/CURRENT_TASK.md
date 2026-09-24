@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **58 檔 / 1030 測試**全綠（2026-09-24，P5-T023 實作後、未 commit）
+- `npm run verify`：typecheck 通過；Vitest **58 檔 / 1030 測試**全綠（2026-09-24，P5-T023 之後）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
