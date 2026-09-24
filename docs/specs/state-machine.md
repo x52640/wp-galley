@@ -71,6 +71,31 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
 4. `requireFeaturedImage` 的 target 有設精選圖片
 5. 更新既有文章時，遠端沒被改過（`assertUnchanged`，比對上次記錄的遠端快照）。
    目前沒有「修改已發布文章」的路徑，這條檢查備而不用，見 `plan.md` Q-5。
+6. 更新既有文章時，遠端那篇必須是草稿——**不論使用者選草稿或公開**；已公開、排程（`future`）、
+   私人等非草稿狀態一律拒絕、零寫入：「這篇在站上已經是 <狀態>，發布台目前不支援修改已公開的文章
+   （待裁定 Q-5）」（P5-T022，審查 #1；2026-09-24 裁定）。那條路就是「修改已發布文章」；而且 WordPress
+   的更新不帶 status 就維持原狀態，不擋的話「存成草稿」會直接改到線上內容。
+   目前只有 target 設了 `fixedObjectId` 才走得到。
+7. 這篇沒有圖片正在上傳或替換（P5-T022，審查 #3）。換圖一開始就撤銷核准、然後等上傳；
+   等待期間重新核准再發布，發出去的是舊圖，回來的上傳卻要改本機紀錄。
+
+讀遠端（第 5 項）要等網路，讀完後第 1–4 項重跑一次，版本或核准變了就中止。
+
+### PUBLISHING 期間核准被撤銷（P5-T022，審查 #2）
+
+`revokeApproval` 不看工作狀態，PUBLISHING 期間也撤得掉。進 PUBLISHING 之後還有兩個等網路的點
+（查分類、建／改草稿），所以：
+
+- **每一個寫入請求送出前**同步確認建立發布時的那張核准仍有效（沒被撤銷、沒被換掉），檢查與送出之間
+  沒有 await。建新稿前直接檢查；`updateDraft`、`setStatus` 內部會先讀遠端再寫，所以檢查放在它們的
+  `beforeWrite` 回呼（讀回遠端之後、送出寫入之前），不是呼叫它們之前。
+- 草稿還沒寫就失效：一個寫入都不送。
+- 草稿寫了、改公開前失效：不改成公開，WordPress 上那篇維持寫進去時的狀態（依回傳的狀態寫，目前一定是草稿）。
+
+兩種都是 `PUBLISHING → FAILED`，記 `publish`／`failed` 事件，錯誤講清楚有沒有送出、那篇停在什麼狀態（第 N 號）。
+落在 `FAILED` 是因為 PUBLISHING 只能到 `PUBLISHED` 或 `FAILED`，而 `PUBLISHED` 代表照核准發出去了，
+這裡不是。跟其他發布途中出錯一樣，那篇草稿不記進 `wordpress_objects`（錯誤訊息與事件裡有編號）。
 
 送出時只送允許變更的欄位，不順便覆蓋未知的 meta；建立或更新後記錄遠端快照
-（hash、modified time、內容），供下一次更新比對。
+（hash、modified time、內容），供下一次更新比對。更新時送哪些欄位見
+[wordpress-site.md](wordpress-site.md)「更新既有文章」。

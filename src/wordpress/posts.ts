@@ -203,6 +203,20 @@ export interface UpdateOptions {
    * 那就等於允許無聲覆蓋。
    */
   readonly expect: RemoteSnapshot;
+  /**
+   * 讀回遠端、確認沒被改過之後，**送出寫入之前**同步呼叫（中間沒有 await）。丟錯就不寫。
+   * CoreService 用它在最後一刻確認核准還有效（P5-T022，審查 #2）：讀遠端要等網路，那段期間核准可能被撤銷。
+   */
+  readonly beforeWrite?: () => void;
+}
+
+/**
+ * 遠端那篇不是草稿時的拒絕訊息；是草稿回 null（P5-T022，審查 #1）。CoreService 的前置檢查用同一句。
+ * 更新一篇已公開、排程或私人的文章就是「修改已發布文章」，Q-5 還沒裁定，一律不做。
+ */
+export function nonDraftUpdateMessage(status: string): string | null {
+  if (status === 'draft') return null;
+  return `這篇在站上已經是 ${status}，發布台目前不支援修改已公開的文章（待裁定 Q-5），這次沒有送出任何修改。`;
 }
 
 /**
@@ -227,11 +241,18 @@ export async function updateDraft(
     );
   }
 
-  await assertUnchanged(client, target, id, options.expect);
+  // 只更新草稿（P5-T022，審查 #1）：WordPress 的更新不帶 status 就維持原狀態，遠端已公開的話
+  // 新內容會直接上線。CoreService 前置檢查已經擋過，這裡用剛讀回的狀態再擋一次，並固定帶 status:draft。
+  const actual = await assertUnchanged(client, target, id, options.expect);
+  const refused = nonDraftUpdateMessage(actual.status);
+  if (refused !== null) {
+    throw new WordPressError(wordpressErrorCodes.INVALID_REQUEST, refused, { retryable: false });
+  }
+  options.beforeWrite?.();
 
   const { data } = await client.request(`/wp/v2/${target.restBase}/${id}`, {
     method: 'POST', // WordPress REST 用 POST 做更新，PUT 也可以但官方文件用 POST
-    body: buildPayload(target, fields),
+    body: { ...buildPayload(target, fields), status: 'draft' },
     schema: PostSchema,
     maxRetries: 0,
   });
@@ -281,6 +302,7 @@ export async function setStatus(
   options: UpdateOptions,
 ): Promise<Post> {
   await assertUnchanged(client, target, id, options.expect);
+  options.beforeWrite?.();
 
   const { data } = await client.request(`/wp/v2/${target.restBase}/${id}`, {
     method: 'POST',

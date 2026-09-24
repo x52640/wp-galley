@@ -116,10 +116,12 @@ import {
   setStatus,
   snapshotOf,
   updateDraft,
+  nonDraftUpdateMessage,
   type PostFields,
   type RemoteSnapshot,
 } from '../wordpress/posts.js';
 import { resolveTerms } from '../wordpress/terms.js';
+import type { Post } from '../wordpress/schemas.js';
 import { taxonomyRestBaseOf, type PublishTarget, type PublishTargetRegistry } from '../wordpress/targets.js';
 
 /**
@@ -337,6 +339,12 @@ export class CoreService {
   private reconfiguring = false;
   /** 正在跟 WordPress 講話的動作（上傳、換圖、發布）。不是 0 就不准換設定。 */
   private wordpressOps = 0;
+  /**
+   * 每個 job 正在進行的上傳／換圖有幾個（P5-T022，審查 #3）。不是 0 就不准發布：
+   * 換圖一開始就撤銷核准、然後等上傳，等待期間重新核准再發布的話，發出去的是舊圖，
+   * 回來的上傳卻要改本機紀錄——本機與線上從此對不上，媒體庫還多一張孤兒圖。
+   */
+  private readonly mediaUploads = new Map<string, number>();
 
   constructor(options: CoreServiceOptions) {
     this.repo = new Repository(options.db);
@@ -2184,7 +2192,45 @@ export class CoreService {
    * 照錨點自動放進正文（沒對上內文圖是 null，P5-T016）。
    */
   async addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
-    return this.trackWordPress(() => this.addMediaUntracked(uuid, input));
+    return this.trackWordPress(() => this.trackMediaUpload(uuid, () => this.addMediaUntracked(uuid, input)));
+  }
+
+  /** 上傳／換圖期間在 `mediaUploads` 記一筆，發布看到就拒絕（審查 #3）。 */
+  private async trackMediaUpload<T>(uuid: string, fn: () => Promise<T>): Promise<T> {
+    this.mediaUploads.set(uuid, (this.mediaUploads.get(uuid) ?? 0) + 1);
+    try {
+      return await fn();
+    } finally {
+      const left = (this.mediaUploads.get(uuid) ?? 1) - 1;
+      if (left > 0) this.mediaUploads.set(uuid, left);
+      else this.mediaUploads.delete(uuid);
+    }
+  }
+
+  /**
+   * 上傳要等網路；等回來時工作可能已經不能改了（發布了、取消了）。那就**不寫任何本機紀錄**，
+   * 記一筆失敗事件、丟清楚的錯誤（審查 #3）。圖已經在 WordPress 媒體庫，發布台不自動刪使用者站上的東西。
+   */
+  private assertMutableAfterUpload(
+    job: JobRow,
+    wordpressMediaId: number,
+    eventType: 'media_added' | 'media_replaced',
+  ): void {
+    const fresh = this.requireJob(job.uuid);
+    if (isContentMutable(fresh.state)) return;
+    const message =
+      `上傳期間工作項目變成 ${fresh.state}，不能再改內容，所以這張圖沒有記進發布台。` +
+      `圖已經傳到 WordPress 媒體庫（第 ${wordpressMediaId} 號），發布台不會自動刪除；不需要的話可以到媒體庫刪掉。`;
+    this.repo.insertEvent({
+      jobId: job.id,
+      revisionId: null,
+      approvalId: null,
+      actor: 'ui',
+      eventType,
+      status: 'failed',
+      detail: this.scrub({ mediaId: wordpressMediaId, state: fresh.state, message }),
+    });
+    throw new InvalidInputError(message);
   }
 
   private async addMediaUntracked(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
@@ -2199,6 +2245,7 @@ export class CoreService {
       ...(input.altText === undefined ? {} : { altText: input.altText }),
       ...(input.caption === undefined ? {} : { caption: input.caption }),
     });
+    this.assertMutableAfterUpload(job, uploaded.media.id, 'media_added');
 
     const localPath = this.writeLocalCopy(job.uuid, uploaded.sha256, input.mimeType, input.bytes);
 
@@ -2260,7 +2307,9 @@ export class CoreService {
    * 就算這張圖還沒插進正文也一樣。寧可多撤一次，也不要漏掉。
    */
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
-    return this.trackWordPress(() => this.replaceMediaUntracked(uuid, assetId, input));
+    return this.trackWordPress(() =>
+      this.trackMediaUpload(uuid, () => this.replaceMediaUntracked(uuid, assetId, input)),
+    );
   }
 
   private async replaceMediaUntracked(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
@@ -2278,6 +2327,7 @@ export class CoreService {
       ...(input.altText === undefined ? {} : { altText: input.altText }),
       ...(input.caption === undefined ? {} : { caption: input.caption }),
     });
+    this.assertMutableAfterUpload(job, uploaded.media.id, 'media_replaced');
 
     const localPath = this.writeLocalCopy(job.uuid, uploaded.sha256, input.mimeType, input.bytes);
     const row = this.repo.updateMedia(assetId, {
@@ -2550,6 +2600,9 @@ export class CoreService {
     if (this.publishing.has(job.uuid)) {
       throw this.rejectPublish(job, actor, '這個工作項目已經有一次發布在進行中，等它結束再試');
     }
+    if (this.mediaUploads.has(job.uuid)) {
+      throw this.rejectPublish(job, actor, '這篇有圖片正在上傳或替換到 WordPress，等它完成、重新確認預覽再發布');
+    }
     this.publishing.add(job.uuid);
     try {
       return await this.runPublish(job.uuid, target, input, actor, client);
@@ -2592,6 +2645,14 @@ export class CoreService {
 
     const { job, approval, revisionRow, payload, featured, creating, targetId } = plan;
 
+    // 5b. 更新既有文章：遠端那篇不是草稿就拒絕，不論使用者選草稿或公開（審查 #1）。
+    //     那等於「修改已發布文章」，Q-5 未裁定；而且更新不帶 status 時 WordPress 維持原狀態，
+    //     「存成草稿」會直接改到線上的內容。
+    if (!creating) {
+      const refused = nonDraftUpdateMessage(expect!.status);
+      if (refused !== null) throw this.rejectPublish(job, actor, refused);
+    }
+
     // 前置檢查全過，才開始真的動遠端。
     assertTransition(job.state, 'PUBLISHING');
     this.repo.updateJobState(job.id, 'PUBLISHING');
@@ -2616,23 +2677,49 @@ export class CoreService {
       // 文章 JSON 裡放 term id 的欄位＝分類法的 REST 名稱（核心 category 是 categories）。
       const termsField = taxonomyRestBaseOf(target);
 
+      // 建立新稿：沒有封面、沒有分類就省略（WordPress 預設就是沒有）。
+      // 更新既有文章：封面一律送（沒有送 0）；分類清單是空的就送 []（審查 #13）——不送的話
+      // WordPress 會留著舊的，線上那篇就跟核准的內容對不上。例外：填了分類名稱卻全部查不到，
+      // 不送（不要因為查不到就把遠端的分類清掉），unknownTerms 照報。
+      const featuredId = featured?.wordpress_media_id ?? 0;
       const fields: PostFields = {
         title: this.titleOf(payload.templateData) ?? job.title ?? '未命名',
         content: conversion.markup,
         ...(typeof payload.templateData['slug'] === 'string'
           ? { slug: payload.templateData['slug'] as string }
           : {}),
-        ...(featured?.wordpress_media_id ? { featuredMediaId: featured.wordpress_media_id } : {}),
-        ...(termsField !== null && terms.ids.length > 0 ? { terms: { [termsField]: terms.ids } } : {}),
+        ...(!creating || featuredId > 0 ? { featuredMediaId: featuredId } : {}),
+        ...(termsField !== null && (terms.ids.length > 0 || (!creating && terms.unknown.length === 0))
+          ? { terms: { [termsField]: terms.ids } }
+          : {}),
       };
 
-      let post = creating
-        ? await createDraft(client, target, fields)
-        : await updateDraft(client, target, targetId!, fields, { expect: expect! });
+      // 查分類、讀遠端都要等網路，這段期間核准可能被撤銷（審查 #2）。每一個寫入請求送出前
+      // 同步確認一次（建新稿前面沒有讀遠端，直接檢查；更新與改狀態走 beforeWrite，讀完遠端才檢查）。
+      const noWriteMessage = '發布途中核准被撤銷了，這次沒有送出任何內容到 WordPress，工作項目標成失敗。';
+      let post: Post;
+      if (creating) {
+        this.assertApprovalUnchanged(job, approval, noWriteMessage);
+        post = await createDraft(client, target, fields);
+      } else {
+        post = await updateDraft(client, target, targetId!, fields, {
+          expect: expect!,
+          beforeWrite: () => this.assertApprovalUnchanged(job, approval, noWriteMessage),
+        });
+      }
 
       if (input.status === 'publish') {
+        // 改成公開是收不回來的一步（電子報、自動分享）。沒了核准就維持寫進去時的狀態，不改公開。
+        const written = post;
         post = await setStatus(client, target, post.id, 'publish', {
           expect: snapshotOf(post, termsField),
+          beforeWrite: () =>
+            this.assertApprovalUnchanged(
+              job,
+              approval,
+              `發布途中核准被撤銷了，所以沒有把文章改成公開：WordPress 上那篇（第 ${written.id} 號）` +
+                `維持${written.status === 'draft' ? '草稿' : `原本的 ${written.status} 狀態`}，工作項目標成失敗。`,
+            ),
         });
       }
 
@@ -2863,6 +2950,16 @@ export class CoreService {
 
     const fresh = this.repo.jobById(job.id)!;
     if (fresh.state === 'APPROVED') this.repo.updateJobState(job.id, 'RENDERED');
+  }
+
+  /**
+   * 發布途中（PUBLISHING）確認建立發布時的那張核准還是有效的那一張（審查 #2）。
+   * `revokeApproval` 不看工作狀態，PUBLISHING 期間也撤得掉；撤了之後不能再往 WordPress 寫。
+   * 丟出的錯誤由 runPublish 的 catch 接住：工作轉 FAILED、記 failed 事件。
+   */
+  private assertApprovalUnchanged(job: JobRow, approval: ApprovalRow, message: string): void {
+    if (this.repo.activeApproval(job.id)?.id === approval.id) return;
+    throw new PublishBlockedError(message);
   }
 
   private rejectPublish(job: JobRow, actor: EventActor, message: string): PublishBlockedError {

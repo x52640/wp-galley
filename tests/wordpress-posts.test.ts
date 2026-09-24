@@ -109,6 +109,50 @@ describe('建立草稿', () => {
   });
 });
 
+describe('更新時的草稿狀態與寫入前回呼（P5-T022，審查 #1、#2）', () => {
+  it('更新固定帶 status:draft', async () => {
+    const remote = postBody();
+    mock = await startMockWordPress(() => ({ body: remote }));
+    await updateDraft(clientFor(mock), TARGET, 1839, FIELDS, { expect: snapshotOf(remote as never, TARGET.taxonomy) });
+
+    const sent = JSON.parse(mock.requests.find((r) => r.method === 'POST')!.body);
+    expect(sent.status).toBe('draft');
+  });
+
+  it('遠端不是草稿：拒絕，一個寫入都不送', async () => {
+    const remote = postBody({ status: 'publish' });
+    mock = await startMockWordPress(() => ({ body: remote }));
+    await expect(
+      updateDraft(clientFor(mock), TARGET, 1839, FIELDS, { expect: snapshotOf(remote as never, TARGET.taxonomy) }),
+    ).rejects.toThrow(/已經是 publish/);
+    expect(mock.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+  });
+
+  it('beforeWrite 在讀回遠端之後、寫入之前呼叫；丟錯就不寫', async () => {
+    const remote = postBody();
+    mock = await startMockWordPress(() => ({ body: remote }));
+    let getsAtCall = -1;
+    const stop = (): void => {
+      getsAtCall = mock!.requests.length;
+      throw new Error('停');
+    };
+    await expect(
+      updateDraft(clientFor(mock), TARGET, 1839, FIELDS, {
+        expect: snapshotOf(remote as never, TARGET.taxonomy),
+        beforeWrite: stop,
+      }),
+    ).rejects.toThrow('停');
+    await expect(
+      setStatus(clientFor(mock), TARGET, 1839, 'publish', {
+        expect: snapshotOf(remote as never, TARGET.taxonomy),
+        beforeWrite: stop,
+      }),
+    ).rejects.toThrow('停');
+    expect(getsAtCall).toBe(2);
+    expect(mock.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+  });
+});
+
 describe('更新前的遠端變動偵測', () => {
   it('遠端沒被動過就正常更新', async () => {
     const remote = postBody();

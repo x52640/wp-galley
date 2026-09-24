@@ -69,6 +69,11 @@ interface CoreService {
    */
   addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome>;
   /** 正文裡的舊圖換成新圖，規則見下方「正文裡的圖只動圖片節點」。 */
+  /**
+   * 上傳與換圖（P5-T022，審查 #3）：上傳等回來後、寫任何本機紀錄前，重新讀 job 確認還能改內容；
+   * 不能改（發布了、取消了）就不寫、記一筆 `media_added`／`media_replaced` 的 failed 事件，
+   * 丟錯說明「圖已經在 WordPress 媒體庫第 N 號，發布台不自動刪」。上傳或換圖進行中，同一篇的 `publish` 一律拒絕。
+   */
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
   /** 從正文拿掉那張圖（只動圖片節點，見下方）；不刪 WordPress 媒體庫的檔案。 */
   removeMedia(uuid: string, assetId: number): void;
@@ -88,6 +93,7 @@ interface CoreService {
    * 正文轉 Gutenberg 區塊時用**模板的** `blockDefaults`（見 templates.md）；分類項目的查詢、
    * 寫入欄位與遠端快照一律用分類法的 REST 名稱（`taxonomyRestBaseOf(target)`）。
    */
+  /** 前置檢查與 PUBLISHING 期間的核准再確認見 state-machine.md；更新既有文章送哪些欄位見 wordpress-site.md。 */
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
 }
 ```

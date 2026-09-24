@@ -27,6 +27,22 @@
   `/wp/v2/taxonomies` 的 `rest_base` 比對 target 的分類法 REST 名稱，對不上就直接講要設什麼。
 - 「改成公開可能寄出電子報、自動分享」這條對任何站都成立（見文末），不只作者站台。
 
+## 更新既有文章（P5-T022，審查 #1、#13）
+
+程式：`src/wordpress/posts.ts`（`updateDraft`）、`src/core/service.ts`（`runPublish`）。目前只有 target 設了
+`fixedObjectId` 才會更新既有文章（一般稿件發過就是 PUBLISHED，不再發第二次；見 `plan.md` Q-5）。
+
+- **只更新草稿**：遠端那篇不是草稿（`publish`、`future`、`private` 等）就在發布前拒絕、零寫入，
+  不論使用者選草稿或公開——那就是「修改已發布文章」，待裁定 Q-5（見 [state-machine.md](state-machine.md) 前置檢查第 6 項）。
+  `updateDraft` 自己也用剛讀回的遠端狀態再擋一次，請求**固定帶 `status: 'draft'`**；選「公開」的接著走 `setStatus('publish')`。
+- `updateDraft`／`setStatus` 有 `beforeWrite` 同步回呼：讀回遠端之後、送出寫入之前呼叫，丟錯就不寫。
+  CoreService 拿它做最後一刻的核准檢查。
+- **封面一律送**：沒有封面送 `featured_media: 0`。
+- **分類**：分類清單是空的送空陣列（欄位名是分類法 REST 名稱）；有查到的送查到的；**填了名稱但全部查不到
+  就不送這個欄位**（不因為查不到就清掉遠端分類），查不到的照樣回報在 `unknownTerms`。
+  省略空封面、空分類的話 WordPress 會留著舊的，線上跟核准的內容對不上。
+  **建立新稿不變**：沒有就省略（新文章本來就沒有）。
+
 ## 設定精靈（P8-T002，D-016）
 
 程式：`src/wordpress/setup.ts`、`src/server/routes/setup.ts`、`src/ui/components/SetupWizard.tsx`。
