@@ -46,8 +46,10 @@ import {
   findBlocksContaining,
   normalizeEditedBody,
   insertBlockAfter,
-  removeBlocksWhere,
-  replaceBlocksWhere,
+  containsImage,
+  findImageBlockIndex,
+  removeImageFromBody,
+  replaceImageInBody,
   splitTopLevelBlocks,
   type TopLevelBlock,
 } from './html-blocks.js';
@@ -82,7 +84,6 @@ import {
   userImageFilename,
 } from './image-generation.js';
 import { userNoteLength } from '../contract/user-note.js';
-import { hasWpImageClass } from '../contract/media-marker.js';
 import { buildTemplateDataFromSource } from './source-text.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
@@ -1113,9 +1114,12 @@ export class CoreService {
       }
     }
 
-    // 提案的比對基準跟著換到新版本，剩下的項目才還套得動；
-    // 也讓「內容被別的動作改過」這件事仍然分辨得出來（見 stale 的說明）。
-    this.repo.rebaseReviewProposal(proposal.id, revision.id, revision.contentHash);
+    // 提案還沒過期時，比對基準跟著換到新版本：這次的改動是我們自己造成的，不算外力，
+    // 之後仍可整份採用；「內容被別的動作改過」也仍然分辨得出來（見 stale 的說明）。
+    // 已經過期的就不換（審查 #8）：換了等於把中間的手改洗掉，整份採用會用舊稿蓋掉它。
+    if (proposal.base_content_hash === revisionRow.content_hash) {
+      this.repo.rebaseReviewProposal(proposal.id, revision.id, revision.contentHash);
+    }
     this.repo.insertEvent({
       jobId: job.id,
       revisionId: revision.id,
@@ -1779,11 +1783,12 @@ export class CoreService {
     const blocks = splitTopLevelBlocks(html);
 
     // 「換一張」：同一條需求較新的舊圖優先（一般只會有一張在正文裡）。
+    // 認圖的規則跟換圖本身同一套（img 的 class），正文文字寫著「wp-image-N」不算。
     const previous = this.repo
       .listMedia(job.id)
       .filter((row) => row.id !== assetId && row.brief_key === brief.brief_key && row.wordpress_media_id !== null)
       .reverse()
-      .find((row) => blocks.some((block) => hasWpImageClass(block.html, row.wordpress_media_id!)));
+      .find((row) => containsImage(html, row.wordpress_media_id!));
     if (previous) return this.replaceInBody(job, assetId, previous);
 
     // 使用者自己選的位置（P5-T018）講「你選的位置」，Agent 建議的講「建議的位置」。
@@ -1834,15 +1839,17 @@ export class CoreService {
     const payload = this.payloadOf(revisionRow);
     const body = String(payload.templateData[template.manifest.publishSlot] ?? '');
     const figure = buildFigureHtml(url, asset.alt_text ?? '', asset.caption, asset.wordpress_media_id);
-    const swapped = replaceBlocksWhere(body, (block) => hasWpImageClass(block.html, oldId), () => figure);
+    const swapped = replaceImageInBody(body, oldId, figure);
+    if (swapped.replaced === 0) {
+      // 不假裝換好了：舊圖其實不在要改的正文裡，回報「換了」會讓使用者以為新圖已經在文章上。
+      throw new MediaError('正文裡找不到原本那張圖，沒有換。請用「在這裡插圖」或圖片的「插入位置」自己放。');
+    }
     const revision = this.createRevision(job.uuid, {
       origin: 'media',
       templateData: { ...payload.templateData, [template.manifest.publishSlot]: swapped.html },
       reason: '換一張配圖',
     });
-    const at = splitTopLevelBlocks(revision.publishHtml).findIndex((block) =>
-      hasWpImageClass(block.html, asset.wordpress_media_id!),
-    );
+    const at = findImageBlockIndex(revision.publishHtml, asset.wordpress_media_id!);
     const afterBlockIndex = at - 1;
     return {
       outcome: 'replaced',
@@ -2273,7 +2280,7 @@ export class CoreService {
       const swapped =
         oldId === null
           ? { html: body, replaced: 0 }
-          : replaceBlocksWhere(body, (block) => hasWpImageClass(block.html, oldId), () => figure);
+          : replaceImageInBody(body, oldId, figure);
 
       if (swapped.replaced > 0 || payload.featuredMediaAssetId === assetId) {
         this.createRevision(job.uuid, {
@@ -2316,11 +2323,11 @@ export class CoreService {
       const payload = this.payloadOf(revisionRow);
       const body = String(payload.templateData[template.manifest.publishSlot] ?? '');
       const wpId = asset.wordpress_media_id;
-      const stripped =
-        wpId === null ? { html: body, removed: 0 } : removeBlocksWhere(body, (block) => hasWpImageClass(block.html, wpId));
+      // 只拿掉圖片節點，同一段的文字留著（審查 #9）。
+      const stripped = wpId === null ? { html: body, touched: 0 } : removeImageFromBody(body, wpId);
 
       const wasFeatured = payload.featuredMediaAssetId === assetId;
-      if (stripped.removed > 0 || wasFeatured) {
+      if (stripped.touched > 0 || wasFeatured) {
         // 走 createRevision，核准失效因此自動處理。
         this.createRevision(job.uuid, {
           origin: 'media',
@@ -2394,18 +2401,14 @@ export class CoreService {
 
     // 這張圖已經在正文裡就是「搬家」，不是「再放一張」。先把舊的拿掉再插，
     // 否則同一張圖會出現兩次，而 toMedia() 只回報第一個，畫面上完全看不出來。
+    // 只拿掉圖片節點（連同包它的 figure）；同一段還有字就留著那段（審查 #9）。
     const wpId = asset.wordpress_media_id;
-    const existingIndexes = blocks
-      .map((block, index) => (hasWpImageClass(block.html, wpId) ? index : -1))
-      .filter((index) => index >= 0);
+    const existing = removeImageFromBody(currentHtml, wpId);
 
-    // 被移除的區塊如果排在目標位置前面，目標位置就要往前挪同樣的格數——
-    // 使用者指的是**他現在看到的**第幾塊。
-    const removedBefore = existingIndexes.filter((index) => index <= afterBlockIndex).length;
-    const baseHtml =
-      existingIndexes.length === 0
-        ? currentHtml
-        : removeBlocksWhere(currentHtml, (block) => hasWpImageClass(block.html, wpId)).html;
+    // 整塊被拿掉的區塊如果排在目標位置前面，目標位置就要往前挪同樣的格數——
+    // 使用者指的是**他現在看到的**第幾塊。留下文字的那塊沒消失，不用挪。
+    const removedBefore = existing.droppedIndexes.filter((index) => index <= afterBlockIndex).length;
+    const baseHtml = existing.html;
     const targetIndex = afterBlockIndex - removedBefore;
 
     const figure = buildFigureHtml(url, asset.alt_text ?? '', asset.caption, asset.wordpress_media_id);
@@ -2415,7 +2418,7 @@ export class CoreService {
     return this.createRevision(uuid, {
       origin: 'media',
       templateData: { ...payload.templateData, [template.manifest.publishSlot]: nextBody },
-      reason: existingIndexes.length > 0 ? '移動圖片位置' : '插入圖片',
+      reason: existing.touched > 0 ? '移動圖片位置' : '插入圖片',
     });
   }
 
@@ -2718,7 +2721,7 @@ export class CoreService {
     const strayImages = this.repo
       .listMedia(job.id)
       .filter((asset) => asset.wordpress_media_id !== null && this.mediaOnOtherSite(asset))
-      .filter((asset) => hasWpImageClass(bodyHtml, asset.wordpress_media_id!));
+      .filter((asset) => containsImage(bodyHtml, asset.wordpress_media_id!));
     if (strayImages.length > 0) {
       throw this.rejectPublish(
         job,
@@ -2928,7 +2931,7 @@ export class CoreService {
     const placedAt =
       wpId === null || revision === null
         ? -1
-        : splitTopLevelBlocks(revision.publishHtml).findIndex((block) => hasWpImageClass(block.html, wpId));
+        : findImageBlockIndex(revision.publishHtml, wpId);
 
     return {
       id: row.id,

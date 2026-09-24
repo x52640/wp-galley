@@ -213,6 +213,202 @@ export function replaceBlocksWhere(
   return { html: next.join('\n'), replaced };
 }
 
+/** 這個元素是不是那張圖：`<img>` 的 class 裡有 `wp-image-N` 這個 token。 */
+function isImageOf(element: DefaultTreeAdapterMap['element'], mediaId: number): boolean {
+  if (element.tagName !== 'img') return false;
+  const cls = element.attrs.find((attr) => attr.name === 'class')?.value ?? '';
+  return cls.split(/\s+/).includes(`wp-image-${mediaId}`);
+}
+
+/**
+ * 拿掉圖片之後，只剩這些就算「空了」、包它的也一起拿掉：換行、空白、沒有內容的行內包裝
+ * （例如包著圖的 `<a>`）與段落、群組、figure、引用、清單與清單項目、標題等容器。
+ * 其他元素（hr、影片、嵌入、表格…）都算內容——表格的空格子拿掉會把表格弄壞，不碰。
+ */
+const EMPTYABLE_TAGS: ReadonlySet<string> = new Set([
+  ...INLINE_TAGS,
+  'p', 'div', 'figure', 'figcaption', 'blockquote', 'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+  'section', 'article', 'aside', 'header', 'footer', 'main', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre',
+]);
+
+function countImages(node: Node): number {
+  if (isElement(node) && (node as DefaultTreeAdapterMap['element']).tagName === 'img') return 1;
+  return childrenOf(node).reduce((sum, child) => sum + countImages(child), 0);
+}
+
+/**
+ * 圖庫：class 有 `wp-block-gallery`，或裡面不只一張圖。圖庫不是「包這張圖的 figure」，
+ * 拿掉一張時只拿那張（它自己的 figure，沒有就 img 本身），其他張留著。
+ */
+function isGalleryFigure(element: DefaultTreeAdapterMap['element']): boolean {
+  const cls = element.attrs.find((attr) => attr.name === 'class')?.value ?? '';
+  return cls.split(/\s+/).includes('wp-block-gallery') || countImages(element) > 1;
+}
+
+function hasContent(node: Node): boolean {
+  if (node.nodeName === '#text') {
+    return !/^[ \t\r\n]*$/.test((node as DefaultTreeAdapterMap['textNode']).value);
+  }
+  if (!isElement(node)) return false;
+  const element = node as DefaultTreeAdapterMap['element'];
+  if (element.tagName === 'br') return false;
+  if (!EMPTYABLE_TAGS.has(element.tagName)) return true;
+  return childrenOf(element).some((child) => hasContent(child));
+}
+
+function detach(node: Node): void {
+  const parent = (node as { parentNode?: ParentNode | null }).parentNode;
+  if (!parent) return;
+  const siblings = parent.childNodes as Node[];
+  const at = siblings.indexOf(node);
+  if (at >= 0) siblings.splice(at, 1);
+}
+
+function collectImages(node: Node, mediaId: number, out: DefaultTreeAdapterMap['element'][]): void {
+  if (isElement(node) && isImageOf(node as DefaultTreeAdapterMap['element'], mediaId)) {
+    out.push(node as DefaultTreeAdapterMap['element']);
+    return;
+  }
+  for (const child of childrenOf(node)) collectImages(child, mediaId, out);
+}
+
+/** 每個頂層區塊拿掉那張圖之後的樣子：`html` 為 null 代表整塊都是那張圖、整塊拿掉。 */
+interface ImageStrippedBlock {
+  readonly html: string | null;
+  readonly touched: boolean;
+}
+
+/**
+ * 從正文拿掉 `wp-image-N` 那張圖，**只拿掉圖片節點**（審查 #9，P5-T019）。
+ *
+ * 規則：
+ * - 圖在 `<figure>` 裡就連同最近的那個 figure（圖說跟著走）；否則只拿 `<img>`。
+ * - 拿掉之後，往上一層一層看：包它的東西空了（只剩空白、`<br>`、空的行內包裝）就一起拿掉。
+ * - 頂層區塊整個空了才整塊拿掉；還有字或別的節點就留著剩下的。
+ *
+ * 以前是整個頂層區塊刪掉——`<p>前文<img>後文</p>` 移動或移除圖片時，前文與後文一起消失。
+ * 沒碰到的區塊原樣序列化（跟 `splitTopLevelBlocks` 同一種輸出），區塊索引跟它一致。
+ */
+function stripImageFromBlocks(html: string, mediaId: number): ImageStrippedBlock[] {
+  const fragment = parseFragment(html) as unknown as Node;
+  const out: ImageStrippedBlock[] = [];
+
+  for (const child of childrenOf(fragment)) {
+    if (child.nodeName === '#text') {
+      const raw = (child as DefaultTreeAdapterMap['textNode']).value;
+      if (raw.trim().length > 0) out.push({ html: raw, touched: false });
+      continue;
+    }
+    if (!isElement(child)) continue;
+    const block = child as DefaultTreeAdapterMap['element'];
+
+    const images: DefaultTreeAdapterMap['element'][] = [];
+    collectImages(block, mediaId, images);
+    if (images.length === 0) {
+      out.push({ html: serializeOuter(block), touched: false });
+      continue;
+    }
+
+    let blockGone = false;
+    for (const image of images) {
+      // 最近的 figure（到頂層區塊為止）；沒有、或最近的是圖庫，就是圖本身。
+      let target: Node = image;
+      for (let at: Node | null = image; at && at !== fragment; at = parentOf(at)) {
+        if (isElement(at) && (at as DefaultTreeAdapterMap['element']).tagName === 'figure') {
+          if (!isGalleryFigure(at as DefaultTreeAdapterMap['element'])) target = at;
+          break;
+        }
+      }
+      if (target === block) {
+        blockGone = true;
+        break;
+      }
+      let parent = parentOf(target);
+      detach(target);
+      while (parent && parent !== block && !hasContent(parent)) {
+        const next = parentOf(parent);
+        detach(parent);
+        parent = next;
+      }
+    }
+
+    if (blockGone || !hasContent(block)) {
+      out.push({ html: null, touched: true });
+      continue;
+    }
+    out.push({ html: serializeOuter(block), touched: true });
+  }
+
+  return out;
+}
+
+/** 正文裡有沒有這張圖：`<img>` 的 class 有 `wp-image-N` 這個 token。文字裡寫著「wp-image-N」不算。 */
+export function containsImage(html: string, mediaId: number): boolean {
+  const images: DefaultTreeAdapterMap['element'][] = [];
+  collectImages(parseFragment(html) as unknown as Node, mediaId, images);
+  return images.length > 0;
+}
+
+/**
+ * 這張圖在第幾個頂層區塊（第一個出現的；索引同 `splitTopLevelBlocks`）。不在正文裡回 -1。
+ * 判斷規則同 `containsImage`，跟移動、移除、換圖認的是同一件事。
+ */
+export function findImageBlockIndex(html: string, mediaId: number): number {
+  const fragment = parseFragment(html) as unknown as Node;
+  let index = 0;
+  for (const child of childrenOf(fragment)) {
+    if (child.nodeName === '#text') {
+      if ((child as DefaultTreeAdapterMap['textNode']).value.trim().length > 0) index += 1;
+      continue;
+    }
+    if (!isElement(child)) continue;
+    const images: DefaultTreeAdapterMap['element'][] = [];
+    collectImages(child, mediaId, images);
+    if (images.length > 0) return index;
+    index += 1;
+  }
+  return -1;
+}
+
+function parentOf(node: Node): Node | null {
+  return ((node as { parentNode?: ParentNode | null }).parentNode as Node | null | undefined) ?? null;
+}
+
+/**
+ * 從正文拿掉那張圖（規則見 `stripImageFromBlocks`）。
+ * `touched`：動到幾個頂層區塊；`droppedIndexes`：整塊拿掉的是原本的第幾塊（插圖位置要往前挪）。
+ * 沒碰到任何區塊時原樣回傳，不重新序列化。
+ */
+export function removeImageFromBody(
+  html: string,
+  mediaId: number,
+): { html: string; touched: number; droppedIndexes: number[] } {
+  const blocks = stripImageFromBlocks(html, mediaId);
+  const touched = blocks.filter((block) => block.touched).length;
+  if (touched === 0) return { html, touched: 0, droppedIndexes: [] };
+  const droppedIndexes = blocks.flatMap((block, index) => (block.html === null ? [index] : []));
+  return {
+    html: blocks.flatMap((block) => (block.html === null ? [] : [block.html])).join('\n'),
+    touched,
+    droppedIndexes,
+  };
+}
+
+/**
+ * 把正文裡那張圖換成 `snippet`（新圖的 figure）。
+ * 整塊都是那張圖就原地換；那塊還有別的內容（同段文字）就留著，新圖接在那塊後面。
+ */
+export function replaceImageInBody(html: string, mediaId: number, snippet: string): { html: string; replaced: number } {
+  const blocks = stripImageFromBlocks(html, mediaId);
+  const replaced = blocks.filter((block) => block.touched).length;
+  if (replaced === 0) return { html, replaced: 0 };
+  const next = blocks.flatMap((block) => {
+    if (!block.touched) return [block.html!];
+    return block.html === null ? [snippet] : [block.html, snippet];
+  });
+  return { html: next.join('\n'), replaced };
+}
+
 const ESCAPES: Record<string, string> = {
   '&': '&amp;',
   '<': '&lt;',

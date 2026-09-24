@@ -317,6 +317,67 @@ describe('換一張：新圖放到舊圖的位置', () => {
     expect(detail.media.find((row) => row.id === first.media.id)).toMatchObject({ placed: false });
   });
 
+  it('舊圖跟文字在同一段：只換掉圖，前文與後文留著（審查 #9）', async () => {
+    const { core, uuid } = await setup();
+    const first = await upload(core, uuid, 'rainy_crossing');
+    const html = core.getJob(uuid).currentRevision!.publishHtml;
+    const img = /<img[^>]*>/.exec(html)![0];
+    core.createRevision(uuid, {
+      templateData: { title: '20260828', body: `<p class="wp-block-paragraph">前文${img}後文</p>` },
+      reason: '手動編輯',
+    });
+
+    const second = await upload(core, uuid, 'rainy_crossing');
+
+    expect(second.autoPlace).toMatchObject({ outcome: 'replaced', afterBlockIndex: 0 });
+    const body = core.getJob(uuid).currentRevision!.publishHtml;
+    expect(body).toMatch(/<p class="wp-block-paragraph">前文後文<\/p>/);
+    expect(bodyImageIds(core, uuid)).toEqual([second.media.wordpressMediaId]);
+    expect(first.media.wordpressMediaId).not.toBe(second.media.wordpressMediaId);
+  });
+
+  it('正文文字裡寫著舊圖的 wp-image-N、但圖不在：不算換一張，退回照錨點放', async () => {
+    const { core, uuid } = await setup();
+    const first = await upload(core, uuid, 'rainy_crossing');
+    const P = (text: string): string => `<p class="wp-block-paragraph">${text}</p>`;
+    core.createRevision(uuid, {
+      templateData: {
+        title: '20260828',
+        body:
+          P('今天讀完這本書，想到很多事。') +
+          P('下午的雨下得很急，路口積了一小攤水。') +
+          P(`舊圖檔名 wp-image-${first.media.wordpressMediaId}`),
+      },
+      reason: '手動編輯',
+    });
+
+    const second = await upload(core, uuid, 'rainy_crossing');
+
+    expect(second.autoPlace).toMatchObject({ outcome: 'placed', afterBlockIndex: 1 });
+    const body = core.getJob(uuid).currentRevision!.publishHtml;
+    expect(body).toContain(`舊圖檔名 wp-image-${first.media.wordpressMediaId}`);
+    expect(body).toContain(`class="wp-image-${second.media.wordpressMediaId}"`);
+  });
+
+  it('換一張時正文裡其實沒換到任何一張：丟錯，不建版本、不回報換好了', async () => {
+    const { core, uuid } = await setup();
+    const first = await upload(core, uuid, 'rainy_crossing');
+    const original = core.getJob(uuid).currentRevision!.publishHtml.replace(/<figure[\s\S]*?<\/figure>\n?/, '');
+    core.createRevision(uuid, { editedBody: original, origin: 'manual' });
+    const second = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'y' });
+    const before = core.getJob(uuid).revisionCount;
+
+    const internals = core as unknown as {
+      repo: { jobByUuid(uuid: string): unknown; mediaById(id: number): unknown };
+      replaceInBody(job: unknown, assetId: number, previous: unknown): unknown;
+    };
+    const job = internals.repo.jobByUuid(uuid);
+    const previous = internals.repo.mediaById(first.media.id);
+
+    expect(() => internals.replaceInBody(job, second.id, previous)).toThrow(/找不到原本那張圖/);
+    expect(core.getJob(uuid).revisionCount).toBe(before);
+  });
+
   it('舊圖已經不在正文裡：退回照錨點放', async () => {
     const { core, uuid } = await setup();
     const original = core.getJob(uuid).currentRevision!.publishHtml;

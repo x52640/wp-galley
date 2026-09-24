@@ -59,10 +59,15 @@ interface CoreService {
    * （`autoPlace`，見「內文圖的錨點」，P5-T016）的結果。MediaUploadOutcome = { media, autoFeature, autoPlace }。
    */
   addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome>;
+  /** 正文裡的舊圖換成新圖，規則見下方「正文裡的圖只動圖片節點」。 */
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
+  /** 從正文拿掉那張圖（只動圖片節點，見下方）；不刪 WordPress 媒體庫的檔案。 */
   removeMedia(uuid: string, assetId: number): void;
   setFeaturedMedia(uuid: string, assetId: number | null): Revision;
-  /** 把圖片插進正文的第 n 個頂層區塊後面（-1＝最前面）。右欄下拉、「在這裡插圖」、自動放位置都走這裡。 */
+  /**
+   * 把圖片插進正文的第 n 個頂層區塊後面（-1＝最前面）。右欄下拉、「在這裡插圖」、自動放位置都走這裡。
+   * 已經在正文裡就是搬家：先拿掉舊的（只動圖片節點，見下方），整塊被拿掉的區塊排在目標前面時位置往前挪。
+   */
   placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Revision;
 
   // --- 核准（只有 UI 能呼叫） ---
@@ -77,6 +82,28 @@ interface CoreService {
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
 }
 ```
+
+### 正文裡的圖只動圖片節點（P5-T019，審查 #9）
+
+移動（`placeMedia`）、移除（`removeMedia`）、換圖（`replaceMedia`、「換一張」）找正文裡的圖，
+認的是 `<img>` 的 class 有 `wp-image-N` 這個 token（`src/core/html-blocks.ts` 的
+`removeImageFromBody`／`replaceImageInBody`），**不是整個頂層區塊**。「圖在不在正文、在第幾塊」
+（圖片清單的 `placed`、「換一張」找舊圖、發布前擋別站的圖）也用同一套規則（`containsImage`／
+`findImageBlockIndex`）：正文文字裡寫著「wp-image-N」不算。
+
+- 拿掉的是圖片節點；圖在 `<figure>` 裡就連同最近的那個 figure（圖說跟著走）。
+  最近的 figure 是**圖庫**（class 有 `wp-block-gallery`，或裝著不只一張圖）時不拿 figure，只拿那張
+  （圖庫裡每張各自包了 figure 就拿那張自己的 figure），其他張留著。
+- 拿掉之後包它的東西空了（只剩空白、`<br>`）就一起拿掉，一層一層往上：行內包裝（如 `<a>`）、
+  段落、群組、figure／圖庫、引用、清單與清單項目、標題等容器。表格、影片、嵌入、`<hr>` 等算內容，不拿。
+  頂層區塊整個空了才整塊拿掉。
+- 同一塊還有文字或別的節點（`<p>前文<img class="wp-image-N">後文</p>`，整份採用 Agent 稿或
+  在文章上直接改合併段落時會出現）就留著剩下的內容。
+- 換圖：整塊都是那張圖就原地換成新圖的 figure；那塊還有別的內容就留著它，新圖接在那塊後面。
+  「換一張」實際一張都沒換到就丟錯（上傳結果回 `failed`），不建版本、不回報 `replaced`。
+- 搬家時同一張圖出現在好幾塊：整塊拿掉的、排在目標位置（含）之前的才讓位置往前挪；留下文字的那塊不挪。
+
+以前是整塊刪掉含圖的頂層區塊，前文與後文會一起消失。
 
 `getComparison(uuid, against?)`：有未結案提案就跟提案比，沒有就跟上一版比；回傳 `Comparison`，
 除了逐段的 `rows`，還有正文以外的 `fieldChanges`（`src/core/field-diff.ts`，D-019）。

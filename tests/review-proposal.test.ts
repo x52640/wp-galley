@@ -304,6 +304,35 @@ describe('全部接受', () => {
     const result = f.core.acceptWholeProposal(uuid);
     expect(result.revision!.publishHtml).toContain('書裡完全沒寫的');
   });
+
+  it('手改之後再逐項套用一項，提案仍是過期的，全部接受照樣擋下（審查 #8）', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+
+    // 使用者自己加了一段，原本的句子都還在，逐項套用仍套得上。
+    const current = f.core.getJob(uuid).currentRevision!.templateData;
+    f.core.createRevision(uuid, {
+      templateData: { ...current, body: `${String(current.body)}${P('使用者手動加的段落。')}` },
+      reason: '手動編輯',
+    });
+    expect(f.core.getReview(uuid)!.stale).toBe(true);
+
+    const applied = f.core.resolveReviewItems(uuid, { itemIds: [itemAt(f.core, uuid, 0)], decision: 'apply' });
+    expect(applied.applied).toHaveLength(1);
+    expect(applied.revision!.publishHtml).toContain('使用者手動加的段落');
+
+    // 逐項套用不能把過期的提案洗成未過期。
+    expect(f.core.getReview(uuid)!.stale).toBe(true);
+    expect(() => f.core.acceptWholeProposal(uuid)).toThrow(ContentChangedError);
+    expect(f.core.getJob(uuid).currentRevision!.publishHtml).toContain('使用者手動加的段落');
+
+    // 剩下的項目照樣能逐項套用。
+    const second = f.core.resolveReviewItems(uuid, { itemIds: [itemAt(f.core, uuid, 1)], decision: 'apply' });
+    expect(second.applied).toHaveLength(1);
+    expect(second.revision!.publishHtml).toContain('另一回事');
+    expect(second.revision!.publishHtml).toContain('使用者手動加的段落');
+    expect(f.core.getReview(uuid)!.stale).toBe(true);
+  });
 });
 
 describe('丟棄提案', () => {
