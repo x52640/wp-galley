@@ -5,6 +5,7 @@ import { Icon } from '../../icons.js';
 import { readString, readStringArray } from '../../lib/format.js';
 import { useConfirm } from '../ConfirmDialog.js';
 import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
+import { taxonomyTemplateData } from './template-data.js';
 
 /**
  * 分類項目。
@@ -27,7 +28,6 @@ export function TaxonomyPanel({
 }): JSX.Element {
   const taxonomy = job.target.taxonomy;
   const multiple = job.target.contentType === 'longform';
-  const dataKey = multiple ? 'tags' : 'category';
 
   const current = useMemo(
     () =>
@@ -262,15 +262,15 @@ export function TaxonomyPanel({
           disabled={save.busy || !dirty}
           onClick={() =>
             void save.run(async () => {
-              const value = multiple ? selected : (selected[0] ?? '');
               const baseHash = job.currentRevision?.contentHash ?? null;
               // templateData 是整份取代，現有欄位一定要帶上，否則會把正文清掉。
+              // 單選取消到一個都不剩時拿掉 category 鍵（schema 是選填、但不收空字串，P5-T021）。
               // 帶上 expectedContentHash：這份欄位是從哪一版抄來的，就報哪一版；
               // 中間被別人改過的話寧可被擋下來，也不要把對方的修改蓋掉。
               await guardEdit(() =>
                 api.createRevision(job.uuid, {
                   origin: 'manual',
-                  templateData: { ...(job.currentRevision?.templateData ?? {}), [dataKey]: value },
+                  templateData: taxonomyTemplateData(job.currentRevision?.templateData, multiple, selected),
                   reason: '修改分類',
                   ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
                 }),

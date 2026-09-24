@@ -4,6 +4,7 @@ import type { LoadedJob } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { readString } from '../../lib/format.js';
 import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
+import { sourceTemplateData } from './template-data.js';
 
 /**
  * 標題與網址片段。
@@ -61,8 +62,8 @@ export function SourcePanel({
       api.createRevision(job.uuid, {
         origin: 'manual',
         // templateData 是整份取代，所以一定要把現有欄位（分類、tags…）帶上，
-        // 否則儲存原稿會把分類清掉。
-        templateData: { ...(data ?? {}), title, body, ...(slug === '' ? {} : { slug }) },
+        // 否則儲存原稿會把分類清掉。網址片段清空時要拿掉舊的 slug 鍵（P5-T021）。
+        templateData: sourceTemplateData(data, { title, body, slug }),
         sourceText: body,
         reason: '手動編輯原稿',
         ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
