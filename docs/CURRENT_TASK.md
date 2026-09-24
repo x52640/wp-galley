@@ -28,6 +28,11 @@
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
+| [P5-T019](tasks/P5-T019-proposal-and-image-data-loss.md) | 過期提案不能整份覆蓋、移動圖片不刪同段文字 | D-023，審查 #8 #9，先做 |
+| [P5-T020](tasks/P5-T020-agent-run-lifecycle.md) | 重啟後不卡看稿中、取消排隊不執行 | D-023，#12 #11 |
+| [P5-T021](tasks/P5-T021-clear-category-and-slug.md) | 分類與網址片段可以清空 | D-023，#14 #15 |
+| [P5-T022](tasks/P5-T022-publish-path-guards.md) | 發布路徑防護 | D-023，#3 #2 #1 #13 |
+| [P5-T023](tasks/P5-T023-security-hardening.md) | 秘密遮蔽、擋跨站 GET、http 只准 loopback | D-023，#6 #10 #4 #7 #5 #16 |
 | [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 
@@ -45,7 +50,7 @@
   `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
 
 - 直接在文章上改遇到 409 後按「重新讀取」，編輯框裡未存的字可能消失（P5-T005，少見）。
-- 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
+- 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。2026-09-24 全 repo 審查有留檔：`docs/reviews/`。
 - `core-service.md` 的方法清單是節錄 → P5-T004。
 - D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。
 - ~~prompt 同時帶過期的原稿（sourceText）~~ → P5-T017 已處理：prompt 只送目前這一版；sourceText 仍是
