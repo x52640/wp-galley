@@ -76,6 +76,9 @@
   不撤銷核准，回傳目前那一版。
   `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下
   `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。項目不屬於目前提案就整個拒絕。
+- `ReviewItem.alreadyDone`（P5-T017）：原句找不到、要改成的字已經在文章裡，讀取時算出來的，此時 `state` 回
+  `skipped`；`review/resolve` 的回應多 `alreadyDone`（這次按接受時碰到的這種項目，不建版本）。
+  規則見 [review-proposals.md](review-proposals.md)「已經改好了」。都是新增欄位。
 - 校對符號（`ProofMark`）是版面的簽名元素：改動不用紅綠色塊，用頁邊的符號標示；
   說明文字由 diff 產生，不是 Agent 寫的。
 - 生圖（D-017）：`generate` 跑的期間 `JobDetail.agentRun` 是 running（`task: 'generate-image'`、

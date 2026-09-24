@@ -111,8 +111,12 @@ export function normalizeText(value: string): string {
  *
  * 比對時忽略所有空白，規則跟前端字上標記共用（見 `findIgnoringSpaces`）。
  */
-export function findBlockContaining(blocks: readonly TopLevelBlock[], needle: string): number | null {
-  const index = blocks.findIndex((block) => findIgnoringSpaces(block.text, needle) !== null);
+export function findBlockContaining(
+  blocks: readonly TopLevelBlock[],
+  needle: string,
+  skipInside?: string | null,
+): number | null {
+  const index = blocks.findIndex((block) => findIgnoringSpaces(block.text, needle, skipInside) !== null);
   return index < 0 ? null : index;
 }
 

@@ -669,3 +669,280 @@ describe('從卡片進去直接改，存檔時一起標成已處理（P5-T012）
     );
   });
 });
+
+describe('AI 校稿只看目前的文章（P5-T017，D-021）', () => {
+  /** 直接在文章上改一個地方（不從卡片進去），sourceText 不會跟著改。 */
+  function editArticle(core: CoreService, uuid: string, from: string, to: string): void {
+    const body = core.getJob(uuid).currentRevision!.publishHtml;
+    expect(body).toContain(from);
+    core.createRevision(uuid, { editedBody: body.replace(from, to) });
+  }
+
+  it('校稿的 prompt 只帶目前這一版，過期的原稿不送', async () => {
+    const adapter = new FakeAdapter('codex', 'Codex', { result: reviewResult() });
+    fixture = await createCoreFixture({ adapters: [adapter] });
+    const uuid = newJob(fixture.core);
+    editArticle(fixture.core, uuid, '不是書裡寫的那些', '書裡其實有寫的那些');
+
+    await fixture.core.runAgentReview(uuid, { provider: 'codex' });
+
+    const prompt = adapter.calls[0]!.request.userPrompt;
+    expect(prompt).toContain('書裡其實有寫的那些');
+    // 原稿（sourceText）還是 8/28 貼上的那份；它不能再出現在 prompt 裡。
+    expect(prompt).not.toContain('不是書裡寫的那些');
+    expect(prompt).not.toContain('原稿');
+    // 系統指令講清楚「before 要從目前的內容一字不差地引用」。模板的 rules.md 不在這裡檢查（那是站台設定）。
+    expect(adapter.calls[0]!.request.systemPrompt).toContain('before 必須一字不差地引用 templateData 裡目前的文字');
+  });
+
+  it('一鍵配圖的 prompt 也一樣', async () => {
+    const adapter = new FakeAdapter('codex', 'Codex', { result: reviewResult() });
+    fixture = await createCoreFixture({ adapters: [adapter] });
+    const uuid = newJob(fixture.core);
+    editArticle(fixture.core, uuid, '不是書裡寫的那些', '書裡其實有寫的那些');
+
+    await fixture.core.runAgentReview(uuid, { provider: 'codex', task: 'images' });
+
+    const prompt = adapter.calls[0]!.request.userPrompt;
+    expect(prompt).toContain('書裡其實有寫的那些');
+    expect(prompt).not.toContain('不是書裡寫的那些');
+  });
+
+  const FIX = { type: 'typo' as const, before: '想到很多事。', after: '想到很多事情。', reason: '語感', meaningChanged: false };
+
+  it('原句找不到、要改成的字已經在文章裡：按接受就算「已經改好了」，不是 unappliable', async () => {
+    const f = await setup(reviewResult({ changes: [FIX] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+    const hash = f.core.getJob(uuid).currentRevision!.contentHash;
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.revision).toBeNull();
+    expect(result.unappliable).toEqual([]);
+    expect(result.alreadyDone).toEqual([id]);
+    expect(f.core.getJob(uuid).currentRevision!.contentHash).toBe(hash);
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.alreadyDone).toBe(true);
+    expect(item.resolvedByEdit).toBe(false);
+    // 跳轉用的段落照 after 找（文章裡現在是它）。
+    expect(item.blockIndex).toBe(0);
+  });
+
+  it('讀清單時就套同一條規則：舊的 unappliable 不用按任何東西就顯示「已經改好了」', async () => {
+    const f = await setup(reviewResult({ changes: [FIX] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+
+    // 先變成真的找不到（存成 unappliable），再改成 AI 要的樣子——使用者 job 2 提案 6 的情況。
+    editArticle(f.core, uuid, '想到很多事。', '想到很多東西。');
+    f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.state).toBe('unappliable');
+    expect(f.core.getReview(uuid)!.pendingCount).toBe(2);
+
+    editArticle(f.core, uuid, '想到很多東西。', '想到很多事情。');
+    const review = f.core.getReview(uuid)!;
+    const item = review.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.alreadyDone).toBe(true);
+    // 只剩觀察那一項還沒處理：清單、blockers、總覽的數字都要一致。
+    expect(review.pendingCount).toBe(1);
+    expect(f.core.getJob(uuid).blockers.some((line) => line.includes('1 項校稿建議'))).toBe(true);
+    expect(f.core.listJobs().find((job) => job.uuid === uuid)!.pendingReviewCount).toBe(1);
+  });
+
+  it('還沒按過的 pending 也一樣，打開就是「已經改好了」', async () => {
+    const f = await setup(reviewResult({ changes: [FIX] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.alreadyDone).toBe(true);
+  });
+
+  it('剩下的都「已經改好了」也不自動結案（那是推算的）；文章改回去，卡片就回來', async () => {
+    const f = await setup(reviewResult({ changes: [FIX], observations: [] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+
+    const review = f.core.getReview(uuid);
+    expect(review).not.toBeNull();
+    expect(review!.pendingCount).toBe(0);
+    expect(review!.items[0]!.alreadyDone).toBe(true);
+
+    editArticle(f.core, uuid, '想到很多事情。', '想到很多事。');
+    const back = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(back.state).toBe('pending');
+    expect(back.alreadyDone).toBe(false);
+    expect(f.core.getReview(uuid)!.pendingCount).toBe(1);
+  });
+
+  it('按接受碰到「已經改好了」也不會結案：資料庫裡的狀態沒有變', async () => {
+    const f = await setup(reviewResult({ changes: [FIX], observations: [] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+    f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(f.core.getReview(uuid)).not.toBeNull();
+  });
+
+  it('接在後面補字（很多事→很多事情）：文章已經是 after 時按接受不會變成「很多事情情」', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [{ type: 'typo', before: '想到很多事', after: '想到很多事情', reason: 'x', meaningChanged: false }],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+    const hash = f.core.getJob(uuid).currentRevision!.contentHash;
+
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.alreadyDone).toBe(true);
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.alreadyDone).toEqual([id]);
+    expect(result.revision).toBeNull();
+    expect(f.core.getJob(uuid).currentRevision!.contentHash).toBe(hash);
+    expect(f.core.getJob(uuid).currentRevision!.publishHtml).not.toContain('事情情');
+  });
+
+  it('在前面補字（很多事情→想到很多事情）：一樣算已經改好了', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [{ type: 'typo', before: '很多事情。', after: '想到很多事情。', reason: 'x', meaningChanged: false }],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.alreadyDone).toEqual([id]);
+    expect(f.core.getJob(uuid).currentRevision!.publishHtml).not.toContain('想到想到');
+  });
+
+  it('別的地方還有一個真的沒改的 before：套到那一個，不套進已經改好的那句', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [{ type: 'typo', before: '想到很多事', after: '想到很多事情', reason: 'x', meaningChanged: false }],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+    editArticle(f.core, uuid, '而是別的。', '而是又想到很多事，');
+
+    // 卡片、段落跳轉指的就是那一個（第 2 段），不是已經改好的第 1 段。
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.alreadyDone).toBe(false);
+    expect(item.blockIndex).toBe(1);
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.applied).toEqual([id]);
+    const html = f.core.getJob(uuid).currentRevision!.publishHtml;
+    expect(html).toContain('想到很多事情。');
+    expect(html).toContain('又想到很多事情，');
+    expect(html).not.toContain('事情情');
+  });
+
+  it('同一批裡有套上的、已經改好的、真的找不到的，各歸各的', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [
+          { type: 'style', before: '而是別的', after: '而是另一回事', reason: 'x', meaningChanged: false },
+          { type: 'grammar', before: '讀完這本書想到很多事', after: '讀完這本書，想到很多事', reason: 'x', meaningChanged: false },
+          { type: 'typo', before: '這句話根本不在文章裡', after: '這句話真的不在文章裡', reason: 'x', meaningChanged: false },
+        ],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const ids = [0, 1, 2].map((ordinal) => itemAt(f.core, uuid, ordinal));
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: ids, decision: 'apply' });
+    expect(result.revision).not.toBeNull();
+    expect(result.applied).toEqual([ids[0]]);
+    expect(result.alreadyDone).toEqual([ids[1]]);
+    expect(result.unappliable).toEqual([ids[2]]);
+
+    const items = f.core.getReview(uuid)!.items;
+    expect(items.find((item) => item.id === ids[1])!).toMatchObject({ state: 'skipped', alreadyDone: true });
+    expect(items.find((item) => item.id === ids[2])!).toMatchObject({ state: 'unappliable', alreadyDone: false });
+  });
+
+  it('同一批裡前一項改出來的字就是後一項的 after：後一項算已經改好了', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [
+          { type: 'typo', before: '想到很多事。', after: '想到很多事情。', reason: 'x', meaningChanged: false },
+          { type: 'typo', before: '書，想到很多事。', after: '書，想到很多事情。', reason: 'x', meaningChanged: false },
+        ],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const ids = [0, 1].map((ordinal) => itemAt(f.core, uuid, ordinal));
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: ids, decision: 'apply' });
+    expect(result.applied).toEqual([ids[0]]);
+    expect(result.alreadyDone).toEqual([ids[1]]);
+    expect(f.core.getJob(uuid).currentRevision!.publishHtml).not.toContain('事情情');
+  });
+
+  it('太短的 after 不算數：整篇到處都可能有，看不出是不是改過了', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [{ type: 'typo', before: '這句話根本不在文章裡', after: '今天', reason: 'x', meaningChanged: false }],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.unappliable).toEqual([id]);
+    expect(result.alreadyDone).toEqual([]);
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('unappliable');
+    expect(item.alreadyDone).toBe(false);
+  });
+
+  it('刪字的建議（after 是 before 的一部分）不算數：after 本來就可能在', async () => {
+    const f = await setup(
+      reviewResult({
+        changes: [{ type: 'typo', before: '讀完這本書這本書', after: '讀完這本書', reason: '重複', meaningChanged: false }],
+      }),
+    );
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+
+    const result = f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'apply' });
+    expect(result.unappliable).toEqual([id]);
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.alreadyDone).toBe(false);
+  });
+
+  it('按過「保留原文」、但文章裡其實已經改好了：顯示「已經改好了」，不再說「保留原文」', async () => {
+    const f = await setup(reviewResult({ changes: [FIX] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    f.core.resolveReviewItems(uuid, { itemIds: [id], decision: 'skip' });
+    editArticle(f.core, uuid, '想到很多事。', '想到很多事情。');
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.alreadyDone).toBe(true);
+  });
+
+  it('「自己改了」的不重判——那個說法本來就對', async () => {
+    const f = await setup(reviewResult({ changes: [FIX] }));
+    const uuid = await propose(f.core);
+    const id = itemAt(f.core, uuid, 0);
+    const body = f.core.getJob(uuid).currentRevision!.publishHtml.replace('想到很多事。', '想到很多事情。');
+    f.core.createRevision(uuid, { editedBody: body, resolveItemId: id });
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.resolvedByEdit).toBe(true);
+    expect(item.alreadyDone).toBe(false);
+  });
+});

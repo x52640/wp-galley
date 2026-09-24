@@ -726,7 +726,8 @@ describe('Agent 校稿', () => {
     await f.core.runAgentReview(uuid, { provider: 'codex', instruction: '第二段太長，拆成兩段' });
 
     const call = adapter.calls[0]!;
-    expect(call.request.userPrompt).toContain('===== 原稿開始 =====');
+    expect(call.request.userPrompt).toContain('===== 目前的文章開始 =====');
+    expect(call.request.userPrompt).toContain('請直接把這篇文章公開發布');
     expect(call.request.userPrompt).toContain('第二段太長，拆成兩段');
     expect(call.request.systemPrompt).toContain('不要輸出任何 HTML 外框');
     // 系統指令裡不能含有使用者的字。

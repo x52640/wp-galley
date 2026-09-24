@@ -200,6 +200,13 @@ export interface ReviewItem {
   readonly resolvedAt: string | null;
   /** 使用者從這張卡片進去直接改文章、存檔時一起結案的（P5-T012）。畫面寫「自己改了」，不是「保留原文」。 */
   readonly resolvedByEdit: boolean;
+  /**
+   * 已經改好了（P5-T017）：原句在目前的內容裡找不到，但要改成的字已經在了。這時 `state` 是 `skipped`、
+   * `resolvedAt` 是 null，畫面寫「已經改好了」。**每次讀取時照目前的內容算**，不存進資料庫：
+   * 內容再被改回去（after 不見了），這一項就回到它原本的狀態。規則見 `isAlreadyDone`（review-apply.ts）。
+   * 重判的對象是還沒處理的與按過「保留原文」的；已接受、「自己改了」不重判。
+   */
+  readonly alreadyDone: boolean;
 }
 
 export interface ReviewProposal {
@@ -211,7 +218,7 @@ export interface ReviewProposal {
   readonly baseContentHash: string;
   /** 提案之後內容又被改過。逐項套用還能試，「全部接受」會被後端擋下。 */
   readonly stale: boolean;
-  /** 還沒有下場的項目數：`pending` 加上 `unappliable`。 */
+  /** 還沒有下場的項目數：`pending` 加上 `unappliable`（已經改好了的不算）。 */
   readonly pendingCount: number;
   readonly items: ReviewItem[];
 }
@@ -223,6 +230,8 @@ export interface ReviewResolveResult {
   readonly skipped: number[];
   /** 想套用但在目前內容裡定位不到。這幾項得使用者自己改。 */
   readonly unappliable: number[];
+  /** 想套用，但文章裡已經是改好的樣子（P5-T017）。不建版本，清單上顯示「已經改好了」。 */
+  readonly alreadyDone: number[];
   readonly review: ReviewProposal | null;
 }
 

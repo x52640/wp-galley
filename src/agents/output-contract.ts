@@ -24,7 +24,11 @@ import type { ImageBriefDraft, Observation, ReviewChange } from '../contract/api
 export interface ReviewOutput {
   readonly title: string;
   readonly summary: string;
-  readonly correctedSource: string;
+  /**
+   * 已停用（P5-T017）：以前要 Agent 交一份「校正後的完整原稿」，發布台從來沒用過，而且原稿
+   * 已經不送了。保留成選填，舊的輸出帶著它照樣合格；不給就省下一整篇的輸出。
+   */
+  readonly correctedSource?: string;
   readonly changes: ReviewChange[];
   readonly observations: Observation[];
   readonly templateData: Record<string, unknown>;
@@ -39,7 +43,6 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
   required: [
     'title',
     'summary',
-    'correctedSource',
     'changes',
     'observations',
     'templateData',
@@ -56,10 +59,11 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
       maxLength: 500,
       description: '這次校稿做了什麼的一句話說明，給使用者看的，不是文章摘要。',
     },
+    // 選填（不列 required）：發布台不用它。Codex 的 strict schema 會把它轉成 nullable，回來的 null 在驗證前被拿掉。
     correctedSource: {
       type: 'string',
       maxLength: 200000,
-      description: '校正後的完整原稿純文字，供使用者比對差異用。',
+      description: '不用填。發布台不使用這一欄，留空或省略。',
     },
     changes: {
       type: 'array',
@@ -71,8 +75,14 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
         required: ['type', 'before', 'after', 'reason', 'meaningChanged'],
         properties: {
           type: { type: 'string', enum: ['typo', 'grammar', 'clarity', 'style'] },
-          before: { type: 'string', maxLength: 2000 },
-          after: { type: 'string', maxLength: 2000 },
+          before: {
+            type: 'string',
+            maxLength: 2000,
+            description:
+              '從 templateData 目前的內容裡一字不差地引用要改的那一段，多帶幾個字讓它在整篇裡只出現一次。' +
+              '引用對不上，發布台就套不上去。',
+          },
+          after: { type: 'string', maxLength: 2000, description: '同一段改好之後的樣子（純文字，不要帶 HTML 標籤）。' },
           reason: { type: 'string', maxLength: 300 },
           meaningChanged: {
             type: 'boolean',

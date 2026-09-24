@@ -196,14 +196,14 @@ export function SuggestionColumn({
           <ul>
             {resolved.map((item) => (
               <li key={item.id} data-state={item.state}>
-                <Icon name={item.state === 'applied' ? 'check' : 'minus'} size={13} />
+                <Icon name={item.state === 'applied' || item.alreadyDone ? 'check' : 'minus'} size={13} />
                 <span>
                   {item.change
                     ? `${item.change.before} → ${item.change.after}`
                     : `「${item.observation?.excerpt ?? ''}」`}
                 </span>
                 <span className="dim">
-                  {item.state === 'applied' ? '已接受' : item.resolvedByEdit ? '自己改了' : '保留原文'}
+                  {resolvedLabel(item)}
                 </span>
               </li>
             ))}
@@ -313,7 +313,9 @@ function SuggestionCard({
       {observation && <p className="s-suggest">建議：{observation.suggestion}</p>}
 
       {item.state === 'unappliable' && (
-        <p className="s-hint">這句話在目前的文章裡找不到了（可能被別的修改吃掉），要自己改或保留原文。</p>
+        <p className="s-hint">
+          文章裡找不到「{change?.before}」，沒辦法自動改。要改的話按「自己改」，在文章裡找到那句直接改；不改就保留原文。
+        </p>
       )}
 
       <div className="s-actions">
@@ -321,11 +323,6 @@ function SuggestionCard({
           <button type="button" className="btn btn-primary btn-tiny" disabled={busy} onClick={() => onDecide('apply')}>
             <Icon name="check" size={13} />
             接受
-          </button>
-        )}
-        {change && item.state === 'unappliable' && (
-          <button type="button" className="btn btn-quiet btn-tiny" disabled={busy} onClick={() => onDecide('apply')}>
-            再試一次
           </button>
         )}
         <button type="button" className="btn btn-quiet btn-tiny" onClick={onEditSource}>
@@ -337,4 +334,15 @@ function SuggestionCard({
       </div>
     </article>
   );
+}
+
+/**
+ * 已處理那一項的下場。四種要分得開（P5-T012、P5-T017）：
+ * 按了接受、自己在文章上改掉、文章裡早就是改好的樣子、決定不改。
+ */
+function resolvedLabel(item: ReviewItem): string {
+  if (item.state === 'applied') return '已接受';
+  if (item.alreadyDone) return '已經改好了';
+  if (item.resolvedByEdit) return '自己改了';
+  return '保留原文';
 }

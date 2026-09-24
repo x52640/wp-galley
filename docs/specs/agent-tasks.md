@@ -25,6 +25,16 @@
 `buildSystemPrompt(template, task)` 裡的 `TASK_BRIEF`。用不到的欄位明講「給空陣列」，
 模型才不會為了填滿欄位硬擠內容。
 
+### prompt 只給目前這一版（D-021，P5-T017）
+
+`buildUserPrompt` 只送**目前這一版的 templateData**（「目前的文章」一段）與使用者這次的要求。
+revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文章都不會更新它；以前一起送，AI 從那份
+過期的稿子挑出早就改好的錯字，按接受一定找不到。`sourceText` 本身的語意不變，只是不進 prompt。
+系統指令另外講明：`before` 必須一字不差地引用 templateData 裡目前的文字，並多帶幾個字讓它在整篇只出現一次。
+
+`correctedSource`（「校正後的完整原稿」）發布台從來沒用過，改成**選填**、說明寫「不用填」：
+舊的輸出帶著它照樣通過驗證，不帶就省下一整篇的輸出。生圖（`buildImagePrompt`）只用配圖需求本身，本來就不帶原稿。
+
 ## `AgentTask` 決定結果怎麼落地
 
 `images` 那一趟**不建立提案，也不驗 templateData**。兩個理由：

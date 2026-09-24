@@ -36,6 +36,8 @@
  * 不做任何安全性判斷。
  */
 
+import { isInsideAligned } from '../contract/text-match.js';
+
 /**
  * 一項要處理的改動。
  *
@@ -51,6 +53,11 @@ export interface ChangeSlot {
   readonly find: string;
   /** 找到之後換成什麼；`null` 代表只定位、不替換。 */
   readonly replaceWith: string | null;
+  /**
+   * 落在這個字串（對齊的完整出現）裡面的 `find` 不算數。找 `before` 時傳 after：「很多事→很多事情」
+   * 在文章已經是「很多事情」時，「很多事」就在改好的那句裡，套下去會變成「很多事情情」（P5-T017 審查）。
+   */
+  readonly skipInside?: string | undefined;
 }
 
 export interface ApplyResult {
@@ -98,7 +105,7 @@ export function applyChanges(
       continue;
     }
 
-    const hit = locate(leaves, slot.find);
+    const hit = locate(leaves, slot.find, slot.skipInside);
     if (!hit) {
       if (slot.replaceWith !== null) notFound.push(slot.ordinal);
       continue;
@@ -135,16 +142,65 @@ export function applyChanges(
  * 從頭再找一次——Agent 沒照順序列的時候還救得回來，只是這時候「第幾個出現」
  * 就不保證了，所以只當作退路。
  */
-function locate(leaves: readonly Leaf[], needle: string): { leaf: Leaf; index: number } | null {
+function locate(
+  leaves: readonly Leaf[],
+  needle: string,
+  skipInside: string | undefined,
+): { leaf: Leaf; index: number } | null {
   for (const leaf of leaves) {
-    const index = indexOfText(leaf.value, needle, leaf.cursor);
+    const index = indexOfText(leaf.value, needle, leaf.cursor, skipInside);
     if (index >= 0) return { leaf, index };
   }
   for (const leaf of leaves) {
-    const index = indexOfText(leaf.value, needle, 0);
+    const index = indexOfText(leaf.value, needle, 0, skipInside);
     if (index >= 0) return { leaf, index };
   }
   return null;
+}
+
+/**
+ * `after` 至少要有幾個**字母或數字**才拿來判斷「已經改好了」。標點與空白不算：
+ * 「的時候，」只有 3 個字，整篇到處都可能有，找到它說明不了任何事（P5-T017 審查）。
+ */
+export const ALREADY_DONE_MIN_AFTER = 6;
+
+function letterCount(text: string): number {
+  return (text.match(/[\p{L}\p{N}]/gu) ?? []).length;
+}
+
+/**
+ * 這一項是不是**已經改好了**（P5-T017，D-021）：原句找不到，但要改成的字已經在目前的內容裡。
+ *
+ * 典型情況：使用者早就自己改掉了，或 AI 是從過期的原稿挑出來的。這種項目按「接受」一定
+ * 定位不到，標成「找不到」只會讓人以為還有事要做。
+ *
+ * 定位規則跟套用**完全一樣**（逐字、只在標籤外面找、跨標籤不算），差別只在判斷的條件：
+ *
+ * 1. `before` 在目前內容裡**找不到**。找得到就還沒改，交給正常的套用。落在完整 after 裡的
+ *    不算「找得到」（「很多事→很多事情」，文章已經是「很多事情」）——跟套用同一條規則。
+ * 2. `after` 在目前內容裡**找得到**。
+ * 3. `after` 至少 `ALREADY_DONE_MIN_AFTER` 個字母或數字（標點不算）——太短的字串到處都有，找到不代表改過了。
+ * 4. `after` 不是 `before` 的一部分——刪字的建議（「這本書這本書」→「這本書」）的 after
+ *    本來就在原文裡，找到它證明不了什麼。
+ * 5. `before` 不是空的——純新增的建議沒有「原句」可比。
+ *
+ * **為什麼不限縮在「那一段」**：定位段落靠的就是 before，before 找不到就沒有「那一段」可以限縮，
+ * 只能整篇找；所以用 3、4 兩條把誤判壓下來。誤判的代價也小：before 已經不在文章裡，
+ * 這一項本來就套不上去，誤判只是少了一張「自己改」的提醒。
+ */
+export function isAlreadyDone(
+  base: Record<string, unknown>,
+  change: { readonly before: string; readonly after: string },
+): boolean {
+  const { before, after } = change;
+  if (before.length === 0 || after === before) return false;
+  if (letterCount(after) < ALREADY_DONE_MIN_AFTER) return false;
+  if (before.includes(after)) return false;
+
+  const leaves = collectStringLeaves(base);
+  const found = (needle: string, skipInside?: string): boolean =>
+    leaves.some((leaf) => indexOfText(leaf.value, needle, 0, skipInside) >= 0);
+  return !found(before, after) && found(after);
 }
 
 /**
@@ -155,14 +211,16 @@ function locate(leaves: readonly Leaf[], needle: string): { leaf: Leaf; index: n
  * （`wrapBareTopLevelText` 也是為了這個理由「沒東西要包就原樣回傳」）。
  * 這裡只需要知道「哪些位置是標籤」，掃一遍就夠，不必動到字串的其他部分。
  */
-function indexOfText(haystack: string, needle: string, from: number): number {
+function indexOfText(haystack: string, needle: string, from: number, skipInside?: string): number {
   const tags = tagRanges(haystack);
   let at = haystack.indexOf(needle, from);
   while (at >= 0) {
     const end = at + needle.length;
     // 整段都要落在標籤之外；跨過標籤邊界的（例如 `今天<em>讀完` 對上「今天讀完」）
-    // 也不算——換掉的話會把標籤吃掉。
-    if (!tags.some((range) => at < range.end && end > range.start)) return at;
+    // 也不算——換掉的話會把標籤吃掉。落在一個完整的 after 裡的也不算（見 ChangeSlot.skipInside）。
+    const inTag = tags.some((range) => at < range.end && end > range.start);
+    const inAfter = skipInside !== undefined && isInsideAligned(haystack, at, needle, skipInside);
+    if (!inTag && !inAfter) return at;
     at = haystack.indexOf(needle, at + 1);
   }
   return -1;

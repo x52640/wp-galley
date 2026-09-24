@@ -272,8 +272,9 @@ function reviewItem(
   ordinal: number,
   partial: Pick<ReviewItem, 'type' | 'change' | 'observation' | 'blockIndex'>,
   state: ReviewItem['state'] = 'pending',
+  alreadyDone = false,
 ): ReviewItem {
-  return { id, ordinal, state, resolvedAt: null, resolvedByEdit: false, ...partial };
+  return { id, ordinal, state, resolvedAt: null, resolvedByEdit: false, alreadyDone, ...partial };
 }
 
 function diaryReview(): ReviewProposal {
@@ -284,7 +285,7 @@ function diaryReview(): ReviewProposal {
     createdAt: '2026-08-28T09:39:10Z',
     baseContentHash: '5c02f7ab91de4460'.padEnd(64, '0'),
     stale: false,
-    pendingCount: 4,
+    pendingCount: 5,
     items: [
       reviewItem(9001, 0, {
         type: 'change',
@@ -334,6 +335,44 @@ function diaryReview(): ReviewProposal {
           suggestion: '確認這兩段講的是不是同一件事，或補一句把它們接起來。',
         },
       }),
+      // 真的找不到（P5-T017）：AI 引用時把「筆記」寫成「日記」，文章裡沒有這句。
+      reviewItem(
+        9005,
+        4,
+        {
+          type: 'change',
+          blockIndex: null,
+          change: {
+            type: 'typo',
+            before: '把去年的日記翻出來對照',
+            after: '把去年的日記本翻出來對照',
+            reason: '「日記」指的是一本本子，補上「本」比較清楚',
+            meaningChanged: false,
+          },
+          observation: null,
+        },
+        'unappliable',
+      ),
+      // 已經改好了（P5-T017）：原句找不到，但文章裡已經是改好的樣子。後端讀取時算出來的，
+      // 示範資料直接給結果。
+      reviewItem(
+        9006,
+        5,
+        {
+          type: 'change',
+          blockIndex: 2,
+          change: {
+            type: 'grammar',
+            before: '有八成都沒發生',
+            after: '有八成都沒有發生',
+            reason: '與全文語氣一致',
+            meaningChanged: false,
+          },
+          observation: null,
+        },
+        'skipped',
+        true,
+      ),
     ],
   };
 }
@@ -657,7 +696,7 @@ function buildStore(): Map<string, FixtureJob> {
       },
       review: diaryReview(),
       imageBriefs: diaryBriefs(),
-      blockers: ['還有 4 項校稿建議沒處理', '還沒渲染，先按「渲染」產生校樣'],
+      blockers: ['還有 5 項校稿建議沒處理', '還沒渲染，先按「渲染」產生校樣'],
     }),
     baseLongform('f-media', {
       state: 'MEDIA_READY',
@@ -1170,6 +1209,8 @@ export const fixtureApi: PublisherApi = {
     const wanted = new Set(input.itemIds);
     const applied: number[] = [];
     const skipped: number[] = [];
+    const unappliable: number[] = [];
+    const alreadyDone: number[] = [];
     let body = readBody(job);
 
     job.review.items = job.review.items.map((item) => {
@@ -1179,7 +1220,16 @@ export const fixtureApi: PublisherApi = {
         return { ...item, state: 'skipped', resolvedAt: new Date().toISOString(), resolvedByEdit: false };
       }
       // 後端是在標籤外面定位的；示範資料的正文都是規規矩矩的段落，
-      // 直接換第一個出現的位置就夠像了。
+      // 直接換第一個出現的位置就夠像了。找不到時照後端的規則分「已經改好了」與「真的找不到」
+      // （簡化版：不檢查長度與刪字，示範資料用不到）。
+      if (item.change && !body.includes(item.change.before)) {
+        if (body.includes(item.change.after)) {
+          alreadyDone.push(item.id);
+          return { ...item, state: 'skipped', alreadyDone: true };
+        }
+        unappliable.push(item.id);
+        return { ...item, state: 'unappliable' };
+      }
       if (item.change) body = body.replace(item.change.before, item.change.after);
       applied.push(item.id);
       return { ...item, state: 'applied', resolvedAt: new Date().toISOString() };
@@ -1209,7 +1259,8 @@ export const fixtureApi: PublisherApi = {
       revision: applied.length > 0 ? clone(job.currentRevision) : null,
       applied,
       skipped,
-      unappliable: [],
+      unappliable,
+      alreadyDone,
       review: clone(job.review),
     } satisfies ReviewResolveResult;
   },

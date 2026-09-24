@@ -48,6 +48,8 @@ export interface ProofEditRequest {
   itemId: number | null;
   /** 游標要停在哪段字前面；null＝文章開頭。 */
   caret: string | null;
+  /** 落在這段字（建議的 after）裡的 caret 不算，跟後端套用同一條規則（P5-T017）。 */
+  caretSkipInside?: string | null;
   blockIndex: number | null;
   nonce: number;
 }
@@ -59,6 +61,11 @@ export interface ProofHighlight {
   text: string;
   /** 掛在第幾個頂層區塊；null＝定位不到，就在整篇裡找第一個。 */
   blockIndex: number | null;
+  /**
+   * 落在這段字（建議的 after）裡的不標（P5-T017）：「很多事→很多事情」在已經有「很多事情」的文章裡，
+   * 要標的是另一個還沒改的「很多事」，跟按接受真的會改的位置一致。
+   */
+  skipInside?: string | null;
 }
 
 /** 標記的顏色。跟 styles.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。 */
@@ -709,7 +716,7 @@ function editTarget(doc: Document, body: Element, request: ProofEditRequest): { 
   if (request.caret !== null) {
     const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-      const hit = findIgnoringSpaces((node as Text).data, request.caret);
+      const hit = findIgnoringSpaces((node as Text).data, request.caret, request.caretSkipInside);
       if (hit === null) continue;
       caret.setStart(node, hit.start);
       caret.collapse(true);
@@ -739,7 +746,7 @@ function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, act
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const text = node as Text;
     if (text.parentElement?.closest('mark[data-hl]')) continue;
-    const hit = findIgnoringSpaces(text.data, highlight.text);
+    const hit = findIgnoringSpaces(text.data, highlight.text, highlight.skipInside);
     if (hit === null) continue;
     const range = doc.createRange();
     range.setStart(text, hit.start);

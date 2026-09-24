@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyChanges, type ChangeSlot } from '../src/core/review-apply.js';
+import { applyChanges, isAlreadyDone, type ChangeSlot } from '../src/core/review-apply.js';
 
 const slot = (ordinal: number, find: string, replaceWith: string | null): ChangeSlot => ({
   ordinal,
@@ -155,5 +155,95 @@ describe('逐條套用校稿建議', () => {
   it('同一份輸入跑兩次結果一樣（決定性）', () => {
     const slots = [slot(0, '不彷', '不妨'), slot(1, '我覺得', '我認為')];
     expect(applyChanges(base, slots)).toEqual(applyChanges(base, slots));
+  });
+});
+
+describe('原句找不到、但已經改好了（P5-T017）', () => {
+  const data = {
+    title: '聖杯與寶劍',
+    body: '<p class="wp-block-paragraph">以封建制為基礎的俗世政治，<em>相互競爭</em>、偶有媾和中。</p>',
+  };
+  const change = (before: string, after: string) => ({ before, after });
+
+  it('before 不在、after 在（標籤外、逐字）→ 已經改好了', () => {
+    expect(isAlreadyDone(data, change('以封建制爲基礎的俗世政治', '以封建制為基礎的俗世政治'))).toBe(true);
+  });
+
+  it('before 還在就不是', () => {
+    expect(isAlreadyDone(data, change('俗世政治', '俗世的政治'))).toBe(false);
+  });
+
+  it('after 跨過標籤才對得上就不算——跟套用的定位規則一樣', () => {
+    expect(isAlreadyDone(data, change('相互競爭偶有媾和中', '相互競爭、偶有媾和中'))).toBe(false);
+  });
+
+  it('after 只出現在標籤屬性裡不算', () => {
+    expect(isAlreadyDone(data, change('wp-block-paragrap', 'wp-block-paragraph'))).toBe(false);
+  });
+
+  it('after 太短（字母數字不到 6 個）不算', () => {
+    expect(isAlreadyDone(data, change('政冶', '政治'))).toBe(false);
+  });
+
+  it('標點不算字：「的時侯，→的時候，」只有 3 個字，AI 引用時標點抄錯的話錯字可能還在', () => {
+    const text = { body: '<p>那個時候，他說的時候，大家都笑了。</p>' };
+    expect(isAlreadyDone(text, change('的時侯，', '的時候，'))).toBe(false);
+  });
+
+  it('補逗號的短句：別處剛好有同樣的句子，不能當成改好了', () => {
+    // 第二段的錯還在，只是 AI 引用時少了原文的空格，逐字找不到；after 剛好在第一段有。
+    const text = { body: '<p>好的，我知道了。</p><p>他說好的 我會去。</p>' };
+    expect(isAlreadyDone(text, change('好的我', '好的，我'))).toBe(false);
+  });
+
+  it('接在後面補字：before 只出現在 after 裡面，不算「還在」', () => {
+    const text = { body: '<p>今天想到很多事情。</p>' };
+    expect(isAlreadyDone(text, change('想到很多事', '想到很多事情'))).toBe(true);
+  });
+
+  it('在前面補字也一樣', () => {
+    const text = { body: '<p>今天想到很多事情。</p>' };
+    expect(isAlreadyDone(text, change('很多事情。', '想到很多事情。'))).toBe(true);
+  });
+
+  it('別處還有一個獨立的 before，就不是改好了', () => {
+    const text = { body: '<p>今天想到很多事情。又想到很多事，</p>' };
+    expect(isAlreadyDone(text, change('想到很多事', '想到很多事情'))).toBe(false);
+  });
+
+  it('after 是 before 的一部分（刪字）不算', () => {
+    expect(isAlreadyDone(data, change('的俗世政治俗世政治', '的俗世政治'))).toBe(false);
+  });
+
+  it('before 是空的（純新增）不算', () => {
+    expect(isAlreadyDone(data, change('', '以封建制為基礎'))).toBe(false);
+  });
+});
+
+describe('before 落在 after 裡面不算數（P5-T017 審查）', () => {
+  const body = (text: string) => ({ body: `<p class="wp-block-paragraph">${text}</p>` });
+
+  it('接在後面補字：已經是 after 的那句不會被再補一次', () => {
+    const result = applyChanges(body('想到很多事情。'), [
+      { ordinal: 0, find: '想到很多事', replaceWith: '想到很多事情', skipInside: '想到很多事情' },
+    ]);
+    expect(result.notFound).toEqual([0]);
+    expect(result.templateData['body']).toContain('想到很多事情。');
+    expect(result.templateData['body']).not.toContain('事情情');
+  });
+
+  it('在前面補字也一樣', () => {
+    const result = applyChanges(body('想到很多事情。'), [
+      { ordinal: 0, find: '很多事情', replaceWith: '想到很多事情', skipInside: '想到很多事情' },
+    ]);
+    expect(result.notFound).toEqual([0]);
+  });
+
+  it('跳過落在 after 裡的，套到後面那個獨立的 before', () => {
+    const result = applyChanges(body('想到很多事情。又想到很多事，'), [
+      { ordinal: 0, find: '想到很多事', replaceWith: '想到很多事情', skipInside: '想到很多事情' },
+    ]);
+    expect(result.replaced).toEqual([0]);
+    expect(result.templateData['body']).toContain('想到很多事情。又想到很多事情，');
   });
 });

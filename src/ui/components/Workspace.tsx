@@ -144,7 +144,9 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
     () =>
       items.flatMap((item) => {
         const text = highlightText(item);
-        return text === null ? [] : [{ id: item.id, kind: kindOf(item), text, blockIndex: item.blockIndex }];
+        return text === null
+          ? []
+          : [{ id: item.id, kind: kindOf(item), text, blockIndex: item.blockIndex, skipInside: item.change?.after ?? null }];
       }),
     [items],
   );
@@ -169,13 +171,21 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
       setEditNotice('AI 還在處理這篇，等它跑完再改。');
       return;
     }
-    setEditNotice(null);
+    // 按過接受、後端在每個欄位（標題、正文…）都找不到原句的（unappliable，P5-T017）：字上標不出來，
+    // 游標只能放文章開頭——明講找不到，不然使用者會以為游標停的地方就是要改的地方。
+    // 不用 blockIndex === null 判斷：改標題的建議也沒有段落，但它找得到，只是不在正文裡。
+    const quoted = item === null ? null : (item.change?.before ?? item.observation?.excerpt ?? null);
+    const lost = item !== null && item.state === 'unappliable';
+    // 空白不同之類逐字對不上、但定位（忽略空白）找得到段落的，游標放那一段開頭。
+    const where = item?.blockIndex == null ? '文章開頭' : `第 ${item.blockIndex + 1} 段開頭`;
+    setEditNotice(lost && quoted ? `文章裡找不到「${quoted}」，游標放在${where}。找到那句直接改，改完按儲存。` : null);
     // 對照蓋在校樣上面，看不到正在改的文章；先回到文章再進編輯。
     setView('article');
     setSheet(null);
     setEditing({
       itemId: item?.id ?? null,
-      caret: item === null ? null : (highlightText(item) ?? item.observation?.excerpt ?? item.change?.before ?? null),
+      caret: item === null || lost ? null : (highlightText(item) ?? quoted),
+      caretSkipInside: item?.change?.after ?? null,
       blockIndex: item?.blockIndex ?? null,
       nonce: Date.now(),
     });

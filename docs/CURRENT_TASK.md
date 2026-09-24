@@ -4,14 +4,17 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **50 檔 / 835 測試**全綠（2026-09-24，P8-T002 安全審查修正後）
+- `npm run verify`：typecheck 通過；Vitest **50 檔 / 870 測試**全綠（2026-09-24，P5-T017 之後）
 - migration head：`007-article-content-type`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-無主 Task。[P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016）已完成（2026-09-24，subagent），
+[P5-T017](tasks/P5-T017-review-current-content.md) AI 校稿只看目前的文章（D-021）：實作完成、verify 綠，
+job 2 已唯讀確認；**還沒 commit**，等使用者看過。
+
+[P8-T002](tasks/P8-T002-setup-wizard.md) 首次設定精靈（D-016）已完成（2026-09-24，subagent），
 安全審查的十項已修（見 Task 完成結果）。**還沒用真實站台跑過**：等使用者用自己的站走一次（故意填錯密碼、填 http 各一次）。
 
 P5-T001 實測已結案（2026-09-23，使用者實測並發布）；實測中當場修的是 P5-T008～P5-T016，見該 Task 的完成結果。
@@ -53,8 +56,9 @@ B 版三個畫面都做完、commit 了，**使用者還沒實際用過**。真�
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。
 - `core-service.md` 的方法清單是節錄 → P5-T004。
 - D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。
-- Agent 的 prompt 同時帶「原稿」（sourceText）與目前的 templateData；接受建議或直接在文章上改都不更新
-  sourceText，兩者會不一致（P5-T010 審查發現，原本就存在），尚未開 Task。
+- ~~prompt 同時帶過期的原稿（sourceText）~~ → P5-T017 已處理：prompt 只送目前這一版；sourceText 仍是
+  「最早貼上的原稿」的紀錄，不跟著更新（刻意的）。模板 `rules.md` 裡還有「原稿」的字眼（指使用者的文章，
+  不是那份過期的稿子），在 `templates/`，P5-T017 沒動。
 - 直接在文章上改的整理規則只處理頂層：巢狀 `div`（例如清單項目裡）不轉成段落、空標題不刪（P5-T010 審查，少見）。
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。

@@ -32,3 +32,20 @@ describe('findBlockContaining', () => {
     expect(findBlockContaining(blocks, '我上的 2021 年那一屆')).toBe(1);
   });
 });
+
+describe('findIgnoringSpaces 跳過落在 after 裡的（P5-T017）', () => {
+  it('第一個出現的位置在 after 裡面，就找下一個', () => {
+    const text = '想到很多事情。又想到 很多事，';
+    const hit = findIgnoringSpaces(text, '想到很多事', '想到很多事情');
+    expect(hit).not.toBeNull();
+    expect(hit!.start).toBe(text.indexOf('想到 很多事'));
+  });
+
+  it('全部都在 after 裡面就是找不到', () => {
+    expect(findIgnoringSpaces('想到很多事情。', '想到很多事', '想到很多事情')).toBeNull();
+  });
+
+  it('不給 after 時照舊', () => {
+    expect(findIgnoringSpaces('想到很多事情。', '想到很多事')).not.toBeNull();
+  });
+});

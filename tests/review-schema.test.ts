@@ -39,6 +39,14 @@ describe('buildReviewSchema', () => {
     expect(validateAgainstSchema(schema, 'rv-1', valid).valid).toBe(true);
   });
 
+  it('correctedSource 選填：發布台不用它，不給也合格；舊的輸出帶著它也照樣合格（P5-T017）', () => {
+    const schema = buildReviewSchema(registry.get('diary-v1').schema);
+    const { correctedSource: _dropped, ...without } = valid;
+    expect(validateAgainstSchema(schema, 'rv-cs-1', without).valid).toBe(true);
+    expect(validateAgainstSchema(schema, 'rv-cs-2', valid).valid).toBe(true);
+    expect(REVIEW_OUTPUT_SCHEMA['required']).not.toContain('correctedSource');
+  });
+
   it('templateData 多塞欄位會被擋下', () => {
     const schema = buildReviewSchema(registry.get('diary-v1').schema);
     const bad = { ...valid, templateData: { ...valid.templateData, injected: 'x' } };
