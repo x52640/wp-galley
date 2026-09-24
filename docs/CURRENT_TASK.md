@@ -28,6 +28,7 @@
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
+| [P5-T024](tasks/P5-T024-choose-author.md) | 發布時指定作者，預設是本人 | D-024，使用者實測發現；等使用者說開工 |
 | [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 
