@@ -78,9 +78,52 @@ function checkRequest(request: FastifyRequest): void {
   if (!SAFE_METHODS.has(request.method) && !isAllowedWriteSource({ ...request.headers })) {
     throw new AppError(errorCodes.CROSS_ORIGIN_BLOCKED, '不接受從其他網頁送來的修改請求。', 403);
   }
+
+  // 5. /api 不論方法（GET 也算），瀏覽器說是從別的網站（含同一台機器的其他埠）來的一律擋（P5-T023，審查 #10）。
+  //    有些 GET 也有副作用（例如列模型會啟動 CLI），外站用一張 <img> 就能觸發。
+  if (isCrossSiteFetch(request.headers['sec-fetch-site']) && isApiRequest(request)) {
+    throw new AppError(errorCodes.CROSS_ORIGIN_BLOCKED, '不接受從其他網頁送來的請求。', 403);
+  }
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+const API_PATH = /^\/api(?:[/?#]|$)/;
+
+export function isApiPath(url: string): boolean {
+  return API_PATH.test(url);
+}
+
+/**
+ * 這個請求是不是打 `/api`。**不能只看原始網址**：`/%61pi/...` 會被 Fastify 解碼後路由到 `/api/...`，
+ * 原始字串比對就被繞過了（P5-T023 審查）。有匹配到路由時看路由本身的路徑；沒匹配到（404）時看解碼後的路徑；
+ * 原始網址本身是 `/api` 開頭也算。解碼失敗（不合法的 % 序列）的一律當成 `/api`——寧可多擋。
+ */
+export function isApiRequest(request: FastifyRequest): boolean {
+  const routeUrl = request.routeOptions?.url;
+  if (typeof routeUrl === 'string' && isApiPath(routeUrl)) return true;
+  if (isApiPath(request.url)) return true;
+  const path = request.url.split(/[?#]/, 1)[0] ?? '';
+  try {
+    return isApiPath(decodeURIComponent(path));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 瀏覽器附的 `Sec-Fetch-Site` 是 `cross-site` 或 `same-site`（P5-T023）。
+ *
+ * 發布台自己的畫面一律是 `same-origin`：後端直接提供時 :3000 對 :3000；經 Vite dev server 時畫面在 :5173、
+ * `/api` 也打 :5173（proxy 轉給 :3000），瀏覽器看到的還是同源。校樣 iframe 由同源的畫面載入，也是 same-origin。
+ * 網址列直接打是 `none`；curl、測試不帶這個標頭——這三種照舊放行。
+ * `same-site` 也擋：同一台機器其他埠（localhost:8080 上別人的開發中網站）對瀏覽器來說是同一個 site。
+ */
+export function isCrossSiteFetch(site: string | string[] | undefined): boolean {
+  if (site === undefined) return false;
+  const value = (Array.isArray(site) ? site[0] : site)?.trim().toLowerCase();
+  return value === 'cross-site' || value === 'same-site';
+}
 
 /**
  * 會改東西的請求（POST／PUT／DELETE…）只接受發布台自己的畫面或非瀏覽器的本機程式。

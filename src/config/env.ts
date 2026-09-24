@@ -12,6 +12,18 @@ import { createSecretScrubber } from './secrets.js';
 /** 允許綁定的位址。0.0.0.0 與 :: 會讓服務暴露到區網，明確排除。 */
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
+/**
+ * 網址的主機名是不是本機（`localhost`、`127.x.x.x`、`::1`，IPv6 可帶中括號）。
+ *
+ * 設定精靈（src/wordpress/setup.ts）與啟動設定共用這一個判斷（P5-T023）：http 的 WordPress 網址只准本機測試站，
+ * 其他一律要 https——Application Password 走明碼等於送給路上每一台機器。放在 config 層是因為依賴方向：
+ * wordpress 可以 import config，反過來不行。
+ */
+export function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
 export class ConfigError extends Error {
   override readonly name = 'ConfigError';
   constructor(
@@ -73,6 +85,12 @@ function normalizeWordPressUrl(raw: string): string {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new ConfigError('WORDPRESS_URL 必須是 http 或 https');
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname)) {
+    throw new ConfigError(
+      'WORDPRESS_URL 用 http 只准本機測試站（localhost、127.0.0.1、::1）；其他網站一定要 https，' +
+        '不然應用程式密碼會用明碼送出去。把網址改成 https:// 開頭再啟動',
+    );
   }
   return parsed.origin + parsed.pathname.replace(/\/+$/, '');
 }

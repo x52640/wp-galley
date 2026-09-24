@@ -4,14 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **56 檔 / 984 測試**全綠（2026-09-24，P5-T022 實作後、未 commit）
+- `npm run verify`：typecheck 通過；Vitest **58 檔 / 1030 測試**全綠（2026-09-24，P5-T023 實作後、未 commit）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-[P5-T023](tasks/P5-T023-security-hardening.md)（D-023 第五個，最後一個）。
+無。D-023（Codex 全 repo 審查 16 條）已全部完成：P5-T019～P5-T023。使用者要求做完先停，等指示再開工。
 
 ## 上次停在哪（2026-09-24 收官）
 
@@ -28,7 +28,6 @@
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P5-T023](tasks/P5-T023-security-hardening.md) | 秘密遮蔽、擋跨站 GET、http 只准 loopback | D-023，#6 #10 #4 #7 #5 #16 |
 | [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
 | [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
 

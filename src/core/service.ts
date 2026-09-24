@@ -87,7 +87,7 @@ import { userNoteLength } from '../contract/user-note.js';
 import { buildTemplateDataFromSource } from './source-text.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
-import { createSecretScrubber, type Scrubber } from '../config/secrets.js';
+import { containsSecret, createSecretScrubber, type Scrubber } from '../config/secrets.js';
 import { paths } from '../config/paths.js';
 import { AgentRegistry, AgentUnavailableError } from '../agents/registry.js';
 import { createJobWorkspace } from '../agents/workspace.js';
@@ -295,6 +295,12 @@ const AGENT_INTERRUPTED_MESSAGE = '後端重啟，這次沒有完成';
 const OTHER_SITE_MEDIA_MESSAGE =
   '這張圖是傳到另一個站的媒體庫，現在發布台連的是別的站，不能用在這裡。請在現在這個站重新上傳這張圖。';
 
+/**
+ * 使用者輸入含目前設定的 WordPress 應用程式密碼時的訊息（D-023，P5-T023，審查 #5）。
+ * **訊息本身不含密碼**，連遮蔽過的樣子、位置、長度都不給。
+ */
+export const APP_PASSWORD_IN_CONTENT_MESSAGE = '內容裡有你的 WordPress 應用程式密碼，請刪掉再存';
+
 export interface CoreServiceOptions {
   readonly db: DatabaseSync;
   readonly templates: TemplateRegistry;
@@ -466,11 +472,40 @@ export class CoreService {
     }
   }
 
+  /**
+   * 使用者給的東西裡有 WordPress 應用程式密碼就整個拒絕（D-023，P5-T023，審查 #5）。
+   *
+   * **所有使用者文字進系統、以及任何要送給 Agent 的東西，都在這一個方法檢查**：建立 job、建新版本
+   * （createRevision——放圖、設封面、套用校稿全部經過它）、上傳圖片的替代文字與說明、派校稿（指示＋實際送出的
+   * prompt）、請 AI 配一張（那句話＋實際送出的 prompt）、生圖（實際送出的 prompt）。派工時檢查的是**組好的
+   * prompt**，所以密碼設定之前就存進去的舊內容也擋得住。
+   *
+   * 「認得哪些樣子」跟遮蔽器完全一樣（containsSecret 用的就是同一個遮蔽器，含有無空白兩種寫法），
+   * 設定精靈當場換的新密碼也立刻算數。在任何寫入之前呼叫，拒絕時什麼都不留。
+   */
+  private assertNoAppPassword(...values: unknown[]): void {
+    if (this.hasAppPassword(...values)) throw new InvalidInputError(APP_PASSWORD_IN_CONTENT_MESSAGE);
+  }
+
+  private hasAppPassword(...values: unknown[]): boolean {
+    return values.some((value) => containsSecret(this.scrub, value));
+  }
+
+  /**
+   * 目前這一版的內容（templateData＋渲染結果）。核准、發布、上傳／換圖前檢查用：密碼設定之前就存進去的舊內容
+   * 不能被核准、發出去，也不要等圖傳到 WordPress 之後才在建版本時被擋（審查補充）。
+   */
+  private currentContentOf(job: JobRow): unknown[] {
+    const row = this.repo.latestRevision(job.id);
+    return row ? [this.payloadOf(row).templateData, row.rendered_html] : [];
+  }
+
   // --- 建立與讀取 -----------------------------------------------------------
 
   createJob(input: CreateJobInput): Job {
     const target = this.requireTarget(input.targetKey);
     const template = this.templates.get(target.templateId);
+    this.assertNoAppPassword(input.sourceText, input.title, input.templateData);
 
     if (input.sourceText.trim().length === 0 && !input.templateData) {
       throw new InvalidInputError('原稿是空的。貼上內容或直接給 templateData 才建得起來');
@@ -684,6 +719,8 @@ export class CoreService {
       featuredMediaAssetId:
         input.featuredMediaId === undefined ? base.featuredMediaAssetId : input.featuredMediaId,
     };
+    // 檢查整份新內容（不只這次送來的欄位）：之後的校稿會把整份送給 Agent。
+    this.assertNoAppPassword(payload.templateData, input.editedBody, input.sourceText, input.reason);
 
     if (payload.featuredMediaAssetId !== null) {
       const asset = this.repo.mediaById(payload.featuredMediaAssetId);
@@ -836,6 +873,9 @@ export class CoreService {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     }
 
+    const userPrompt = buildUserPrompt(payload.templateData, input.instruction);
+    this.assertNoAppPassword(input.instruction, userPrompt);
+
     const workspace = job.workspace_path ?? createJobWorkspace(this.draftsDir, job.uuid);
 
     const runRow = this.repo.insertAgentRun({
@@ -855,7 +895,7 @@ export class CoreService {
         input.provider,
         {
           systemPrompt: buildSystemPrompt(template, task),
-          userPrompt: buildUserPrompt(payload.templateData, input.instruction),
+          userPrompt,
           workspaceDir: workspace,
           model: input.model,
           timeoutMs: input.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
@@ -1455,6 +1495,14 @@ export class CoreService {
       throw new AgentUnavailableError(status.reason ?? '沒有能生圖的 Agent');
     }
 
+    // 使用者在文章上請 AI 配的那條（P5-T018），prompt 建需求時就由固定程式組好了（前後段落＋
+    // 那句話＋固定約束），直接用；再包一層「畫面描述」反而把約束埋進內容裡。
+    const prompt =
+      brief.origin === 'user'
+        ? brief.prompt
+        : buildImagePrompt({ prompt: brief.prompt, aspectRatio: brief.aspect_ratio });
+    this.assertNoAppPassword(prompt);
+
     const workspace = job.workspace_path ?? createJobWorkspace(this.draftsDir, job.uuid);
     const runRow = this.repo.insertAgentRun({
       jobId: job.id,
@@ -1473,12 +1521,7 @@ export class CoreService {
       const result = await this.agents.generateImage(
         provider,
         {
-          // 使用者在文章上請 AI 配的那條（P5-T018），prompt 建需求時就由固定程式組好了（前後段落＋
-          // 那句話＋固定約束），直接用；再包一層「畫面描述」反而把約束埋進內容裡。
-          prompt:
-            brief.origin === 'user'
-              ? brief.prompt
-              : buildImagePrompt({ prompt: brief.prompt, aspectRatio: brief.aspect_ratio }),
+          prompt,
           workspaceDir: workspace,
           timeoutMs: input.timeoutMs ?? DEFAULT_IMAGE_TIMEOUT_MS,
           maxOutputBytes: MAX_AGENT_OUTPUT_BYTES,
@@ -1583,6 +1626,7 @@ export class CoreService {
     const job = this.requireJob(uuid);
     this.assertMutable(job);
     const row = this.requireCandidate(job, candidateId);
+    this.assertNoAppPassword(input.altText, ...this.currentContentOf(job));
     const brief = this.repo.imageBriefById(row.image_brief_id);
     if (!brief || brief.job_id !== job.id || brief.dismissed_at !== null) {
       throw new InvalidInputError('這張圖對應的配圖需求已經不在了（或被標成不要了）');
@@ -1645,6 +1689,7 @@ export class CoreService {
     const revisionRow = this.requireRevision(job);
 
     const note = normalizeUserNote(input.note);
+    this.assertNoAppPassword(input.note);
     // 跟前端計數、zod 同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。
     if (userNoteLength(note) > USER_NOTE_MAX) {
       throw new InvalidInputError(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
@@ -1681,11 +1726,13 @@ export class CoreService {
 
     const { anchor, position } = positionAnchor(blocks, input.afterBlockIndex);
     const context = positionContext(blocks, input.afterBlockIndex);
+    const prompt = buildPositionImagePrompt({ ...context, note, aspectRatio: POSITION_ASPECT_RATIO });
+    this.assertNoAppPassword(prompt);
     const row = this.repo.insertUserImageBrief({
       jobId: job.id,
       briefKey: `${USER_BRIEF_PREFIX}${randomBytes(4).toString('hex')}`,
       purpose: '你在文章上指定位置、請 AI 配的圖',
-      prompt: buildPositionImagePrompt({ ...context, note, aspectRatio: POSITION_ASPECT_RATIO }),
+      prompt,
       aspectRatio: POSITION_ASPECT_RATIO,
       // 那句話講的是風格（「水彩風」），不是圖的內容，不能當替代文字；生圖那一趟也只回圖。
       // 留空，卡片上在「用這張」旁邊請使用者自己寫一句（選填），跟著用這張送出。
@@ -2192,6 +2239,9 @@ export class CoreService {
    * 照錨點自動放進正文（沒對上內文圖是 null，P5-T016）。
    */
   async addMediaWithOutcome(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
+    // 替代文字與說明會進正文（放圖時寫進 figure），之後的校稿會送給 Agent。目前的內容也先看：
+    // 自動放圖、設封面會建新版本，舊內容有密碼的話會在那裡被擋——那時圖已經傳上 WordPress 了。
+    this.assertNoAppPassword(input.altText, input.caption, ...this.currentContentOf(this.requireJob(uuid)));
     return this.trackWordPress(() => this.trackMediaUpload(uuid, () => this.addMediaUntracked(uuid, input)));
   }
 
@@ -2307,6 +2357,7 @@ export class CoreService {
    * 就算這張圖還沒插進正文也一樣。寧可多撤一次，也不要漏掉。
    */
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
+    this.assertNoAppPassword(input.altText, input.caption, ...this.currentContentOf(this.requireJob(uuid)));
     return this.trackWordPress(() =>
       this.trackMediaUpload(uuid, () => this.replaceMediaUntracked(uuid, assetId, input)),
     );
@@ -2537,6 +2588,7 @@ export class CoreService {
     }
 
     const revisionRow = this.requireRevision(job);
+    this.assertNoAppPassword(this.payloadOf(revisionRow).templateData, revisionRow.rendered_html);
     if (revisionRow.content_hash !== input.contentHash) {
       throw new ContentChangedError('內容在你按下核准之後又改過了，請重新檢查預覽再核准一次', {
         expected: revisionRow.content_hash,
@@ -2830,6 +2882,11 @@ export class CoreService {
 
     // 4. 需要精選圖片的 target 一定要有精選圖片。
     const payload = this.payloadOf(revisionRow);
+
+    // 4a. 內容裡有 WordPress 應用程式密碼（核准之後才設定密碼的舊內容）就不發（D-023）。
+    if (this.hasAppPassword(payload.templateData, revisionRow.rendered_html)) {
+      throw this.rejectPublish(job, actor, APP_PASSWORD_IN_CONTENT_MESSAGE);
+    }
     const featured =
       payload.featuredMediaAssetId === null ? null : this.repo.mediaById(payload.featuredMediaAssetId);
     if (target.requireFeaturedImage && (featured === null || featured.wordpress_media_id === null)) {

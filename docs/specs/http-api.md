@@ -12,6 +12,16 @@
   `REQUEST_CONTRACT_CHECK` 在編譯期確認 schema 與契約的欄位一模一樣——zod 會默默丟掉
   不認得的欄位，前端多送的欄位不會報錯，只會「以為有效」。
 - 只有「做完沒有資料可回」的路由回 `{ <動作>: true }`，其餘都回資料。
+- **跨站一律 403**（P5-T023）：`/api` 下任何方法（GET、HEAD 也算），瀏覽器帶 `Sec-Fetch-Site: cross-site`
+  或 `same-site` 就回 403 `CROSS_ORIGIN_BLOCKED`；`same-origin`、`none`、沒帶的照舊。規則見
+  [security.md](security.md)「本機守門與秘密」。
+- **所有回應送出前過遮蔽器**（P5-T023）：JSON 與校樣 HTML 裡若出現已知的 WordPress 密碼，換成 `[REDACTED]`；
+  圖檔原樣。
+- **內容裡有 WordPress 應用程式密碼就拒絕**（P5-T023，D-023）：建立 job、建 revision、上傳／換圖／用這張的
+  替代文字與說明、派校稿、請 AI 配一張、生圖、核准，回 400 `INVALID_INPUT`「內容裡有你的 WordPress 應用程式密碼，
+  請刪掉再存」，什麼都不寫、不派工、不上傳；發布回 `PUBLISH_BLOCKED`（同一句），一個請求都不送。
+- `GET /api/agents/:id/models`：30 秒快取（跟 `GET /api/agents` 一樣），同時進來的請求共用同一趟；
+  `POST /api/setup/agents` 會清掉。
 
 ## 路由
 
@@ -118,7 +128,7 @@
     文字由後端給，畫面照抄）與逐關的 `checks`。
   - 所有 `POST /api/setup/*` 要 `Content-Type: application/json`（否則 415）。全域守門對所有修改請求：
     `Sec-Fetch-Site` 有的話只能是 `same-origin`／`none`、`Origin` 不能是 `null`、有 Origin 時要跟 Host
-    同源（否則 403 `CROSS_ORIGIN_BLOCKED`）。兩個有副作用的讀取（agents、destinations/check）也是 POST，
+    同源（否則 403 `CROSS_ORIGIN_BLOCKED`）；`/api` 的 GET 也擋 `cross-site`／`same-site`（P5-T023）。兩個有副作用的讀取（agents、destinations/check）也是 POST，
     吃同一套。
   - 換站：`wordpress/test` 通過、測的是另一個站、而目前的站上發過文或傳過圖時，回應帶 `siteChange`
     （from／to／publishedJobs／uploadedMedia）；這時 `POST /api/setup/wordpress` 要帶 `confirmSiteChange: true`，

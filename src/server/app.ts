@@ -123,6 +123,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   applyLocalOnlyGuard(app);
 
+  // 所有回應送出前的最後一道遮蔽（P5-T023，審查 #7）：原本只遮錯誤回應，200 的 JSON 與校樣 HTML
+  // 直接送出。掛在 root、在所有路由之前，一次涵蓋全部路由。到這裡時 JSON 已經序列化成字串；
+  // Buffer（圖片）與 stream（靜態檔）不是字串，原封不動。Content-Length 由 Fastify 在 onSend 之後
+  // 依換過的字串計算（路由都沒自己設）。
+  app.addHook('onSend', async (_request, _reply, payload) => (typeof payload === 'string' ? scrub(payload) : payload));
+
   app.setNotFoundHandler((request, reply) => {
     const { statusCode, body } = toErrorBody(
       new AppError(errorCodes.NOT_FOUND, `找不到 ${request.method} ${request.url}`, 404),

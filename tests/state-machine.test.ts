@@ -46,18 +46,57 @@ describe('狀態機的表格', () => {
   });
 });
 
+/**
+ * docs/specs/state-machine.md「狀態轉移」那張表，**抄死在這裡**（審查 #16）。
+ * 不能從 TRANSITIONS 反推：實作表多加一條錯的邊，反推出來的「非法清單」就跟著少一條，測試永遠綠。
+ * 規格改了，這裡要跟著手改——那正是要的：改狀態機必須同時改規格與這張表。
+ * 表裡沒列的 FAILED／CANCELLED／SUPERSEDED 是終止狀態（「另外三個終止狀態」），沒有出口。
+ */
+const SPEC_TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
+  SOURCE: ['REVIEWED', 'RENDERED', 'CANCELLED', 'FAILED'],
+  REVIEWED: ['MEDIA_READY', 'RENDERED', 'CANCELLED', 'FAILED'],
+  MEDIA_READY: ['RENDERED', 'CANCELLED', 'FAILED'],
+  RENDERED: ['PREVIEWED', 'REVIEWED', 'MEDIA_READY', 'CANCELLED', 'FAILED'],
+  PREVIEWED: ['APPROVED', 'RENDERED', 'CANCELLED', 'FAILED'],
+  APPROVED: ['PUBLISHING', 'RENDERED', 'CANCELLED'],
+  PUBLISHING: ['PUBLISHED', 'FAILED'],
+  PUBLISHED: ['SUPERSEDED'],
+  FAILED: [],
+  CANCELLED: [],
+  SUPERSEDED: [],
+};
+
+describe('實作的轉移表與規格完全一致', () => {
+  it('狀態集合相同，每個狀態允許的目標集合相同（不多不少）', () => {
+    expect(Object.keys(TRANSITIONS).sort()).toEqual(Object.keys(SPEC_TRANSITIONS).sort());
+    expect([...JOB_STATES].sort()).toEqual(Object.keys(SPEC_TRANSITIONS).sort());
+    for (const state of JOB_STATES) {
+      expect([...TRANSITIONS[state]].sort(), state).toEqual([...SPEC_TRANSITIONS[state]].sort());
+    }
+  });
+});
+
 describe('非法轉移一律丟 InvalidTransitionError', () => {
-  // 表格之外的每一組轉移都要被擋下來，不是抽樣。
+  // 規格表之外的每一組轉移都要被擋下來，不是抽樣。答案來自 SPEC_TRANSITIONS，不是實作。
   const allPairs: [JobState, JobState][] = [];
+  const legalPairs: [JobState, JobState][] = [];
   for (const from of JOB_STATES) {
     for (const to of JOB_STATES) {
-      if (!TRANSITIONS[from].includes(to)) allPairs.push([from, to]);
+      if (SPEC_TRANSITIONS[from].includes(to)) legalPairs.push([from, to]);
+      else allPairs.push([from, to]);
     }
   }
 
+  it(`規格允許的 ${legalPairs.length} 組全部通過`, () => {
+    for (const [from, to] of legalPairs) {
+      expect(canTransition(from, to), `${from} → ${to}`).toBe(true);
+      expect(() => assertTransition(from, to)).not.toThrow();
+    }
+  });
+
   it(`共 ${allPairs.length} 組非法轉移，全部被拒絕`, () => {
     for (const [from, to] of allPairs) {
-      expect(canTransition(from, to)).toBe(false);
+      expect(canTransition(from, to), `${from} → ${to}`).toBe(false);
       expect(() => assertTransition(from, to)).toThrow(InvalidTransitionError);
     }
   });

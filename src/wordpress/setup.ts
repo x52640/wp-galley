@@ -12,6 +12,7 @@ import type {
 } from '../contract/api.js';
 import { createSecretScrubber } from '../config/secrets.js';
 import { writeFileAtomic } from '../config/env-file.js';
+import { isLoopbackHostname } from '../config/env.js';
 import { readBodyCapped, ResponseTooLargeError, WordPressClient } from './client.js';
 import { WordPressError, wordpressErrorCodes } from './errors.js';
 import { fetchIdentity, fetchPostTypes, fetchTaxonomies, type SiteIdentity } from './site.js';
@@ -55,11 +56,11 @@ export function normalizeSiteUrl(raw: string): string | null {
   return parsed.origin + path;
 }
 
-/** 本機架的測試站可以用 http；其他一律 https。 */
-export function isLoopbackHostname(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host);
-}
+/**
+ * 本機架的測試站可以用 http；其他一律 https。判斷的家在 config（啟動設定也要用，P5-T023）；
+ * 這裡轉出，既有的 import 不用改。
+ */
+export { isLoopbackHostname };
 
 /** WordPress 產生的應用程式密碼：24 個英數字，顯示時每 4 個一組。空白一律拿掉。 */
 export function normalizeAppPassword(raw: string): string {

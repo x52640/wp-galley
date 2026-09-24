@@ -35,6 +35,7 @@ export class FakeAdapter implements AgentAdapter {
   readonly cancelled: string[] = [];
   readonly imageCalls: { runId: string; request: ImageRequest }[] = [];
   detectCount = 0;
+  listModelsCount = 0;
   /**
    * 只有給了 `image` 的假 adapter 才會生圖——跟真實世界一樣，不是每一家都有這個方法。
    */
@@ -97,6 +98,7 @@ export class FakeAdapter implements AgentAdapter {
   }
 
   async listModels(): Promise<ModelOption[]> {
+    this.listModelsCount += 1;
     return this.behaviour.models ?? [];
   }
 

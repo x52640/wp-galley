@@ -109,7 +109,7 @@ describe('守門判斷函式', () => {
 
 /**
  * 會改東西的請求（P8-T002）：沙箱 iframe、file:// 頁面送的是 `Origin: null`，原本會被放行；
- * 瀏覽器附的 Sec-Fetch-Site 說不是同源也要擋。GET 照舊（校樣 iframe 之類不受影響）。
+ * 瀏覽器附的 Sec-Fetch-Site 說不是同源也要擋。GET 的 Sec-Fetch-Site 另見 P5-T023（/api 一律擋跨站）。
  */
 describe('修改請求的來源', () => {
   it.each([
@@ -135,13 +135,23 @@ describe('修改請求的來源', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('GET 不受影響', async () => {
+  it('GET 帶 Origin: null（沒有 Sec-Fetch-Site）不受影響', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/health',
+      headers: { host: '127.0.0.1:3000', origin: 'null' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET 帶 Sec-Fetch-Site: cross-site 也擋（P5-T023，審查 #10）', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/health',
       headers: { host: '127.0.0.1:3000', origin: 'null', 'sec-fetch-site': 'cross-site' },
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('CROSS_ORIGIN_BLOCKED');
   });
 
   it('發布台自己的畫面（same-origin）與非瀏覽器（沒有這兩個標頭）照常', () => {

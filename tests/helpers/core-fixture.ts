@@ -11,6 +11,7 @@ import { paths } from '../../src/config/paths.js';
 import { createTestDatabase, type TestDatabase } from './test-db.js';
 import { startMockWordPress, type MockResponse, type MockWordPress, type RecordedRequest } from './mock-wordpress.js';
 import type { AgentAdapter } from '../../src/agents/types.js';
+import type { Scrubber } from '../../src/config/secrets.js';
 
 /**
  * 階段 5 的測試腳手架。
@@ -36,6 +37,8 @@ export interface CoreFixtureOptions {
   readonly handler?: (request: RecordedRequest, index: number) => MockResponse;
   /** 測發布前置檢查用：換成開關不同的 target。 */
   readonly targets?: PublishTargetRegistry;
+  /** 測秘密相關規則用（P5-T023）：CoreService 的遮蔽器。不給就是空的（不認得任何密碼）。 */
+  readonly scrub?: Scrubber;
 }
 
 /** 預設的假 WordPress：接受媒體上傳、建立與更新文章、列出分類項目。 */
@@ -161,6 +164,7 @@ export async function createCoreFixture(options: CoreFixtureOptions = {}): Promi
     wordpress: client,
     draftsDir: join(workDir, 'drafts'),
     mediaDir: join(workDir, 'media'),
+    ...(options.scrub === undefined ? {} : { scrub: options.scrub }),
   });
 
   return {

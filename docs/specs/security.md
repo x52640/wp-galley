@@ -52,6 +52,31 @@
   Fastify plugin 會建立封裝範圍，hook 就套不到父層註冊的路由，守門會整個失效（階段 1 踩過）。
 - **任何要輸出的東西**（log、HTTP response、未來的 MCP output）都要先過
   `createSecretScrubber()`；設定摘要用 `redactConfig()`，永遠不要直接序列化 `AppConfig`。
+  集中點（P5-T023，審查 #6 #7）：
+  - **log**：pino 的 `formatters.log` 遮合併進 log 的物件；`hooks.logMethod` 遮其餘所有參數——訊息字串
+    （`log.warn(obj, msg)` 的 msg）、printf 參數（`%s`／`%j`／`%o` 的字串、物件、Error，格式化前先深層遮）、
+    當第一個參數的 Error（pino 拿它的 message 當 msg）。第一個參數是一般物件時不在這裡動（例如 Fastify 的
+    `{ req }`，先拆開 serializer 就認不得），交給 formatters.log。Error 複製時保留型別與 stack，照樣當 Error
+    序列化。遮蔽器深層走到第 8 層為止。原本只遮物件，錯誤訊息裡的密碼原樣進 log。有測試擷取實際 log 輸出斷言。
+  - **HTTP 回應**：`buildApp` 在 root 掛一個 `onSend`，**所有路由、所有狀態碼**的字串回應（JSON 已序列化、
+    校樣 HTML）送出前過遮蔽器；Buffer（圖片）與 stream（靜態檔）不動。Content-Length 由 Fastify 依換過的
+    字串計算。原本只遮錯誤回應，WordPress 回來的資料（例如分類名稱）原樣回給畫面。
+  - **遮蔽器認得兩種樣子**：每個秘密的原樣，加上去掉所有空白的樣子（WordPress 顯示的密碼每 4 字一組有空白，
+    驗證時會去掉；`.env` 手填有空白、貼進文章沒空白，都要抹）。
+  - 遮蔽是字串比對：秘密在 JSON 裡被跳脫（含 `"`、`\`）就對不上。Application Password 只有英數，不受影響。
+- **內容裡有 WordPress 應用程式密碼就拒絕（D-023，P5-T023，審查 #5）**：使用者文字進系統、以及任何要送給
+  Agent 的東西，都在 `CoreService.assertNoAppPassword` 一處檢查，含遮蔽器認得的任何密碼就丟
+  `InvalidInputError`「內容裡有你的 WordPress 應用程式密碼，請刪掉再存」（400 `INVALID_INPUT`），**在任何寫入、
+  任何派工之前**；錯誤訊息、details、log 都不含密碼。
+  - 涵蓋：`createJob`（原稿、標題、templateData）、`createRevision`（整份新內容、editedBody、sourceText、reason
+    ——放圖、設封面、套用校稿都經過它）、上傳／換圖／「用這張」的替代文字與說明、派校稿（指示＋**組好的
+    prompt**）、請 AI 配一張（那句話＋組好的 prompt）、生圖（組好的 prompt）。派工檢查組好的 prompt，所以密碼
+    設定之前就存進去的舊內容也送不出去。
+  - 舊內容（密碼設定之前存的）另外在三處擋：**核准**（`approve`，`InvalidInputError`）、**發布**（前置檢查 4a，
+    `PublishBlockedError`，同一句訊息，一個請求都不送）、**上傳／換圖／用這張**（送到 WordPress 之前先看目前
+    這一版；不然自動放圖、設封面建新版本時才被擋，圖已經傳上去了）。
+  - 判斷用同一個遮蔽器（`containsSecret`）：認得的樣子跟遮蔽完全一致，設定精靈當場加的新密碼立刻算數；
+    另外把字串的空白全部去掉再比一次，密碼中間的空白換成換行、tab 也認得。舊密碼留在遮蔽器裡，也一樣會擋。
 - 帳號用專用 WordPress 使用者（editor，不用 administrator）與 Application Password。
 - **本機守門對「會改東西的請求」更嚴（P8-T002）**：非 GET／HEAD／OPTIONS 的請求（`isAllowedWriteSource`）：
   - `Origin: null`（沙箱 iframe、`file://` 頁面）拒絕。原本「Origin 是 null 就放行」讓沙箱裡的外站頁面
@@ -63,6 +88,18 @@
     Host 保持 :5173，跟瀏覽器送的 Origin 一樣，所以不用另外開例外（有測試；實測 dev server 通過）。
     **改 Vite proxy 設定時不能打開 `changeOrigin`**，不然畫面上所有修改都會被擋。
   - 沒有 Origin 也沒有 Sec-Fetch-Site 的（curl、測試、非瀏覽器程式）照舊放行：本機程式本來就讀得到 `.env`。
+- **`/api` 不論方法都擋跨站（P5-T023，審查 #10）**：`Sec-Fetch-Site` 是 `cross-site` 或 `same-site` 一律 403
+  `CROSS_ORIGIN_BLOCKED`，GET／HEAD 也算。有些 GET 有副作用（`GET /api/agents/:id/models` 會啟動 CLI 子行程），
+  外站用一張 `<img>` 就能觸發；`same-site` 也擋，因為同一台機器的其他埠對瀏覽器來說是同一個 site。
+  - 不受影響的：發布台自己的畫面一律 `same-origin`（後端直接提供時 :3000 對 :3000；經 Vite dev server 時畫面在
+    :5173、`/api` 也打 :5173 再由 proxy 轉給 :3000，UI 的請求全是相對路徑 `/api/...`）；校樣 iframe 由同源畫面
+    載入，也是 `same-origin`（校樣自己的 CSP 不准載 http 圖片，不會再打 `/api`）；網址列直接打是 `none`；
+    curl／測試沒有這個標頭。**UI 若改成直接打 :3000（不經 proxy），會變成 same-site 被擋。**
+  - 只管 `/api`：外站連結點進首頁（靜態 UI）不擋。判斷「是不是 `/api`」不能只看原始網址——`/%61pi/...` 會被
+    Fastify 解碼後路由到 `/api/...`。有匹配路由看路由本身的路徑，沒匹配（404）看解碼後的路徑，解碼失敗當成
+    `/api`（`isApiRequest`）。
+  - 模型列表另有 30 秒快取（跟 `GET /api/agents` 同一個時間），同時進來的請求共用同一趟；設定精靈的
+    「重新偵測」（`POST /api/setup/agents`）會一起清掉。
 
 ## 設定精靈寫入的秘密（P8-T002）
 
@@ -101,7 +138,9 @@
 - **只讀不寫**：測試連線只打 `GET /wp-json/`、`GET /wp/v2/users/me`、`GET /wp/v2/types`、
   `GET /wp/v2/taxonomies`，不建立、不修改站上任何東西；不重試（認證錯誤重試會被安全外掛鎖帳號）。
 - **http 網址只准 loopback**（本機架的測試站）；其他一律要 https：Application Password 走明碼
-  就等於把密碼送給路上每一台機器。
+  就等於把密碼送給路上每一台機器。**啟動設定也一樣**（P5-T023，審查 #4）：`.env` 手填的 `WORDPRESS_URL`
+  是 http 且不是 loopback，`loadConfig` 丟 `ConfigError`、啟動失敗。精靈與啟動共用 `src/config/env.ts` 的
+  `isLoopbackHostname`（`localhost`、`127.x.x.x`、`::1`）。
 - **回應本體有逾時與上限**：逾時涵蓋到本體讀完（標頭先到、本體一直不來的伺服器也會被切斷）；
   `/wp-json/` 首頁上限 8 MB，一般 REST 回應上限 32 MB（`WordPressClient`），超過就中止、不重試。
 - **換設定的期間不碰 WordPress**：存檔先 `CoreService.tryBeginReconfigure()`——有發布或上傳在跑就 409；

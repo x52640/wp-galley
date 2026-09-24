@@ -13,8 +13,26 @@ const MIN_SECRET_LENGTH = 6;
 
 export type Scrubber = <T>(value: T) => T;
 
+/**
+ * 一個秘密要抹掉的所有樣子：原樣，加上去掉所有空白的樣子（P5-T023）。
+ *
+ * WordPress 顯示 Application Password 時每 4 個字一組、中間有空白，驗證時會去掉空白——兩種寫法是同一個密碼。
+ * `.env` 手填的可能是有空白的，使用者貼進文章的可能是沒空白的（或反過來），只認一種就會漏。
+ */
+function secretForms(secret: string): string[] {
+  const bare = secret.replace(/\s+/g, '');
+  return bare === secret ? [secret] : [secret, bare];
+}
+
 export function createSecretScrubber(secrets: readonly (string | null | undefined)[]): Scrubber {
-  const active = [...new Set(secrets.filter((s): s is string => typeof s === 'string' && s.length >= MIN_SECRET_LENGTH))]
+  const active = [
+    ...new Set(
+      secrets
+        .filter((s): s is string => typeof s === 'string')
+        .flatMap(secretForms)
+        .filter((s) => s.length >= MIN_SECRET_LENGTH),
+    ),
+  ]
     // 長的先換，避免短秘密是長秘密子字串時換出殘骸。
     .sort((a, b) => b.length - a.length);
 
@@ -71,4 +89,25 @@ export function createMutableScrubber(initial: readonly (string | null | undefin
       current = createSecretScrubber(known);
     },
   };
+}
+
+/**
+ * 這個值（字串、陣列、物件裡的任何字串）有沒有含遮蔽器認得的秘密（P5-T023，D-023）。
+ *
+ * 直接用遮蔽器本身判斷——遮蔽器換掉了東西就是有——所以「認得哪些樣子」跟 log／HTTP 輸出的遮蔽永遠一致，
+ * 設定精靈當場加進去的新密碼也立刻算數。另外把字串的空白全部去掉再比一次：密碼中間的空白被換成換行、
+ * tab、兩個空格，一樣認得出來。
+ */
+export function containsSecret(scrub: Scrubber, value: unknown, depth = 0): boolean {
+  if (depth > 32) return false;
+  if (typeof value === 'string') {
+    if (scrub(value) !== value) return true;
+    const bare = value.replace(/\s+/g, '');
+    return bare !== value && scrub(bare) !== bare;
+  }
+  if (Array.isArray(value)) return value.some((item) => containsSecret(scrub, item, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.entries(value).some(([key, item]) => containsSecret(scrub, key, depth + 1) || containsSecret(scrub, item, depth + 1));
+  }
+  return false;
 }

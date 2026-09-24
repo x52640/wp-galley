@@ -30,6 +30,15 @@ export interface AgentRegistryOptions {
   readonly now?: () => number;
 }
 
+/**
+ * 模型列表的快取（P5-T023，審查 #10）。Google 的 adapter 要跑 `agy models`，`GET /api/agents/:id/models`
+ * 每次都跑就是一個能被反覆觸發的子行程。存的是 promise：同時進來的請求共用同一趟。
+ */
+interface ModelsCacheEntry {
+  readonly models: Promise<ModelOption[]>;
+  readonly at: number;
+}
+
 interface CacheEntry {
   readonly status: AgentStatus;
   readonly at: number;
@@ -42,6 +51,7 @@ export class AgentUnavailableError extends Error {
 export class AgentRegistry {
   private readonly adapters: Map<AgentId, AgentAdapter>;
   private readonly cache = new Map<AgentId, CacheEntry>();
+  private readonly modelsCache = new Map<AgentId, ModelsCacheEntry>();
   private readonly now: () => number;
   /** concurrency 1：後來的請求排在這條 promise 鏈上。 */
   private queue: Promise<unknown> = Promise.resolve();
@@ -80,6 +90,8 @@ export class AgentRegistry {
 
   async detect(id: AgentId, options: { refresh?: boolean } = {}): Promise<AgentStatus> {
     const adapter = this.get(id);
+    // 明確要求重新偵測（設定精靈的「重新偵測」）時，模型列表的快取一起丟掉：可能剛裝好或剛登入。
+    if (options.refresh) this.modelsCache.delete(id);
     const cached = this.cache.get(id);
     if (!options.refresh && cached && this.now() - cached.at < DETECT_CACHE_MS) {
       return cached.status;
@@ -108,12 +120,21 @@ export class AgentRegistry {
     }
   }
 
+  /** 30 秒快取（跟偵測同一個時間）；失敗的結果（空清單）也快取，免得壞掉的 CLI 被一直重跑。 */
   async listModels(id: AgentId): Promise<ModelOption[]> {
-    try {
-      return await this.get(id).listModels();
-    } catch {
-      return [];
-    }
+    const adapter = this.get(id);
+    const cached = this.modelsCache.get(id);
+    if (cached && this.now() - cached.at < DETECT_CACHE_MS) return cached.models;
+
+    const models = (async (): Promise<ModelOption[]> => {
+      try {
+        return await adapter.listModels();
+      } catch {
+        return [];
+      }
+    })();
+    this.modelsCache.set(id, { models, at: this.now() });
+    return models;
   }
 
   /**

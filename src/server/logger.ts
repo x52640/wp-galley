@@ -6,9 +6,11 @@ import { createSecretScrubber, type Scrubber } from '../config/secrets.js';
 /**
  * 結構化 log 設定（Fastify 內建 pino）。
  *
- * 兩層防護：
+ * 三層防護：
  * 1. redact：把常見會夾帶憑證的欄位整個換掉。
  * 2. formatters.log：把已知秘密的字面值從任何 log 物件中抹掉。
+ * 3. hooks.logMethod：訊息字串（`log.warn(obj, msg)` 的 msg）、printf 參數（字串、物件、Error）、
+ *    當第一個參數的 Error 也抹掉（P5-T023，審查 #6）——formatters.log 只看得到物件，msg 原樣寫出。
  */
 export function buildLoggerOptions(
   config: AppConfig,
@@ -40,6 +42,20 @@ export function buildLoggerOptions(
     },
     formatters: {
       log: (object: Record<string, unknown>) => scrub(object),
+    },
+    hooks: {
+      // 第一個參數是物件時（合併進 log 的欄位，例如 Fastify 的 { req }）留給 formatters.log——這裡先 walk
+      // 會把 req 這類物件拆成普通物件，serializer 就認不得了。例外是 Error：pino 會拿它的 message 當 msg，
+      // formatters.log 碰不到 msg。遮蔽器複製 Error 時保留型別、name、stack，pino 照樣當 Error 序列化。
+      // 其他參數（訊息字串、%s／%j／%o 的 printf 參數，含物件與 Error）一律先遮蔽，格式化後才不會漏。
+      logMethod(this: unknown, args: unknown[], method: (...args: unknown[]) => void) {
+        method.apply(
+          this,
+          args.map((arg, index) =>
+            index === 0 && arg !== null && typeof arg === 'object' && !(arg instanceof Error) ? arg : scrub(arg),
+          ),
+        );
+      },
     },
     serializers: {
       req: (request: { method: string; url: string; id: string }) => ({
