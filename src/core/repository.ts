@@ -760,6 +760,13 @@ export class Repository {
     );
   }
 
+  /** 所有還是 running 的 Agent 執行（不分稿件、不分種類）。給啟動清理用。 */
+  allRunningAgentRuns(): AgentRunRow[] {
+    return this.db
+      .prepare("SELECT * FROM agent_runs WHERE status = 'running' ORDER BY id")
+      .all() as unknown as AgentRunRow[];
+  }
+
   // --- 校稿提案 -------------------------------------------------------------
 
   insertReviewProposal(input: {

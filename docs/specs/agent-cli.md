@@ -29,8 +29,8 @@ interface AgentAdapter {
 ```
 
 `AgentRegistry.imageGeneratorId()` 找有 `generateImage` 的那一家，不寫死名字；`generateImage` 跟
-`runStructured` 排同一條佇列（concurrency 1）。生圖排在佇列裡就被取消的話，輪到它時直接回 `cancelled`，
-不叫 adapter（每一張都花額度）。生圖流程與規則見 [agent-tasks.md](agent-tasks.md)。
+`runStructured` 排同一條佇列（concurrency 1）。校稿或生圖排在佇列裡就被取消的話，輪到它時直接回 `cancelled`，
+不叫 adapter（每一次都花額度；校稿這條是 P5-T020 補上的）。生圖流程與規則見 [agent-tasks.md](agent-tasks.md)。
 
 `AgentStatus` 至少包含：已安裝、版本、登入狀態是否可確認、支援的輸出格式與目前是否可用。不要在 UI 顯示登入 token。
 

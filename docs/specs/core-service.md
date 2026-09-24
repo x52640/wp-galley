@@ -6,6 +6,12 @@
 > MCP 與 UI 共用同一個實例（規則見 [security.md](security.md)）。
 > 方法的回傳型別定義在 `src/contract/api.ts`；`service.ts` 以舊名字（`ApprovalView` 等）轉出。
 
+**啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖都算）結成
+`failed`，原因「後端重啟，這次沒有完成」，每筆記一條 `agent_interrupted` 事件（actor `system`）。
+進行中的執行只記在記憶體（`activeRuns`），子行程也隨舊行程結束，所以這些不可能再完成。只動那幾筆，
+不刪資料、不動其他表。前提：**一個 DB 只有一個 CoreService 行程**；將來若 MCP 另起行程共用同一個 DB，
+這條要改（否則後啟動的會把前一個正在跑的結掉）。
+
 下面是**節錄**，列出核心流程的方法。提案制與配圖需求另有 `getReview`、
 `resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison`、
 `dismissImageBrief`，以及 `getPreviewDocument`、`getMarks`、`listEvents`；完整清單以
@@ -30,7 +36,10 @@ interface CoreService {
 
   // --- Agent ---
   runAgentReview(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
-  /** 取消這篇稿件正在跑的 Agent 動作（校稿或生圖）。 */
+  /**
+   * 取消這篇稿件正在跑的 Agent 動作（校稿或生圖）。記憶體裡沒有、DB 卻還是 running（上一個行程留下的）
+   * 也把 DB 那筆結成 cancelled（P5-T020）。
+   */
   cancelAgentRun(uuid: string): void;
 
   // --- 生圖（D-017，見 agent-tasks.md） ---

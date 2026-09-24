@@ -48,7 +48,7 @@ export class AgentRegistry {
   private busyWith: string | null = null;
   /**
    * 排在佇列裡就被取消的 runId。`adapter.cancel()` 只碰得到已經開跑的那一個，
-   * 排隊中的會照樣跑——生圖每一張都花額度，所以輪到它時先看這裡，被取消就不跑。
+   * 排隊中的會照樣跑——校稿與生圖每一次都花額度，所以輪到它時先看這裡，被取消就不跑。
    */
   private readonly cancelledRuns = new Set<string>();
 
@@ -134,12 +134,23 @@ export class AgentRegistry {
       throw new AgentUnavailableError(status.unavailableReason ?? `${adapter.displayName} 目前無法使用`);
     }
 
-    const task = this.queue.then(async () => {
+    const task = this.queue.then(async (): Promise<AgentResult<T>> => {
+      // 排隊中就被取消的，輪到時不叫 adapter——每一次校稿都花訂閱額度（跟生圖同一條規則）。
+      if (this.cancelledRuns.delete(runId)) {
+        return {
+          ok: false,
+          reason: 'cancelled',
+          message: '還沒開始看稿就取消了',
+          issues: [],
+          meta: { runId, agentId: id, model: request.model ?? null, durationMs: 0, stderrTail: '' },
+        };
+      }
       this.busyWith = runId;
       try {
         return await adapter.runStructured<T>(request, schema, runId);
       } finally {
         this.busyWith = null;
+        this.cancelledRuns.delete(runId);
       }
     });
 

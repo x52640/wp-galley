@@ -4,14 +4,14 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **53 檔 / 948 測試**全綠（2026-09-24，P5-T019 之後）
+- `npm run verify`：typecheck 通過；Vitest **54 檔 / 955 測試**全綠（2026-09-24，P5-T020 之後）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-[P5-T020](tasks/P5-T020-agent-run-lifecycle.md)（D-023 第二個）。
+[P5-T021](tasks/P5-T021-clear-category-and-slug.md)（D-023 第三個）。
 
 ## 上次停在哪（2026-09-24 收官）
 
@@ -28,7 +28,6 @@
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P5-T020](tasks/P5-T020-agent-run-lifecycle.md) | 重啟後不卡看稿中、取消排隊不執行 | D-023，#12 #11 |
 | [P5-T021](tasks/P5-T021-clear-category-and-slug.md) | 分類與網址片段可以清空 | D-023，#14 #15 |
 | [P5-T022](tasks/P5-T022-publish-path-guards.md) | 發布路徑防護 | D-023，#3 #2 #1 #13 |
 | [P5-T023](tasks/P5-T023-security-hardening.md) | 秘密遮蔽、擋跨站 GET、http 只准 loopback | D-023，#6 #10 #4 #7 #5 #16 |
@@ -48,6 +47,7 @@
 - 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
   `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
 
+- 啟動清理在建 CoreService 時就跑（P5-T020）：已開著一個後端時再啟動第二個（連接埠被占而退出），會先把第一個正在跑的 AI 工作標成「後端重啟」作廢、額度照花。修法是移到 listen 成功後（要改 `src/server/main.ts`）；MCP 若另起行程共用 DB 也會踩到。2026-09-24 使用者裁定先記下，未開 Task。
 - `?fixtures=1` 的假資料（`src/ui/service/fixtures.ts`）移除／移動圖片仍整塊刪，跟後端（P5-T019）不一致，只影響示範畫面。
 - 直接在文章上改遇到 409 後按「重新讀取」，編輯框裡未存的字可能消失（P5-T005，少見）。
 - 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。2026-09-24 全 repo 審查有留檔：`docs/reviews/`。

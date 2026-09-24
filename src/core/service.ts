@@ -286,6 +286,8 @@ const MAX_AGENT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_IMAGE_TIMEOUT_MS = 300_000;
 /** `agent_runs.purpose` 記的生圖那一趟。 */
 const GENERATE_IMAGE_PURPOSE: AgentRunTask = 'generate-image';
+/** 後端重啟時還沒跑完的 Agent 執行，結掉時寫的原因。 */
+const AGENT_INTERRUPTED_MESSAGE = '後端重啟，這次沒有完成';
 
 /** 圖是傳到別的站的（設定精靈換過站，P8-T002）。 */
 const OTHER_SITE_MEDIA_MESSAGE =
@@ -349,6 +351,32 @@ export class CoreService {
     this.siteId = this.repo.syncSite(options.site ?? null);
     this.targetIds = this.repo.syncTargets(this.targets.list(), this.siteId);
     this.templateRowIds = this.repo.syncTemplates(this.templates.list());
+    this.failInterruptedAgentRuns();
+  }
+
+  /**
+   * 啟動清理（P5-T020）：上一個行程留下、DB 還是 running 的 Agent 執行，一律結成失敗。
+   *
+   * `activeRuns` 只在記憶體，子行程也跟著舊行程一起沒了，所以這些執行不可能再完成；不結掉的話
+   * 畫面會一直卡在「看稿中」、校稿按鈕停用、取消也找不到它。所有種類（校稿、配圖、生圖）都清。
+   * **只改 agent_runs 的 running 紀錄**、每筆記一條事件，不刪資料、不動其他表。
+   *
+   * 前提：一個 DB 只有一個 CoreService 行程在用（本機單使用者工具，見 core-service.md）。
+   */
+  private failInterruptedAgentRuns(): void {
+    for (const row of this.repo.allRunningAgentRuns()) {
+      this.repo.finishAgentRun(row.id, { status: 'failed', outputHash: null, errorMessage: AGENT_INTERRUPTED_MESSAGE });
+      if (row.job_id === null) continue;
+      this.repo.insertEvent({
+        jobId: row.job_id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'system',
+        eventType: 'agent_interrupted',
+        status: 'failed',
+        detail: { agentRunId: row.id, purpose: row.purpose, provider: row.provider, startedAt: row.started_at },
+      });
+    }
   }
 
   // --- 設定精靈 --------------------------------------------------------------
@@ -833,7 +861,10 @@ export class CoreService {
         const status: AgentRunStatus =
           result.reason === 'timeout' ? 'timeout' : result.reason === 'cancelled' ? 'cancelled' : 'failed';
         const message = this.scrub(result.message);
-        this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        // 已經被結掉的（使用者取消、重啟清理）不改寫：原因與結束時間以先結的那一次為準。
+        if (this.repo.agentRunById(runRow.id)?.status === 'running') {
+          this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        }
         throw new AgentError(message, this.scrub(result.issues));
       }
 
@@ -948,9 +979,12 @@ export class CoreService {
   cancelAgentRun(uuid: string): void {
     const job = this.requireJob(uuid);
     const active = this.activeRuns.get(job.uuid);
-    if (!active) return;
-    void this.agents.cancel(active.provider, active.runId);
-    this.repo.finishAgentRun(active.rowId, {
+    // 記憶體裡沒有、DB 卻還是 running（上一個行程留下的孤兒）：沒有子行程可停，但 DB 那筆要結掉，
+    // 否則畫面會一直顯示在跑、按取消也沒用（P5-T020）。
+    const rowId = active?.rowId ?? this.repo.runningAgentRun(job.id)?.id;
+    if (rowId === undefined) return;
+    if (active) void this.agents.cancel(active.provider, active.runId);
+    this.repo.finishAgentRun(rowId, {
       status: 'cancelled',
       outputHash: null,
       errorMessage: '使用者取消',
@@ -1448,7 +1482,10 @@ export class CoreService {
         const status: AgentRunStatus =
           result.reason === 'timeout' ? 'timeout' : result.reason === 'cancelled' ? 'cancelled' : 'failed';
         const message = this.scrub(result.message);
-        this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        // 已經被結掉的（使用者取消、重啟清理）不改寫：原因與結束時間以先結的那一次為準。
+        if (this.repo.agentRunById(runRow.id)?.status === 'running') {
+          this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        }
         throw new AgentError(message, this.scrub(result.issues));
       }
 
