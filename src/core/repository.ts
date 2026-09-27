@@ -958,6 +958,26 @@ export class Repository {
     this.db.prepare('UPDATE image_briefs SET prompt = ?, user_note = ? WHERE id = ?').run(input.prompt, input.userNote, id);
   }
 
+  /**
+   * 使用者在卡片上改過畫面描述（prompt）的配圖需求 id（D-027，P5-T027）。
+   *
+   * 判斷依據是 P5-T025 每次存描述都會記的 `image_brief_edited` 事件（`detail.field = 'prompt'`），不另加欄位：
+   * 事件表只增不改，改過一次就一直算改過（沒有「交還給 AI」這條路）。使用者那條改的是 `note`，不算在內。
+   */
+  promptEditedBriefIds(jobId: number): Set<number> {
+    const rows = this.db
+      .prepare(`
+        SELECT DISTINCT CAST(json_extract(detail_json, '$.briefId') AS INTEGER) AS brief_id
+        FROM publish_events
+        WHERE job_id = ?
+          AND event_type = 'image_brief_edited'
+          AND status = 'succeeded'
+          AND json_extract(detail_json, '$.field') = 'prompt'
+      `)
+      .all(jobId) as unknown as { brief_id: number | null }[];
+    return new Set(rows.map((row) => row.brief_id).filter((id): id is number => id !== null));
+  }
+
   dismissImageBrief(id: number): void {
     this.db.prepare("UPDATE image_briefs SET dismissed_at = datetime('now') WHERE id = ?").run(id);
   }

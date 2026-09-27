@@ -409,7 +409,7 @@ function BriefCard({
           ? 'Codex 正在畫這張，等它跑完再改。'
           : mine
             ? '存的時候，會用文章裡這個位置目前前後的段落，重新組給 Codex 的指令。'
-            : '存了之後，「用 Codex 生圖」就照這段畫。'}
+            : '存了之後，「用 Codex 生圖」就照這段畫；之後 AI 再給建議也不會蓋掉。'}
         {candidate !== null && !generating && ' 已經生好的那張留著，想要新的就再生一張。'}
       </p>
       <div className="brief-actions">
@@ -490,6 +490,12 @@ function BriefCard({
           <span className="brief-cover">
             <Icon name="star" size={12} />
             封面
+          </span>
+        )}
+        {!mine && brief.promptEdited && (
+          <span className="brief-edited" title="這段描述是你改過的；之後 AI 再給建議也不會蓋掉">
+            <Icon name="pencil" size={11} />
+            你改過
           </span>
         )}
         <span className="brief-ratio mono">{brief.aspectRatio}</span>

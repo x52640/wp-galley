@@ -130,6 +130,7 @@
   回 200 `{ brief, notice }`：`notice` 不是 null 時畫面要照講（使用者那條的前後段落沿用當初的）。
   需求已標成不要了 400、沒有這篇 404、有 WordPress 密碼 400、Codex 正在畫這張 502（`AGENT_ERROR`，跟「另一個 Agent 動作在跑」
   同一類）。走跟其他改東西的路由同一套守門（跨站 403）。規則見 [agent-tasks.md](agent-tasks.md)「在卡片上改描述」。
+  `ImageBrief` 多一個欄位 `promptEdited`（D-027，P5-T027，新增、不影響舊前端）：Agent 那條的描述使用者改過，之後的 Agent 不蓋掉。
 - 建議英文網址（D-026，P5-T026）：`POST /slug-suggestions` 的 body 是 `.strict()`，只收 `provider`（＋選填 `model`、`timeoutMs`）；
   多送欄位（例如 `title`）400——輸入一律是後端目前這一版的標題與內文開頭。回 200 `{ slugs, dropped }`：`slugs` 已篩過、
   1 到 3 個；`dropped` 是格式不合格被丟掉的個數。跑的期間 `JobDetail.agentRun` 是 running（`task: 'suggest-slug'`），

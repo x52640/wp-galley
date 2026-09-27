@@ -1643,14 +1643,28 @@ export class CoreService {
     };
   }
 
+  /**
+   * 把 Agent 這一趟給的配圖需求存起來（校驗與一鍵配圖都走這裡）。同一個 key 覆蓋上一次的建議。
+   *
+   * 例外（D-027，P5-T027）：使用者在卡片上改過描述的那條（`promptEditedBriefIds`），**描述保留使用者的版本**，
+   * 其他欄位（用途、比例、alt、說明、位置、錨點）照常換成 Agent 的新版本。比例也沒變時連 `agent_run_id` 都不換：
+   * 生圖只看描述與比例，已經生好的候選圖一律不讓它過時（包括改描述前照 AI 描述生的那張，見 agent-tasks.md）。
+   */
   private storeImageBriefs(job: JobRow, agentRunId: number, briefs: readonly ImageBrief[]): void {
+    const existing = new Map(this.repo.listImageBriefs(job.id).map((row) => [row.brief_key, row]));
+    const edited = this.repo.promptEditedBriefIds(job.id);
+    const keptUserPrompt: string[] = [];
     for (const brief of briefs) {
+      const briefKey = agentBriefKey(brief.key);
+      const previous = existing.get(briefKey);
+      const keep = previous !== undefined && previous.origin === 'agent' && edited.has(previous.id);
+      if (keep) keptUserPrompt.push(briefKey);
       this.repo.upsertImageBrief({
         jobId: job.id,
-        agentRunId,
-        briefKey: agentBriefKey(brief.key),
+        agentRunId: keep && previous.aspect_ratio === brief.aspectRatio ? previous.agent_run_id : agentRunId,
+        briefKey,
         purpose: brief.purpose,
-        prompt: brief.prompt,
+        prompt: keep ? previous.prompt : brief.prompt,
         aspectRatio: brief.aspectRatio,
         altText: brief.altText,
         caption: brief.caption ?? null,
@@ -1666,7 +1680,8 @@ export class CoreService {
         actor: 'ui',
         eventType: 'image_briefs_proposed',
         status: 'succeeded',
-        detail: { count: briefs.length, keys: briefs.map((brief) => agentBriefKey(brief.key)) },
+        // keptUserPrompt：哪幾條保留了使用者改過的描述（只記 key，不記內容）。
+        detail: { count: briefs.length, keys: briefs.map((brief) => agentBriefKey(brief.key)), keptUserPrompt },
       });
     }
   }
@@ -1675,13 +1690,15 @@ export class CoreService {
     const filled = new Set(media.map((asset) => asset.briefKey).filter((key): key is string => key !== null));
     const featuredKey = revision?.templateData['featuredImageBriefKey'];
     const candidates = new Map(this.repo.latestOpenCandidates(job.id).map((row) => [row.image_brief_id, row]));
+    const edited = this.repo.promptEditedBriefIds(job.id);
     return this.repo
       .listImageBriefs(job.id)
       .filter((row) => row.dismissed_at === null)
       .map((row) => {
         const candidate = candidates.get(row.id);
         const current = candidate !== undefined && isCandidateCurrent(candidate, row);
-        return this.toImageBrief(row, filled, featuredKey, current ? this.toCandidate(job, candidate) : null);
+        const promptEdited = row.origin === 'agent' && edited.has(row.id);
+        return this.toImageBrief(row, filled, featuredKey, current ? this.toCandidate(job, candidate) : null, promptEdited);
       });
   }
 
@@ -1690,6 +1707,7 @@ export class CoreService {
     filled: ReadonlySet<string>,
     featuredKey: unknown,
     candidate: ImageCandidate | null,
+    promptEdited: boolean,
   ): ImageBriefView {
     return {
       id: row.id,
@@ -1709,6 +1727,7 @@ export class CoreService {
       origin: row.origin,
       anchorPosition: row.anchor_position,
       note: row.user_note,
+      promptEdited,
     };
   }
 

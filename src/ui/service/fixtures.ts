@@ -408,6 +408,7 @@ function diaryBriefs(): ImageBrief[] {
       origin: 'agent',
       anchorPosition: 'after',
       note: null,
+      promptEdited: false,
     },
     {
       id: 602,
@@ -430,6 +431,7 @@ function diaryBriefs(): ImageBrief[] {
       origin: 'agent',
       anchorPosition: 'after',
       note: null,
+      promptEdited: false,
     },
   ];
 }
@@ -460,6 +462,7 @@ function longformBriefs(): ImageBrief[] {
       origin: 'agent',
       anchorPosition: 'after',
       note: null,
+      promptEdited: false,
     },
     {
       id: 612,
@@ -479,6 +482,7 @@ function longformBriefs(): ImageBrief[] {
       origin: 'agent',
       anchorPosition: 'after',
       note: null,
+      promptEdited: false,
     },
   ];
 }
@@ -1252,7 +1256,25 @@ export const fixtureApi: PublisherApi = {
 
     // 配圖那一趟不建提案，所以按「一鍵配圖」不會洗掉還沒清完的校稿清單。
     if (task === 'images') {
-      job.imageBriefs = diaryBriefs();
+      // 跟後端同一套（P5-T027）：同 key 覆蓋，但使用者改過的描述保留、候選圖在比例沒變時留著；
+      // 這趟沒提到的（含使用者自己請 AI 配的）照舊留著。
+      const proposed = diaryBriefs();
+      const previous = new Map(job.imageBriefs.map((brief) => [brief.key, brief]));
+      const merged = proposed.map((brief) => {
+        const old = previous.get(brief.key);
+        if (old === undefined) return brief;
+        if (!old.promptEdited) return { ...brief, id: old.id, fulfilled: old.fulfilled };
+        return {
+          ...brief,
+          id: old.id,
+          fulfilled: old.fulfilled,
+          prompt: old.prompt,
+          promptEdited: true,
+          candidate: old.aspectRatio === brief.aspectRatio ? old.candidate : null,
+        };
+      });
+      const proposedKeys = new Set(proposed.map((brief) => brief.key));
+      job.imageBriefs = [...merged, ...job.imageBriefs.filter((brief) => !proposedKeys.has(brief.key))];
       return {
         runId: 'fixture-run',
         status: 'succeeded',
@@ -1260,7 +1282,7 @@ export const fixtureApi: PublisherApi = {
         changes: [],
         observations: [],
         // 後端回的是 Agent 交回來的原樣（還沒有 id），不是存進去之後的樣子。
-        imageBriefs: job.imageBriefs.map((brief) => ({
+        imageBriefs: proposed.map((brief) => ({
           key: brief.key,
           purpose: brief.purpose,
           prompt: brief.prompt,
@@ -1322,7 +1344,8 @@ export const fixtureApi: PublisherApi = {
       const prompt = normalizeBriefPrompt(input.prompt);
       if (prompt === '') throw new Error('畫面描述不能是空的');
       if (briefPromptLength(prompt) > BRIEF_PROMPT_MAX) throw new Error(`畫面描述最多 ${BRIEF_PROMPT_MAX} 個字`);
-      next = { ...brief, prompt };
+      // 改過就一直算改過（跟後端一樣看事件，不比對內容）：之後的 Agent 不蓋掉（P5-T027）。
+      next = { ...brief, prompt, promptEdited: true };
     }
     job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? next : row));
     return { brief: clone(next), notice: null };
@@ -1423,6 +1446,7 @@ export const fixtureApi: PublisherApi = {
       origin: 'user',
       anchorPosition: position,
       note,
+      promptEdited: false,
     };
     job.imageBriefs = [...job.imageBriefs, brief];
     void fixtureGenerate(job, brief.id).catch(() => undefined);

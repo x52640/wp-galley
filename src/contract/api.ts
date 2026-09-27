@@ -277,6 +277,11 @@ export interface ImageBrief {
   readonly anchorPosition: 'after' | 'before';
   /** 使用者那句「想要什麼樣的圖」（選填）；Agent 的建議是 null。 */
   readonly note: string | null;
+  /**
+   * 使用者在卡片上改過這條的畫面描述（D-027，P5-T027）。之後任何一趟 Agent 回同一個 key，描述都保留使用者的版本。
+   * 只有 Agent 那條（`origin = 'agent'`）可能是 true；使用者那條改的是 `note`，永遠是 false。
+   */
+  readonly promptEdited: boolean;
 }
 
 /**

@@ -1997,6 +1997,17 @@ h1, h2, h3 { font-weight: 600; }
   color: var(--accent-strong);
   font-size: .7rem;
 }
+/* Agent 那條的描述使用者改過（D-027，P5-T027）：之後的 Agent 不蓋掉。中性小標，不搶「封面」「已上傳」。 */
+.brief-edited {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .35rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  color: var(--shell-text-dim);
+  font-size: .7rem;
+}
 .brief[data-focused='yes'] { border-color: var(--accent); }
 .insert-ai-over { color: var(--danger-on-shell, var(--danger)); font-weight: 600; }
 

@@ -152,6 +152,7 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 - 卡片上只顯示每條需求**最新的**那張；最新那張用掉了就不再顯示候選圖（不會冒出更早那張沒選的）。
 - 同一個 key 重新提過（upsert 保留 id、換掉 `agent_run_id`，描述與比例可能都變了），之前生的候選圖
   就過時了：不顯示也不能用。判斷是候選圖的 `agent_run_id` 要大於需求的 `agent_run_id`。
+  例外：使用者改過描述的那條（見下一節「改過的描述不被蓋掉」）重提時比例沒變，`agent_run_id` 不換，候選圖照樣留著。
 - 按「停止」（卡片上或頂端長條）之後，卡片講「已停止」，不當成錯誤。
 
 ## 在文章上直接請 AI 配一張（D-022，P5-T018）
@@ -254,9 +255,19 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 - **Codex 正在畫這張時不准改**（`AgentError`「Codex 正在畫這張，等它跑完再改」）：那一趟用的是舊的，改了會讓人以為畫出來的是新的。
   畫別張、或在跑校稿時可以改。稿件不能改（`assertMutable`）時也不准——反正生不了圖。
 - 已上傳過圖（`fulfilled`）的也能改（之後可能要重生替換）；已標成不要了的拒絕（跟生圖同一句）。
-- **已知行為（待使用者裁定，尚未處理）**：之後**任何一趟 Agent**——不只「一鍵配圖」，一般校稿也會（`runAgentReview`
-  兩條路都呼叫 `storeImageBriefs`）——回了同一個 key 的配圖需求，就會 upsert 整條蓋掉：改過的描述回到 Agent 的新版本，
-  按過「不要了」的也會復活（upsert 清掉 `dismissed_at`）。使用者發起的那條（`user-` 開頭）碰不到。
+- **改過的描述不被蓋掉（D-027，P5-T027）**：之後**任何一趟 Agent**（一鍵配圖、一般「校驗」——`runAgentReview` 兩條路都呼叫
+  `storeImageBriefs`）回了同一個 key 的配圖需求時：
+  - 「改過」怎麼判斷：這條有 `image_brief_edited` 事件、`detail.field = 'prompt'`（`repo.promptEditedBriefIds`，同一篇稿件內）。
+    不加欄位、不加 migration。改過一次就一直算改過——**改回跟 AI 原本一字不差也算**；沒有「交還給 AI」這條路，想換成 AI 的
+    新描述就自己貼上或按「不要了」後重跑。
+  - **描述（`prompt`）保留使用者的版本**；用途、比例、alt、說明、位置、錨點照常換成 Agent 的新版本（這些使用者在卡片上改不了，
+    Agent 對著新稿給的比較準）。
+  - 比例也沒變時 `agent_run_id` 不換：生圖只看描述與比例，已經生好的候選圖都不讓它過時——**包括改描述之前照 AI 原本描述生的那張**（不比建立時間，使用者看得到圖，要換就再生一次）；比例變了照常過時。
+  - `image_briefs_proposed` 事件的 `detail.keptUserPrompt` 列出這一趟保留了使用者描述的 key（不記內容）。
+  - 畫面上 `ImageBrief.promptEdited = true`，卡片標「你改過」（[design-system.md](design-system.md)「配圖卡片」）。
+  - 不是內容改動：不建版本、不撤銷核准。
+- **已知行為（另案，這裡不改）**：按過「不要了」的需求，Agent 再提同一個 key 會復活（upsert 清掉 `dismissed_at`）；
+  改過描述的那條復活時描述仍是使用者的版本，比例沒變的話原本那張候選圖也一起回來。`?fixtures=1` 的「不要了」是整條刪掉，復活出來是 AI 描述、沒有「你改過」標記（只影響示範資料）。使用者發起的那條（`user-` 開頭）碰不到 upsert。
 - 記一筆 `image_brief_edited` 事件（`field`、`contextRefreshed`），**不記內容本身**。
 - 比例、alt、錨點位置這次不給改；也不讓 AI 重寫描述。
 
