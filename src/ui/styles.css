@@ -1999,3 +1999,11 @@ h1, h2, h3 { font-weight: 600; }
 }
 .brief[data-focused='yes'] { border-color: var(--accent); }
 .insert-ai-over { color: var(--danger-on-shell, var(--danger)); font-weight: 600; }
+
+/* 在卡片上改描述（D-025，P5-T025）：「改」貼在描述右邊，改的時候換成文字框＋「存」「取消」。 */
+.brief-editable { display: flex; align-items: flex-start; gap: .35rem; }
+.brief-editable > p { flex: 1; min-width: 0; }
+.brief-edit { flex: none; }
+.brief-editor { margin: 0 0 .35rem; }
+.brief-editor .brief-actions { margin-top: .3rem; }
+.brief-editor-text { width: 100%; min-height: 7rem; font-size: .85rem; line-height: 1.65; }

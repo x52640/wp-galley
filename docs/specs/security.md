@@ -70,7 +70,7 @@
   任何派工之前**；錯誤訊息、details、log 都不含密碼。
   - 涵蓋：`createJob`（原稿、標題、templateData）、`createRevision`（整份新內容、editedBody、sourceText、reason
     ——放圖、設封面、套用校稿都經過它）、上傳／換圖／「用這張」的替代文字與說明、派校稿（指示＋**組好的
-    prompt**）、請 AI 配一張（那句話＋組好的 prompt）、生圖（組好的 prompt）。派工檢查組好的 prompt，所以密碼
+    prompt**）、請 AI 配一張（那句話＋組好的 prompt）、在卡片上改配圖描述（改的 prompt 或那句話＋重組好的 prompt，P5-T025）、生圖（組好的 prompt）。派工檢查組好的 prompt，所以密碼
     設定之前就存進去的舊內容也送不出去。
   - 舊內容（密碼設定之前存的）另外在三處擋：**核准**（`approve`，`InvalidInputError`）、**發布**（前置檢查 4a，
     `PublishBlockedError`，同一句訊息，一個請求都不送）、**上傳／換圖／用這張**（送到 WordPress 之前先看目前

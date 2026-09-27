@@ -4,14 +4,16 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **59 檔 / 1061 測試**全綠（2026-09-24，P5-T024 實作後、未 commit）
+- `npm run verify`：typecheck 通過；Vitest **60 檔 / 1090 測試**全綠（2026-09-27，P5-T025 commit；
+  P5-T024 之後既有測試實為 1062，原記的 1061 少算 1）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-- [P5-T025](tasks/P5-T025-edit-image-prompt.md)：配圖的 prompt 可以在卡片上直接改（D-025），`in_progress`。
+- P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。未決：任何一趟 Agent 回同一個 key 會蓋掉使用者改過的描述（見 agent-tasks.md），已問使用者要不要修。
+- 下一個：[P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），`ready`。
 - P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。
 
 ## 上次停在哪（2026-09-24 收官）

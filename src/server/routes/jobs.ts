@@ -12,6 +12,7 @@ import { TemplateLoadError } from '../../templates/registry.js';
 import { WorkspaceError } from '../../agents/workspace.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
+import { BRIEF_PROMPT_MAX, briefPromptLength } from '../../contract/brief-prompt.js';
 import { BlockConversionError } from '../../wordpress/block-types.js';
 import type {
   AgentRunRequest,
@@ -28,6 +29,8 @@ import type {
   ImageAtPositionRequest,
   ImageBriefResponse,
   UseCandidateRequest,
+  UpdateImageBriefRequest,
+  UpdateImageBriefResponse,
   ImageCandidateResponse,
   JobDetail,
   JobResponse,
@@ -119,6 +122,27 @@ const ImageAtPositionBody = z
       .optional(),
   })
   .strict();
+
+/**
+ * 在卡片上改配圖需求（P5-T025）。`.strict()`、`prompt`／`note` 只能送一個：比例、alt、錨點不在這次能改的範圍，
+ * 多送要當場擋下，不是被默默丟掉。長度跟前端計數、CoreService 同一套；另有寬鬆的原始長度上限擋超大 body。
+ * 哪一種需求該送哪一個由 CoreService 判斷（MCP 不經過這裡）。
+ */
+const UpdateImageBriefBody = z
+  .object({
+    prompt: z
+      .string()
+      .max(20_000)
+      .refine((value) => briefPromptLength(value) <= BRIEF_PROMPT_MAX, `畫面描述最多 ${BRIEF_PROMPT_MAX} 個字`)
+      .optional(),
+    note: z
+      .string()
+      .max(4_000)
+      .refine((value) => userNoteLength(value) <= USER_NOTE_MAX, `想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`)
+      .optional(),
+  })
+  .strict()
+  .refine((body) => (body.prompt === undefined) !== (body.note === undefined), '要送 prompt 或 note 其中一個');
 
 /** 「用這張」可以帶卡片上填的替代文字（P5-T018）；body 可以整個不給。 */
 const UseCandidateBody = z.object({ altText: z.string().max(300).optional() }).strict().optional();
@@ -463,6 +487,24 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       return { dismissed: true };
     });
   });
+
+  /**
+   * 在卡片上改配圖需求（D-025，P5-T025）：Agent 那條改畫面描述、使用者那條改「想要：…」那句。
+   * 不是內容改動（不建版本、核准不失效），候選圖留著。Codex 正在畫這張時 502（跟「有別的 Agent 在跑」同一類）。
+   */
+  app.patch<{ Params: { uuid: string; id: string } }>(
+    '/api/jobs/:uuid/briefs/:id',
+    async (request): Promise<UpdateImageBriefResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const briefId = parseId(request.params.id, '配圖需求');
+      const body = parse(UpdateImageBriefBody, request.body ?? {});
+      const input: UpdateImageBriefRequest = {
+        ...(body.prompt === undefined ? {} : { prompt: body.prompt }),
+        ...(body.note === undefined ? {} : { note: body.note }),
+      };
+      return guard(() => core().updateImageBrief(uuid, briefId, input));
+    },
+  );
 
   // --- 生圖（D-017，P5-T013） -------------------------------------------------
 

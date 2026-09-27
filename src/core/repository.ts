@@ -950,6 +950,14 @@ export class Repository {
     );
   }
 
+  /**
+   * 使用者在卡片上改了描述（P5-T025）。只動 prompt 與 user_note：`agent_run_id` 不變，所以已經生好的
+   * 候選圖不算過時（留著、還能用）；`created_at` 也不變。
+   */
+  updateImageBriefText(id: number, input: { prompt: string; userNote: string | null }): void {
+    this.db.prepare('UPDATE image_briefs SET prompt = ?, user_note = ? WHERE id = ?').run(input.prompt, input.userNote, id);
+  }
+
   dismissImageBrief(id: number): void {
     this.db.prepare("UPDATE image_briefs SET dismissed_at = datetime('now') WHERE id = ?").run(id);
   }

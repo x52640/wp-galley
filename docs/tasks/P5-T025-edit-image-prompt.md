@@ -1,7 +1,7 @@
 ---
 id: P5-T025
 phase: 5
-status: in_progress
+status: done
 depends_on: []
 specs: [agent-tasks.md, http-api.md, core-service.md, security.md, design-system.md]
 write_paths: ["src/core/", "src/contract/", "src/server/routes/", "src/ui/", "tests/", "docs/specs/", "docs/tasks/P5-T025-edit-image-prompt.md", "docs/CURRENT_TASK.md"]
@@ -65,9 +65,24 @@ D-025。配圖需求卡片（`MediaPanel.tsx` 的 `BriefCard`）上的 prompt �
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立（2026-09-27）
-- 已通過驗證：—
-- 下一步：派實作 subagent
+- 最後完成：實作＋測試＋spec 更新（2026-09-27，未 commit）
+- 已通過驗證：`npm run verify` 綠（60 檔 / 1090 測試，含審查後補修）；`?fixtures=1` 截圖走過 Agent 那條與使用者那條的改／存／超長／生圖中
+- 下一步：主 session 審查 → commit；使用者手動驗證（一鍵配圖 → 改封面 prompt → 存 → Codex 生圖，只存草稿）
 - Blocker：無
+
+## 實作紀錄
+- 路由 `PATCH /api/jobs/:uuid/briefs/:id`（`.strict()`，`prompt`／`note` 只能送一個）→ `CoreService.updateImageBrief`
+  → `repo.updateImageBriefText`（只動 `prompt`、`user_note`；`agent_run_id` 不變，候選圖因此不過時）。回 `{ brief, notice }`。
+- 共用契約：`UpdateImageBriefRequest`／`UpdateImageBriefResponse`（`src/contract/api.ts`），
+  `src/contract/brief-prompt.ts`（`BRIEF_PROMPT_MAX = 2000`、去頭尾保留換行、數 code point；跟 Agent 輸出契約的 maxLength 同一個數字）。
+- 使用者那條：錨點在目前這一版剛好對上一段 → 用目前的前後段落重組；對不上（改掉、不只一段、當初就沒有）→ 照存那句話，
+  `replacePositionNote` 只換 prompt 最後那塊、前後段落沿用當初的，`notice` 講清楚（寫進 agent-tasks.md）。那句話可以清空。
+- Codex 正在畫這張 → `AgentError`（502，跟「另一個 Agent 在跑」同一類）；稿件不能改 → 拒絕；dismissed → 跟生圖同一句 400。
+- 事件 `image_brief_edited`（不記內容）。不影響核准：brief 不在 revision／`content_hash` 裡（state-machine.md 已確認）。
+- UI：卡片上「改」（新增 pencil 圖示）→ 文字框＋計數＋「存」「取消」；改的時候不給生圖；生圖中「改」反灰並寫明。
+- 基準：P5-T024 之後既有測試實際是 1062（CURRENT_TASK 記 1061，差 1，非本 Task 造成）；本 Task 新增 `tests/edit-image-brief.test.ts` 28 條。
+- 審查後補修：`buildImagePrompt` 的畫面描述也過 `neutralize`（描述現在人也能改，做得出「畫面描述結束」那條線）；
+  補測試（錨點不只一段、當初沒有錨點、舊指令認不出來、前後段落含密碼）；「正在畫這張」的測試改用可控的 promise 卡住假生圖，不靠計時器。
+  「Agent 回同一個 key 會蓋掉改過的描述、復活按過不要了的」記在 agent-tasks.md，待使用者裁定。
 
 ## 完成結果

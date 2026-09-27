@@ -81,11 +81,13 @@ import {
   POSITION_ASPECT_RATIO,
   positionAnchor,
   positionContext,
+  replacePositionNote,
   USER_BRIEF_PREFIX,
   USER_NOTE_MAX,
   userImageFilename,
 } from './image-generation.js';
 import { userNoteLength } from '../contract/user-note.js';
+import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../contract/brief-prompt.js';
 import { buildTemplateDataFromSource } from './source-text.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
@@ -492,7 +494,7 @@ export class CoreService {
    *
    * **所有使用者文字進系統、以及任何要送給 Agent 的東西，都在這一個方法檢查**：建立 job、建新版本
    * （createRevision——放圖、設封面、套用校稿全部經過它）、上傳圖片的替代文字與說明、派校稿（指示＋實際送出的
-   * prompt）、請 AI 配一張（那句話＋實際送出的 prompt）、生圖（實際送出的 prompt）。派工時檢查的是**組好的
+   * prompt）、請 AI 配一張（那句話＋實際送出的 prompt）、在卡片上改配圖描述（P5-T025）、生圖（實際送出的 prompt）。派工時檢查的是**組好的
    * prompt**，所以密碼設定之前就存進去的舊內容也擋得住。
    *
    * 「認得哪些樣子」跟遮蔽器完全一樣（containsSecret 用的就是同一個遮蔽器，含有無空白兩種寫法），
@@ -1394,6 +1396,112 @@ export class CoreService {
       status: 'succeeded',
       detail: { briefId, briefKey: brief.brief_key },
     });
+  }
+
+  /**
+   * 在卡片上改配圖需求（D-025，P5-T025）。只能送其中一個：
+   *
+   * - Agent 建議的那條（含封面）送 `prompt`：存成新的畫面描述；生圖時照舊由 `buildImagePrompt` 包進固定約束。
+   * - 使用者發起的那條送 `note`：存那句話，並用**目前這一版**的前後段落與既有錨點重組整份 prompt
+   *   （`buildPositionImagePrompt`）。錨點在目前的文章裡對不上（改掉了、不只一段、當初就沒有）時照存那句話、
+   *   前後段落沿用當初的（`replacePositionNote` 只換最後那一塊），`notice` 講清楚；不默默用舊段落。
+   *
+   * 規則照原本的再驗一次：描述不能是空的、上限 `BRIEF_PROMPT_MAX`；那句話上限 `USER_NOTE_MAX`；有 WordPress
+   * 應用程式密碼直接拒絕（D-023，連重組好的整份 prompt 一起查）。Codex 正在畫這張時不准改（那一趟用的是舊的，
+   * 改了會讓人以為畫出來的是新的）。稿件不能改時也不准（反正生不了圖）。
+   *
+   * 不是內容改動：不建版本、不撤銷核准。`agent_run_id` 不變，已經生好的候選圖留著、還能用。
+   */
+  updateImageBrief(
+    uuid: string,
+    briefId: number,
+    input: { prompt?: string; note?: string | null },
+  ): { brief: ImageBriefView; notice: string | null } {
+    const job = this.requireJob(uuid);
+    this.assertMutable(job);
+    const brief = this.requireOpenBrief(job, briefId);
+    const mine = brief.origin === 'user';
+    if (mine && (input.prompt !== undefined || input.note === undefined)) {
+      throw new InvalidInputError('這條是你在文章上請 AI 配的：能改的是「想要什麼樣的圖」那句（note），整份生圖指令由系統組');
+    }
+    if (!mine && (input.note !== undefined || input.prompt === undefined)) {
+      throw new InvalidInputError('這條是 AI 建議的：能改的是畫面描述（prompt）');
+    }
+    this.assertNoAppPassword(input.prompt, input.note);
+
+    const run = this.activeRuns.get(job.uuid);
+    if (run !== undefined && this.repo.agentRunById(run.rowId)?.image_brief_id === brief.id) {
+      throw new AgentError('Codex 正在畫這張，等它跑完再改');
+    }
+
+    let prompt: string;
+    let userNote: string | null = brief.user_note;
+    let notice: string | null = null;
+    if (!mine) {
+      prompt = normalizeBriefPrompt(input.prompt);
+      if (prompt === '') throw new InvalidInputError('畫面描述不能是空的');
+      if (briefPromptLength(prompt) > BRIEF_PROMPT_MAX) {
+        throw new InvalidInputError(`畫面描述最多 ${BRIEF_PROMPT_MAX} 個字`);
+      }
+    } else {
+      userNote = normalizeUserNote(input.note);
+      if (userNoteLength(userNote) > USER_NOTE_MAX) {
+        throw new InvalidInputError(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
+      }
+      const rebuilt = this.rebuildUserBriefPrompt(job, brief, userNote);
+      prompt = rebuilt.prompt;
+      notice = rebuilt.notice;
+    }
+    this.assertNoAppPassword(prompt);
+
+    this.repo.updateImageBriefText(brief.id, { prompt, userNote });
+    this.repo.insertEvent({
+      jobId: job.id,
+      revisionId: null,
+      approvalId: null,
+      actor: 'ui',
+      eventType: 'image_brief_edited',
+      status: 'succeeded',
+      // 不記內容本身：事件只講「改了哪一條、改的是哪一欄、前後段落有沒有換成目前的」。
+      detail: { briefId: brief.id, briefKey: brief.brief_key, field: mine ? 'note' : 'prompt', contextRefreshed: mine ? notice === null : null },
+    });
+    const view = this.getJob(uuid).imageBriefs.find((row) => row.id === brief.id)!;
+    return { brief: view, notice };
+  }
+
+  /**
+   * 使用者那條的 prompt 用目前這一版重組（P5-T025）。錨點在目前的文章裡剛好對上一段，才知道「那個位置」在哪：
+   * 照建需求時同一套（`positionContext`＋`buildPositionImagePrompt`）。對不上就只換那句話，並回一句話講清楚。
+   */
+  private rebuildUserBriefPrompt(
+    job: JobRow,
+    brief: ImageBriefRow,
+    note: string | null,
+  ): { prompt: string; notice: string | null } {
+    const blocks = splitTopLevelBlocks(this.repo.latestRevision(job.id)?.rendered_html ?? '');
+    const anchor = brief.anchor?.trim() ?? '';
+    const hits = anchor === '' ? [] : findBlocksContaining(blocks, anchor);
+    if (hits.length === 1) {
+      const afterBlockIndex = brief.anchor_position === 'before' ? hits[0]! - 1 : hits[0]!;
+      const context = positionContext(blocks, afterBlockIndex);
+      return { prompt: buildPositionImagePrompt({ ...context, note, aspectRatio: brief.aspect_ratio }), notice: null };
+    }
+
+    const kept = replacePositionNote(brief.prompt, note);
+    if (kept === null) {
+      throw new InvalidInputError('這條配圖需求的生圖指令認不出來，沒辦法只換那句話；請按「不要了」，再到那個位置重新請 AI 配一張');
+    }
+    const side = brief.anchor_position === 'before' ? '後面' : '前面';
+    const why =
+      anchor === ''
+        ? '你選的位置前後當初就沒有文字可以對照'
+        : hits.length === 0
+          ? `你選的位置${side}那段「${anchor}」在目前的文章裡找不到（可能改過了）`
+          : `你選的位置${side}那段「${anchor}」在文章裡出現在 ${hits.length} 段，不確定是哪一段`;
+    return {
+      prompt: kept,
+      notice: `已存。${why}，所以送給 Codex 的前後段落沿用當初請 AI 配圖時的內容，只換了你想要的那句。`,
+    };
   }
 
   private storeImageBriefs(job: JobRow, agentRunId: number, briefs: readonly ImageBrief[]): void {

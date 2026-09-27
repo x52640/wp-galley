@@ -605,6 +605,28 @@ export interface ImageAtPositionRequest {
 }
 
 /**
+ * 在卡片上改配圖需求（D-025，P5-T025，`PATCH /api/jobs/:uuid/briefs/:id`）。**只能送其中一個**：
+ * - `prompt`：Agent 建議的那條（`origin = 'agent'`，含封面）的畫面描述。去頭尾後不能是空的，
+ *   上限 2000 字（code point，`contract/brief-prompt.ts`）。
+ * - `note`：使用者發起的那條（`origin = 'user'`）的「想要：…」那句；空的＝沒有特別要求。上限 200 字
+ *   （`contract/user-note.ts`）。整份生圖指令由後端用目前的內容重組，前端給不了。
+ */
+export interface UpdateImageBriefRequest {
+  readonly prompt?: string;
+  readonly note?: string;
+}
+
+/**
+ * `PATCH /api/jobs/:uuid/briefs/:id`：更新後的那條需求。
+ * `notice`：存了，但有一件事要讓使用者知道（使用者那條的錨點在目前的文章裡對不上，前後段落沿用當初的）；
+ * 沒事是 null。
+ */
+export interface UpdateImageBriefResponse {
+  readonly brief: ImageBrief;
+  readonly notice: string | null;
+}
+
+/**
  * 「用這張」（`POST /api/jobs/:uuid/candidates/:id/use`）可以帶的東西。body 可以整個不給（舊前端）。
  * `altText`：卡片上填的替代文字（P5-T018，使用者在文章上請 AI 配的那條預設是空的），沒給就用需求上的。
  */

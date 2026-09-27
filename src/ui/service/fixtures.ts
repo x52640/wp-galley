@@ -1,6 +1,7 @@
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { hasWpImageClass } from '../../contract/media-marker.js';
 import { normalizeUserNote, USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
+import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../../contract/brief-prompt.js';
 import type {
   AddMediaInput,
   AuthorOption,
@@ -1273,6 +1274,38 @@ export const fixtureApi: PublisherApi = {
     await delay(120);
     const job = mustGet(uuid);
     job.imageBriefs = job.imageBriefs.filter((brief) => brief.id !== briefId);
+  },
+
+  /**
+   * 在卡片上改配圖需求（P5-T025）。跟後端同一套檢查（沒有密碼那一項：示範資料不知道密碼）。
+   * 使用者那條的 prompt 在示範資料裡本來就是一句說明，不重組；錨點對不對得上也不模擬。
+   */
+  async updateImageBrief(uuid: string, briefId: number, input) {
+    await delay(200);
+    const job = mustGet(uuid);
+    const brief = job.imageBriefs.find((row) => row.id === briefId);
+    if (!brief) throw new Error(`找不到這個工作項目的配圖需求 ${briefId}`);
+    const run = job.agentRun;
+    if (run?.status === 'running' && run.task === 'generate-image' && run.briefId === briefId) {
+      throw new Error('Codex 正在畫這張，等它跑完再改');
+    }
+    let next: ImageBrief;
+    if (brief.origin === 'user') {
+      if (input.prompt !== undefined || input.note === undefined) {
+        throw new Error('這條是你在文章上請 AI 配的：能改的是「想要什麼樣的圖」那句（note），整份生圖指令由系統組');
+      }
+      const note = normalizeUserNote(input.note);
+      if (userNoteLength(note) > USER_NOTE_MAX) throw new Error(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
+      next = { ...brief, note };
+    } else {
+      if (input.note !== undefined || input.prompt === undefined) throw new Error('這條是 AI 建議的：能改的是畫面描述（prompt）');
+      const prompt = normalizeBriefPrompt(input.prompt);
+      if (prompt === '') throw new Error('畫面描述不能是空的');
+      if (briefPromptLength(prompt) > BRIEF_PROMPT_MAX) throw new Error(`畫面描述最多 ${BRIEF_PROMPT_MAX} 個字`);
+      next = { ...brief, prompt };
+    }
+    job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? next : row));
+    return { brief: clone(next), notice: null };
   },
 
   async cancelAgent(uuid: string) {

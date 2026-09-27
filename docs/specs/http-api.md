@@ -44,6 +44,7 @@
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
 | `GET` | `/api/jobs/:uuid/compare` | 對照（逐段差異＋正文以外的欄位差異），`?against=proposal\|previous` | → `Comparison` |
 | `POST` | `/api/jobs/:uuid/briefs` | 在文章上「請 AI 配一張」：建使用者發起的配圖需求並開始生圖（**不等畫完**） | `ImageAtPositionRequest` → `ImageBriefResponse`（202） |
+| `PATCH` | `/api/jobs/:uuid/briefs/:id` | 在卡片上改配圖需求：Agent 那條改 `prompt`、使用者那條改 `note`（D-025） | `UpdateImageBriefRequest` → `UpdateImageBriefResponse` |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
 | `GET` | `/api/jobs/:uuid/candidates/:id` | 候選圖本體（`image/*`，`no-store`），只在本機 | → 圖檔 |
@@ -122,6 +123,12 @@
   `candidates/:id/use` 可以帶 `{ altText }`（`.strict()`，上限 300）：卡片上填的替代文字，沒帶就用需求上的。
   `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
   規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
+- 在卡片上改配圖需求（D-025，P5-T025）：`PATCH /briefs/:id` 的 body 是 `.strict()`，`prompt`／`note` **只能送一個**
+  （都送、都不送、多送欄位例如 `aspectRatio` 都是 400）；長度跟畫面計數同一套（`prompt` 去頭尾後數 code point、上限 2000，
+  `contract/brief-prompt.ts`；`note` 同 `POST /briefs`）。哪一種需求該送哪一個由 CoreService 判斷（送錯 400）。
+  回 200 `{ brief, notice }`：`notice` 不是 null 時畫面要照講（使用者那條的前後段落沿用當初的）。
+  需求已標成不要了 400、沒有這篇 404、有 WordPress 密碼 400、Codex 正在畫這張 502（`AGENT_ERROR`，跟「另一個 Agent 動作在跑」
+  同一類）。走跟其他改東西的路由同一套守門（跨站 403）。規則見 [agent-tasks.md](agent-tasks.md)「在卡片上改描述」。
 - 作者（P5-T024，D-024）：`PublishRequest.authorId`（選填正整數）是發布選項，不影響核准；不在站上可當作者的名單
   回 409 `PUBLISH_BLOCKED`，一個寫入都不送。`PublishResult.author` 是實際送出的作者（沒送是 null）。
   `GET /api/wordpress/authors` 只回 `id`、`name`；帳號只能用自己時 `authors` 只有自己、`canChooseOthers: false`、`notice` 講怎麼改。

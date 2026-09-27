@@ -46,6 +46,8 @@ import type {
   SetupSaveResponse,
   SetupStatus,
   Term,
+  UpdateImageBriefRequest,
+  UpdateImageBriefResponse,
 } from '../../contract/api.js';
 
 export type {
@@ -188,6 +190,11 @@ export interface PublisherApi {
   fetchComparison(uuid: string, against?: 'proposal' | 'previous'): Promise<Comparison>;
   /** 丟掉一條配圖需求。 */
   dismissImageBrief(uuid: string, briefId: number): Promise<void>;
+  /**
+   * 在卡片上改配圖需求（P5-T025）：Agent 那條送 `prompt`、使用者那條送 `note`。不動內容、核准不失效；
+   * `notice` 不是 null 時要講給使用者聽（使用者那條的前後段落沿用當初的）。
+   */
+  updateImageBrief(uuid: string, briefId: number, input: UpdateImageBriefRequest): Promise<UpdateImageBriefResponse>;
 
   /** 能不能生圖（只有 Codex 能，D-017）。不能的話 `reason` 講為什麼。 */
   getImageGenerationStatus(): Promise<ImageGenerationStatus>;

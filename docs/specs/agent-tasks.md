@@ -127,7 +127,7 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 流程：
 
 1. 卡片「用 Codex 生圖」→ `POST /api/jobs/:uuid/briefs/:id/generate`，要等 Codex 畫完才回。
-2. 後端用固定程式組 prompt（`buildImagePrompt`：brief 的 prompt 包在分隔線裡當內容、比例、
+2. 後端用固定程式組 prompt（`buildImagePrompt`：brief 的 prompt 先 `neutralize`（同下一節，P5-T025 起）再包在分隔線裡當內容、比例、
    不要文字、只要一張、不要動檔案），交給 Codex。
 3. 拿到的位元組**不信任**：類型看檔頭（`src/media/validate.ts` 的 `inspectImage`），再過跟上傳
    一樣的類型與大小檢查；過了才存成候選圖（`generated-images/<job>/candidates/<sha256>.<ext>`，
@@ -217,11 +217,49 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
    就是 running。路由回 202 與那條需求；生圖的 promise 由 service 接住（失敗記在 `agent_runs`，卡片上講
    「上次生圖失敗」），不會變成沒人接的 rejection。萬一生圖沒登記成功，需求標成不要了、錯誤照丟。
 4. 之後跟一般的生圖一樣：一次一個、同一條佇列、`DELETE /agent` 取消、逾時 5 分鐘、候選圖只在本機。
-   「再生一張」送同一份 prompt（建需求時的前後段落，不會跟著文章更新）。
+   「再生一張」送同一份 prompt（建需求時的前後段落，不會跟著文章更新；在卡片上改了那句話才會重組，見下一節）。
 5. 「用這張」→ `addMediaWithOutcome` → `autoPlace` 照錨點放回去（上一節），不是封面所以不會自動設精選。
    上傳的檔名會變成公開網址的一部分，所以不用 `user-<亂數>`：用文章的 slug（沒有就標題裡的英數，再沒有就
    `illustration`）加 key 的前 6 碼（`userImageFilename`），例如 `why-errors-a1b2c3.png`。
 6. 「能不能生圖」的偵測（`codex login status`）走 AgentRegistry 的 30 秒快取，打開面板、按按鈕不會每次都啟動子行程。
+
+## 在卡片上改描述（D-025，P5-T025）
+
+配圖卡片上的描述可以直接改、按「存」，之後「用 Codex 生圖」／「再生一張」一律用改過的版本
+（`CoreService.updateImageBrief`、`PATCH /api/jobs/:uuid/briefs/:id`）。
+
+| 哪一條 | 能改什麼 | 存什麼 |
+| --- | --- | --- |
+| Agent 建議的（`origin = 'agent'`，含封面） | 畫面描述 `prompt` | `image_briefs.prompt`。去頭尾、保留中間換行；**不能是空的**，上限 **2000 字**（code point，跟 Agent 輸出契約 `imageBriefs[].prompt.maxLength` 同一個數字：Agent 寫得出來的長度，人也改得出來）。生圖時照舊由 `buildImagePrompt` 包進固定約束 |
+| 使用者發起的（`origin = 'user'`） | 「想要：…」那句 `note` | `image_briefs.user_note`（`normalizeUserNote`，上限 200；可以清空＝沒有特別要求），並**重組整份 `prompt`**（見下）。系統組的整份指令不給人直接改 |
+
+使用者那條的 prompt 怎麼重組：拿錨點在**目前這一版**裡找（跟 `autoPlace` 同一套：`findBlocksContaining`）。
+
+- **剛好對上一段**：照建需求時同一套重算位置（`before` 是那段之前、`after` 是之後）→ `positionContext` →
+  `buildPositionImagePrompt`。前後段落因此換成目前的內容（建需求之後改過的字也跟著進去）。
+- **對不上**（那段改掉了、對上不只一段、當初就沒有錨點）：照存那句話，**前後段落沿用當初的**——`replacePositionNote`
+  只換 prompt 最後那一塊（分界用 `===== 使用者的希望開始 =====` 那一行，內容經過 `neutralize` 做不出來；沒有那句話時
+  最後一行一定是「使用者沒有特別要求…」）。回應的 `notice` 講清楚「找不到你選的位置前面那段『…』…所以送給 Codex 的
+  前後段落沿用當初請 AI 配圖時的內容，只換了你想要的那句」，卡片上照講。不默默用舊段落。
+  （舊 prompt 結構認不出來時拒絕，請使用者按「不要了」重新配。）
+
+規則：
+
+- **不是內容改動**：配圖需求不在 revision 裡、不進 `content_hash`，不建版本、不撤銷核准。
+- **已經生好的候選圖留著**：只改 `prompt`／`user_note`，`agent_run_id` 不變，所以候選圖不算過時（上一節的判斷），
+  還能「用這張」。想要新的就再生一次。
+- 照原本的規則再驗一次：長度、非空（Agent 那條）、**有 WordPress 應用程式密碼直接拒絕**（D-023，連重組好的整份 prompt 一起查，
+  前後段落裡有密碼也擋）。送錯欄位（Agent 那條送 `note`、使用者那條送 `prompt`）拒絕。
+- **Codex 正在畫這張時不准改**（`AgentError`「Codex 正在畫這張，等它跑完再改」）：那一趟用的是舊的，改了會讓人以為畫出來的是新的。
+  畫別張、或在跑校稿時可以改。稿件不能改（`assertMutable`）時也不准——反正生不了圖。
+- 已上傳過圖（`fulfilled`）的也能改（之後可能要重生替換）；已標成不要了的拒絕（跟生圖同一句）。
+- **已知行為（待使用者裁定，尚未處理）**：之後**任何一趟 Agent**——不只「一鍵配圖」，一般校稿也會（`runAgentReview`
+  兩條路都呼叫 `storeImageBriefs`）——回了同一個 key 的配圖需求，就會 upsert 整條蓋掉：改過的描述回到 Agent 的新版本，
+  按過「不要了」的也會復活（upsert 清掉 `dismissed_at`）。使用者發起的那條（`user-` 開頭）碰不到。
+- 記一筆 `image_brief_edited` 事件（`field`、`contextRefreshed`），**不記內容本身**。
+- 比例、alt、錨點位置這次不給改；也不讓 AI 重寫描述。
+
+畫面見 [design-system.md](design-system.md)「配圖卡片」。
 
 ## 執行中的回饋
 

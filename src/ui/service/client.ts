@@ -20,6 +20,8 @@ import type {
   SetupSaveResponse,
   SetupStatus,
   TermsResponse,
+  UpdateImageBriefRequest,
+  UpdateImageBriefResponse,
   UseCandidateRequest,
 } from '../../contract/api.js';
 import type {
@@ -258,6 +260,9 @@ const httpApi: PublisherApi = {
   async dismissImageBrief(uuid: string, briefId: number) {
     await sendJson<unknown>(`/api/jobs/${uuid}/briefs/${briefId}`, 'DELETE');
   },
+
+  updateImageBrief: (uuid: string, briefId: number, input: UpdateImageBriefRequest) =>
+    sendJson<UpdateImageBriefResponse>(`/api/jobs/${uuid}/briefs/${briefId}`, 'PATCH', input),
 
   getImageGenerationStatus: () => getJson<ImageGenerationStatus>('/api/image-generation'),
 

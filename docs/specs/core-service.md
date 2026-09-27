@@ -56,6 +56,16 @@ interface CoreService {
     uuid: string,
     input: { afterBlockIndex: number; contentHash: string; note?: string | null; timeoutMs?: number },
   ): Promise<{ brief: ImageBrief; generation: Promise<ImageCandidate> }>;
+  /**
+   * 在卡片上改配圖需求（D-025，P5-T025）：Agent 那條送 `prompt`（非空、≤ 2000 字）、使用者那條送 `note`
+   * （≤ 200 字，可以清空；prompt 用目前這一版重組）。有 WordPress 密碼、稿件不能改、需求已標成不要了、
+   * Codex 正在畫這張（AgentError）都拒絕。不是內容改動；候選圖留著。規則見 agent-tasks.md「在卡片上改描述」。
+   */
+  updateImageBrief(
+    uuid: string,
+    briefId: number,
+    input: { prompt?: string; note?: string | null },
+  ): { brief: ImageBrief; notice: string | null };
   /** 「用這張」：先同步搶下候選圖，再走 addMediaWithOutcome 上傳。 */
   /** `altText`：卡片上填的替代文字（P5-T018），沒給就用需求上的。使用者那條的檔名用文章 slug／標題（userImageFilename）。 */
   useImageCandidate(uuid: string, candidateId: number, input?: { altText?: string }): Promise<MediaUploadOutcome>;

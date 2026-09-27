@@ -15,6 +15,8 @@ import { useConfirm } from '../ConfirmDialog.js';
 import { formatElapsed, useElapsedSeconds, waitingNote } from '../AgentProgress.js';
 import { agentStatusText } from '../../lib/agent-tasks.js';
 import { ErrorNote, Field, Spinner, useAction } from './shared.js';
+import { USER_NOTE_MAX, userNoteLength } from '../../../contract/user-note.js';
+import { BRIEF_PROMPT_MAX, briefPromptLength } from '../../../contract/brief-prompt.js';
 
 /**
  * 配圖。
@@ -255,6 +257,7 @@ export function useImageGenerationStatus(wanted: boolean): ImageGenerationStatus
  * 主要的路是「用 Codex 生圖」→ 看候選圖 →「用這張」。生圖要一分鐘左右，卡片上用計時器
  * 與說明撐住那段時間（D-010：不畫假的進度條）；頂端的 AgentBanner 也會出現。
  * 「複製 prompt」與「上傳這張」留著：不想用 Codex、或想自己找圖的時候用。
+ * 描述可以在卡片上直接改（D-025，P5-T025）：Agent 那條改 prompt，使用者那條改「想要：…」那句。
  */
 function BriefCard({
   job,
@@ -295,13 +298,22 @@ function BriefCard({
    */
   const [candidateAlt, setCandidateAlt] = useState('');
   const askAlt = brief.altText === '';
+  /**
+   * 在卡片上改描述（D-025，P5-T025）：Agent 那條改畫面描述（prompt），使用者那條改「想要：…」那句。
+   * `draft` 是 null＝沒在改。存了之後生圖一律用改過的版本；候選圖留著。
+   */
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = useAction();
+  /** 存了，但有件事要講（使用者那條的前後段落沿用當初的）。 */
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const editing = draft !== null;
 
   const run = job.agentRun;
   const runningHere = run?.status === 'running' && run.task === 'generate-image' && run.briefId === brief.id;
   const runningElsewhere = run?.status === 'running' && !runningHere;
   const generating = generate.busy || runningHere;
   const seconds = useElapsedSeconds(runningHere ? run.startedAt : localStart, generating);
-  const busy = action.busy || generate.busy || use.busy;
+  const busy = action.busy || generate.busy || use.busy || save.busy;
   const candidate = brief.candidate;
   // 重新整理之後 generate.error 就沒了；上一趟這張卡片生圖失敗的話，照樣講出來。
   const lastFailure =
@@ -318,7 +330,99 @@ function BriefCard({
       : !generation.available
         ? (generation.reason ?? '現在不能生圖')
         : null;
-  const canGenerate = generation?.available === true && !generating && !runningElsewhere && !busy;
+  // 改到一半不給生圖：生的會是還沒存的那一版以外的東西，按下去不知道照哪一版畫。
+  const canGenerate = generation?.available === true && !generating && !runningElsewhere && !busy && !editing;
+
+  // 跟後端同一套算法（contract/brief-prompt.ts、contract/user-note.ts）。
+  const draftLength = draft === null ? 0 : mine ? userNoteLength(draft) : briefPromptLength(draft);
+  const draftMax = mine ? USER_NOTE_MAX : BRIEF_PROMPT_MAX;
+  const draftTooLong = draftLength > draftMax;
+  const draftEmpty = !mine && draftLength === 0;
+  const canSave = editing && !draftTooLong && !draftEmpty && !generating && !save.busy;
+  const startEdit = (): void => {
+    setSaveNotice(null);
+    setDraft(mine ? (brief.note ?? '') : brief.prompt);
+  };
+  const cancelEdit = (): void => {
+    setDraft(null);
+    save.clear();
+  };
+  const saveEdit = (): void => {
+    if (!canSave || draft === null) return;
+    void save.run(async () => {
+      const { notice } = await api.updateImageBrief(job.uuid, brief.id, mine ? { note: draft } : { prompt: draft });
+      setDraft(null);
+      setSaveNotice(notice);
+      await refresh();
+    });
+  };
+  const editButton = !editing && (
+    <button
+      type="button"
+      className="btn btn-quiet btn-tiny brief-edit"
+      disabled={generating || busy}
+      title={generating ? 'Codex 正在畫這張，等它跑完再改' : mine ? '改你想要的那句' : '改這段描述；之後生圖照改過的畫'}
+      onClick={startEdit}
+    >
+      <Icon name="pencil" size={12} />
+      改
+    </button>
+  );
+  const editor = editing && (
+    <div className="brief-editor">
+      {mine ? (
+        <input
+          className="input"
+          value={draft ?? ''}
+          autoFocus
+          aria-label="想要什麼樣的圖"
+          placeholder="例如：水彩風、黃昏的顏色（可以留空）"
+          disabled={save.busy}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) saveEdit();
+            if (event.key === 'Escape') cancelEdit();
+          }}
+        />
+      ) : (
+        <textarea
+          className="input textarea brief-editor-text"
+          value={draft ?? ''}
+          autoFocus
+          aria-label="畫面描述（prompt）"
+          rows={5}
+          disabled={save.busy}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') cancelEdit();
+          }}
+        />
+      )}
+      <p className="field-hint">
+        <span className={draftTooLong || draftEmpty ? 'mono insert-ai-over' : 'mono'}>
+          {draftLength}／{draftMax}
+          {draftTooLong && '（太長了，刪短一點）'}
+          {draftEmpty && '（不能是空的）'}
+        </span>
+        {'　'}
+        {generating
+          ? 'Codex 正在畫這張，等它跑完再改。'
+          : mine
+            ? '存的時候，會用文章裡這個位置目前前後的段落，重新組給 Codex 的指令。'
+            : '存了之後，「用 Codex 生圖」就照這段畫。'}
+        {candidate !== null && !generating && ' 已經生好的那張留著，想要新的就再生一張。'}
+      </p>
+      <div className="brief-actions">
+        <button type="button" className="btn btn-primary btn-tiny" disabled={!canSave} onClick={saveEdit}>
+          {save.busy ? <Spinner /> : <Icon name="check" size={13} />}
+          存
+        </button>
+        <button type="button" className="btn btn-quiet btn-tiny" disabled={save.busy} onClick={cancelEdit}>
+          取消
+        </button>
+      </div>
+    </div>
+  );
 
   const upload = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.target.files?.[0];
@@ -399,9 +503,16 @@ function BriefCard({
       </div>
 
       {mine ? (
-        <p className="brief-purpose">
-          {brief.note !== null ? `想要：${brief.note}` : '沒有特別要求：Codex 讀前後段落自己決定畫面'}
-        </p>
+        editing ? (
+          editor
+        ) : (
+          <div className="brief-editable">
+            <p className="brief-purpose">
+              {brief.note !== null ? `想要：${brief.note}` : '沒有特別要求：Codex 讀前後段落自己決定畫面'}
+            </p>
+            {editButton}
+          </div>
+        )
       ) : (
         <p className="brief-purpose">{brief.purpose}</p>
       )}
@@ -412,7 +523,22 @@ function BriefCard({
         </p>
       )}
       {/* 使用者那條的 prompt 是系統組的整份指令（含前後段落），很長；要看就按「複製 prompt」。 */}
-      {!mine && <p className="brief-prompt">{brief.prompt}</p>}
+      {!mine &&
+        (editing ? (
+          editor
+        ) : (
+          <div className="brief-editable">
+            <p className="brief-prompt">{brief.prompt}</p>
+            {editButton}
+          </div>
+        ))}
+      <ErrorNote message={save.error} />
+      {saveNotice !== null && (
+        <p className="note note-info" role="status">
+          <Icon name="alert" size={14} />
+          <span>{saveNotice}</span>
+        </p>
+      )}
       {brief.altText !== '' && (
         <p className="brief-alt">
           <span className="brief-alt-tag">alt</span>
@@ -439,6 +565,7 @@ function BriefCard({
             停止
           </button>
           <p className="brief-generating-note">{waitingNote('generate-image', seconds)}</p>
+          <p className="brief-generating-note">Codex 正在畫這張，等它跑完再改{mine ? '想要的那句' : '描述'}。</p>
         </div>
       )}
 
@@ -568,6 +695,7 @@ function BriefCard({
       {runningElsewhere && !generating && (
         <p className="field-hint">另一個 Agent 動作還在跑，跑完才能生圖或上傳（同一篇一次只跑一個）。</p>
       )}
+      {editing && !generating && <p className="field-hint">先按「存」或「取消」，才能生圖。</p>}
 
       <div className="brief-actions">
         {candidate === null && !generating && (
