@@ -11,7 +11,8 @@
 
 ## 進行中
 
-無。P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。D-023 審查 16 條已全部完成（P5-T019～P5-T023）。
+- [P5-T025](tasks/P5-T025-edit-image-prompt.md)：配圖的 prompt 可以在卡片上直接改（D-025），`in_progress`。
+- P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。
 
 ## 上次停在哪（2026-09-24 收官）
 
