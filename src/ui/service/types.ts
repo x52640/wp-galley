@@ -48,6 +48,8 @@ import type {
   Term,
   UpdateImageBriefRequest,
   UpdateImageBriefResponse,
+  SlugSuggestionRequest,
+  SlugSuggestionResponse,
 } from '../../contract/api.js';
 
 export type {
@@ -104,6 +106,8 @@ export type {
   SetupProblemKind,
   SetupSaveResponse,
   SetupStatus,
+  SlugSuggestionRequest,
+  SlugSuggestionResponse,
   Term,
 } from '../../contract/api.js';
 
@@ -172,6 +176,11 @@ export interface PublisherApi {
 
   runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   cancelAgent(uuid: string): Promise<void>;
+  /**
+   * AI 建議英文網址（D-026）。要等它跑完才回；跑的期間 `agentRun` 是 running（task `suggest-slug`），
+   * 取消用 `cancelAgent`。**不動文章**：候選只回給畫面，點了才填進網址欄。日記不提供。
+   */
+  suggestSlugs(uuid: string, input: SlugSuggestionRequest): Promise<SlugSuggestionResponse>;
 
   /** 逐項套用或略過。套用會產生新版本，略過不動內容。 */
   resolveReview(

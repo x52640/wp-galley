@@ -181,3 +181,34 @@ export function buildReviewSchema(templateSchema: Record<string, unknown>): Reco
     },
   };
 }
+
+/**
+ * AI 建議英文網址那一趟（D-026，P5-T026）的輸出。**另一份小 schema，不共用校稿那份**：
+ *
+ * - 校稿那份的 `templateData` 是必填、而且嵌了整份模板 schema。這一趟只送標題＋內文開頭，
+ *   Agent 手上沒有整份 templateData，硬要它帶回來只能編、或把整篇再吐一次（慢、花額度）。
+ * - 三家 CLI 都吃得下這份：每層 `additionalProperties: false`、只有一個欄位且必填（Codex strict 不用轉 nullable）；
+ *   `maxItems`／`maxLength` 送給 Codex 前會被濾掉，後端照原樣再驗一次。
+ *
+ * 單個候選**不在 schema 裡驗格式**（沒有 pattern）：一個不合格就整趟重來太浪費，
+ * 後端用 `contract/slug.ts` 的 `pickSlugSuggestions` 逐個丟掉不合格的。
+ */
+export interface SlugOutput {
+  readonly slugs: unknown[];
+}
+
+export const SLUG_OUTPUT_SCHEMA: Record<string, unknown> = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: '英文網址建議',
+  type: 'object',
+  additionalProperties: false,
+  required: ['slugs'],
+  properties: {
+    slugs: {
+      type: 'array',
+      maxItems: 10,
+      description: '三個英文網址候選，最好的放第一個。只用小寫英文字母、數字與連字號。',
+      items: { type: 'string', maxLength: 200 },
+    },
+  },
+};

@@ -17,6 +17,7 @@ import { SuggestionColumn } from './SuggestionColumn.js';
 import { MediaPanel } from './panels/MediaPanel.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
+import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
 
 /**
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
@@ -72,6 +73,9 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
    * 會把畫面倒退回去。
    */
   const generation = useRef(0);
+
+  // 換到這一篇：別篇已經結束的「建議網址」結果丟掉（還在跑的留著，D-026）。
+  useEffect(() => forgetOtherSlugSuggests(uuid), [uuid]);
 
   useEffect(() => {
     alive.current = true;

@@ -51,6 +51,8 @@ import type {
   RevisionsResponse,
   RevokeApprovalRequest,
   RevokedResponse,
+  SlugSuggestionRequest,
+  SlugSuggestionResponse,
 } from '../../contract/api.js';
 
 /**
@@ -89,6 +91,18 @@ const AgentBody = z.object({
   instruction: z.string().max(8_000).optional(),
   timeoutMs: z.number().int().min(1_000).max(900_000).optional(),
 });
+
+/**
+ * AI 建議英文網址（D-026，P5-T026）。`.strict()`：輸入一律是後端目前這一版的標題與內文開頭，
+ * 前端多送 `title`、`body` 之類的欄位要當場擋下，不是被默默丟掉、讓人以為送的東西有用。
+ */
+const SlugSuggestionBody = z
+  .object({
+    provider: z.enum(['codex', 'claude', 'google']),
+    model: z.string().max(120).optional(),
+    timeoutMs: z.number().int().min(1_000).max(900_000).optional(),
+  })
+  .strict();
 
 /**
  * 圖片走 base64 JSON 而不是 multipart：本機工具沒有大量上傳的場景，
@@ -193,6 +207,7 @@ export const REQUEST_CONTRACT_CHECK: {
   readonly createJob: Accepts<typeof CreateJobBody, CreateJobRequest>;
   readonly createRevision: Accepts<typeof CreateRevisionBody, CreateRevisionRequest>;
   readonly agent: Accepts<typeof AgentBody, AgentRunRequest>;
+  readonly slugSuggestion: Accepts<typeof SlugSuggestionBody, SlugSuggestionRequest>;
   readonly media: Accepts<typeof MediaBody, MediaUploadRequest>;
   readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
   readonly imageAtPosition: Accepts<typeof ImageAtPositionBody, ImageAtPositionRequest>;
@@ -207,6 +222,7 @@ export const REQUEST_CONTRACT_CHECK: {
   createJob: true,
   createRevision: true,
   agent: true,
+  slugSuggestion: true,
   media: true,
   place: true,
   imageAtPosition: true,
@@ -438,6 +454,26 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
       return { cancelled: true };
     });
   });
+
+  /**
+   * AI 建議英文網址（D-026，P5-T026）。跟 `POST /agent` 一樣要等它跑完才回；跑的期間 `GET /api/jobs/:uuid`
+   * 的 agentRun 是 running（task `suggest-slug`），取消走 `DELETE /agent`。**不動文章**：候選只回給畫面。
+   * 日記 400、另一個 Agent 動作在跑 502、一個合格的候選都沒有 502（`AGENT_ERROR`，訊息講清楚）。
+   */
+  app.post<{ Params: { uuid: string } }>(
+    '/api/jobs/:uuid/slug-suggestions',
+    async (request): Promise<SlugSuggestionResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const body = parse(SlugSuggestionBody, request.body ?? {});
+      return guard(() =>
+        core().suggestSlugs(uuid, {
+          provider: body.provider,
+          ...(body.model === undefined ? {} : { model: body.model }),
+          ...(body.timeoutMs === undefined ? {} : { timeoutMs: body.timeoutMs }),
+        }),
+      );
+    },
+  );
 
   // --- 待處理清單（階段 5.5） ------------------------------------------------
 

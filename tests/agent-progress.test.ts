@@ -23,4 +23,10 @@ describe('waitingNote', () => {
     expect(waitingNote('generate-image', 200)).toContain('停止');
     expect(waitingNote('review', 10)).toContain('30 秒到 3 分鐘');
   });
+
+  it('建議網址講它的期待值，而且說點了才填（D-026）', () => {
+    expect(waitingNote('suggest-slug', 5)).toContain('一分鐘');
+    expect(waitingNote('suggest-slug', 5)).toContain('點了才填');
+    expect(waitingNote('suggest-slug', 90)).toContain('停止');
+  });
 });

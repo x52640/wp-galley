@@ -47,10 +47,11 @@ export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 
 export type AgentTask = 'review' | 'images';
 
 /**
- * `agent_runs` 裡記的一趟是在做什麼：`AgentTask` 之外多一種 `generate-image`
- * （用 Codex 訂閱生圖，D-017）。生圖不走 `POST /agent`，所以不放進 `AgentTask`。
+ * `agent_runs` 裡記的一趟是在做什麼：`AgentTask` 之外多兩種——`generate-image`
+ * （用 Codex 訂閱生圖，D-017）與 `suggest-slug`（AI 建議英文網址，D-026）。
+ * 兩者都不走 `POST /agent`，所以不放進 `AgentTask`。
  */
-export type AgentRunTask = AgentTask | 'generate-image';
+export type AgentRunTask = AgentTask | 'generate-image' | 'suggest-slug';
 
 /** 存成草稿與直接公開是兩個不同的決定。 */
 export type PublishStatus = 'draft' | 'publish';
@@ -574,6 +575,27 @@ export interface AgentRunRequest {
   /** 使用者在聊天框打的字。不受信任內容，會被明確標示邊界。 */
   readonly instruction?: string;
   readonly timeoutMs?: number;
+}
+
+/**
+ * AI 建議英文網址（D-026，P5-T026，`POST /api/jobs/:uuid/slug-suggestions`）。
+ *
+ * 只收「交給哪一家」：輸入一律是後端**目前這一版**的標題＋內文開頭，前端給不了別的內容。
+ */
+export interface SlugSuggestionRequest {
+  readonly provider: AgentProvider;
+  readonly model?: string;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * 建議的網址。`slugs` 已經過後端篩選（`contract/slug.ts`：小寫英數與單個連字號、上限 60），
+ * 最多三個、至少一個（一個都不合格時回 502，不會是空陣列）。`dropped` 是格式不合格被丟掉的個數。
+ * **不會自動填進文章**：使用者點了才填進網址欄，照原本的「儲存」存。
+ */
+export interface SlugSuggestionResponse {
+  readonly slugs: string[];
+  readonly dropped: number;
 }
 
 /** 圖片走 base64 JSON 而不是 multipart，理由見 src/server/routes/jobs.ts。 */

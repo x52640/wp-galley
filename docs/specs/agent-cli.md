@@ -12,7 +12,8 @@
   放寬的只是給模型端的提示，不是驗證標準。
 - 輸出不是合法 JSON、schema 不合格、漏掉必要欄位或嘗試加入不允許 HTML，後端拒絕
   該結果並允許重試，不得直接發布。輸出契約本身的唯一權威是
-  `src/agents/output-contract.ts`（`REVIEW_OUTPUT_SCHEMA`）。
+  `src/agents/output-contract.ts`（校稿與配圖：`REVIEW_OUTPUT_SCHEMA`；建議英文網址：`SLUG_OUTPUT_SCHEMA`，
+  P5-T026，只有一個必填的 `slugs` 字串陣列，三家不用特別轉換——Codex strict 只濾掉 `maxItems`／`maxLength`）。
 
 ## Adapter 介面與執行規則
 

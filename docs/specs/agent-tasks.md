@@ -1,10 +1,11 @@
 # Agent 工作類型：一鍵動作、配圖需求、執行中回饋
 
 > 擁有範圍：`AgentTask`（review / images）、三顆一鍵按鈕、`image_briefs`、用 Codex 生圖（D-017）、
-> 內文圖的錨點與自動放位置（D-020）、在文章上直接請 AI 配一張（D-022）、執行中的回饋。
+> 內文圖的錨點與自動放位置（D-020）、在文章上直接請 AI 配一張（D-022）、建議英文網址（D-026）、執行中的回饋。
 > 程式：`src/agents/output-contract.ts`（`buildSystemPrompt`、`TASK_BRIEF`）、
 > migration 004／005／006／008、`src/core/image-generation.ts`、`src/ui/components/AgentProgress.tsx`、
-> `AgentButton.tsx`、`panels/MediaPanel.tsx`（`BriefCard`）、`InsertImagePanel.tsx`。
+> `AgentButton.tsx`、`panels/MediaPanel.tsx`（`BriefCard`）、`InsertImagePanel.tsx`、
+> `src/core/slug-suggestion.ts`、`src/contract/slug.ts`、`panels/SourcePanel.tsx`（`SlugSuggest`）。
 
 三件事都來自實際用起來的問題（2026-08-28，D-010）。
 
@@ -261,15 +262,40 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 
 畫面見 [design-system.md](design-system.md)「配圖卡片」。
 
+## 建議英文網址（D-026，P5-T026）
+
+「標題與網址」的網址欄底下一顆「建議網址」：跑一趟本機 Agent（使用者在「請 AI 看一遍」選單裡選的那家，
+`loadProvider`），讀**目前這一版**的標題＋內文開頭，回三個英文網址候選。長文與一般文章才有；**日記不提供**
+（網址是日期，前端不顯示、後端 `InvalidInputError`）。
+
+| 項目 | 規則 |
+| --- | --- |
+| 送什麼 | 目前這一版 templateData 的 `title` 與 `publishSlot`（正文）轉成純文字的**開頭 600 字**（code point，`SLUG_EXCERPT_MAX`；一段一行、沒字的區塊跳過、超過截斷加「…」）。不送整篇、不送 sourceText、不帶模板的 rules.md（那是校稿規則） |
+| 怎麼包 | 標題、內文各自包在 `===== 標題開始／結束 =====`、`===== 內文開頭開始／結束 =====` 裡，先 `neutralize`（同 D-022）：內容做不出系統那條分隔線 |
+| 系統指令 | `buildSlugSystemPrompt`：確定知道作品／人物／地名的**官方英文名**就用它（例：「電影推薦「遠山的呼喚」」→ `a-distant-cry-from-spring-review`），不確定就意譯、不要編；**不照字面逐字翻、不用拼音**；三個要有差別；格式同下；沒有網路 |
+| 輸出 schema | **另一份小 schema** `SLUG_OUTPUT_SCHEMA`（`{ slugs: string[] }`，`maxItems` 10、每個 `maxLength` 200），不共用校稿那份：校稿那份的 `templateData` 必填且嵌整份模板 schema，這一趟手上沒有整份 templateData，硬要帶回只能編、或把整篇再吐一次。三家 CLI 都吃得下（只有一個必填欄位，Codex strict 不用轉 nullable） |
+| 單個候選的驗證 | 不放進 schema（一個不合格就整趟重來太浪費）。後端 `pickSlugSuggestions`（`src/contract/slug.ts`，示範資料共用）：去頭尾空白；只收**小寫英數與單個連字號、不以連字號開頭結尾、最多 60 字元**（比模板 schema 的 80 嚴，也不收底線：要的是短、好讀、一定存得進去）；不合格的**丟掉、不改寫**；重複的只留一個；最多留三個 |
+| 全丟光 | 那一趟記成 `failed`，丟 `AgentError`「AI 沒給出能用的網址（給了 N 個，格式都不合格）。再按一次試試，或自己填。」（HTTP 502） |
+| 落地 | **不落地**：不建提案、不改 templateData、不建版本、不動核准、不動配圖需求。候選只回給畫面；使用者點一個才填進網址欄（還沒存，照原本的「儲存」存）。**絕不自動填、不自動存**（AI 可能認錯作品） |
+| 密碼 | **截斷之前**先對整份 templateData 檢查，再對組好的 prompt 檢查（D-023）：只查截好的 prompt 的話，密碼剛好跨在第 600 字時前半段會被送出去（P5-T026 審查）。有就拒絕，不送出、不記執行 |
+| 生命週期 | 跟校稿共用「同一篇一次一趟」（`activeRuns`）、AgentRegistry 同一條佇列、`DELETE /agent` 取消、頂端 AgentBanner。`agent_runs.purpose = 'suggest-slug'`（`AgentRun.task`）。逾時預設 2 分鐘 |
+| 內容被改過 | **不丟結果**：候選不會落地，不像校稿那樣要對著同一版套用。因此它跑的時候上傳圖片的自動放位置／自動設精選照常做（後端 `contentRunActive` 不算它），畫面上圖片的「放進正文／設精選」也不鎖（前端 `runLocksContent`，`src/ui/lib/agent-tasks.ts`，示範資料共用） |
+
+記一筆 `slug_suggested` 事件（provider、候選數、丟掉幾個），**不記候選本身**（沒被採用；採用時會進版本紀錄）。
+不檢查網址是否已被站上別篇用過（WordPress 自己會加 `-2`）；不在建稿時自動產生。
+
+畫面見 [design-system.md](design-system.md)「標題與網址」。
+
 ## 執行中的回饋
 
 一趟要幾十秒到幾分鐘。那段時間只有一個轉圈圈的話，使用者分不出「還在想」與
 「卡死了」。所以：
 
 - **每秒跳一次的計時器**（mm:ss）。動的東西才代表活著。
-- **講出它在做什麼**，用 `agentRun.task` 決定講法——「校稿」、「想配圖」、「生圖」是三件事。
+- **講出它在做什麼**，用 `agentRun.task` 決定講法——「校稿」、「想配圖」、「生圖」、「想英文網址」是四件事。
 - **講出大概要多久**（校稿 30 秒到 3 分鐘，超過 90 秒換一句話安撫；生圖「一分鐘左右、生好會先
-  放在卡片上給你看，不會自動上傳」，超過 2 分鐘換一句）。生圖時計時器同時出現在那張卡片上。
+  放在卡片上給你看，不會自動上傳」，超過 2 分鐘換一句；建議網址「通常十幾秒到一分鐘，想好會列在網址欄下面，
+  點了才填進去」，超過 1 分鐘換一句）。生圖時計時器同時出現在那張卡片上，建議網址時出現在網址欄底下。
 - **頂端長條在工作區任何畫面都看得到**。使用者在看校樣或左右對照時不會把右面板
   打開，「還在跑」這件事必須自己找上門。
 

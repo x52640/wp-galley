@@ -38,6 +38,7 @@
 | `GET` | `/api/jobs/:uuid/diff` | 相對上一版的校對符號，`?revision=n` | → `MarksResponse` |
 | `POST` | `/api/jobs/:uuid/agent` | 派工給 Agent（`task: review \| images`） | `AgentRunRequest` → `AgentRunResult` |
 | `DELETE` | `/api/jobs/:uuid/agent` | 取消執行中的 Agent | → `CancelledResponse` |
+| `POST` | `/api/jobs/:uuid/slug-suggestions` | AI 建議英文網址（D-026，等它跑完才回；不動文章） | `SlugSuggestionRequest` → `SlugSuggestionResponse` |
 | `GET` | `/api/jobs/:uuid/review` | 待處理清單 | → `ReviewResponse` |
 | `POST` | `/api/jobs/:uuid/review/resolve` | 逐項套用或略過 | `ResolveReviewRequest` → `ReviewResolveResult` |
 | `POST` | `/api/jobs/:uuid/review/accept-all` | 採用整份稿 | `ProposalRefRequest` → `ReviewResolveResult` |
@@ -129,6 +130,12 @@
   回 200 `{ brief, notice }`：`notice` 不是 null 時畫面要照講（使用者那條的前後段落沿用當初的）。
   需求已標成不要了 400、沒有這篇 404、有 WordPress 密碼 400、Codex 正在畫這張 502（`AGENT_ERROR`，跟「另一個 Agent 動作在跑」
   同一類）。走跟其他改東西的路由同一套守門（跨站 403）。規則見 [agent-tasks.md](agent-tasks.md)「在卡片上改描述」。
+- 建議英文網址（D-026，P5-T026）：`POST /slug-suggestions` 的 body 是 `.strict()`，只收 `provider`（＋選填 `model`、`timeoutMs`）；
+  多送欄位（例如 `title`）400——輸入一律是後端目前這一版的標題與內文開頭。回 200 `{ slugs, dropped }`：`slugs` 已篩過、
+  1 到 3 個；`dropped` 是格式不合格被丟掉的個數。跑的期間 `JobDetail.agentRun` 是 running（`task: 'suggest-slug'`），
+  取消走 `DELETE /agent`。日記 400、有 WordPress 密碼 400、另一個 Agent 動作在跑 502、一個合格的都沒有 502（`AGENT_ERROR`，
+  訊息「AI 沒給出能用的網址…」）、Agent 不能用 503。**不改 templateData、不建版本、核准不失效**。
+  `AgentRunTask` 多一個 `suggest-slug`（新增的值，舊前端只是講不出這一趟在做什麼）。規則見 [agent-tasks.md](agent-tasks.md)「建議英文網址」。
 - 作者（P5-T024，D-024）：`PublishRequest.authorId`（選填正整數）是發布選項，不影響核准；不在站上可當作者的名單
   回 409 `PUBLISH_BLOCKED`，一個寫入都不送。`PublishResult.author` 是實際送出的作者（沒送是 null）。
   `GET /api/wordpress/authors` 只回 `id`、`name`；帳號只能用自己時 `authors` 只有自己、`canChooseOthers: false`、`notice` 講怎麼改。

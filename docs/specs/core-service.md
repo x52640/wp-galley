@@ -6,7 +6,7 @@
 > MCP 與 UI 共用同一個實例（規則見 [security.md](security.md)）。
 > 方法的回傳型別定義在 `src/contract/api.ts`；`service.ts` 以舊名字（`ApprovalView` 等）轉出。
 
-**啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖都算）結成
+**啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖、建議網址都算）結成
 `failed`，原因「後端重啟，這次沒有完成」，每筆記一條 `agent_interrupted` 事件（actor `system`）。
 進行中的執行只記在記憶體（`activeRuns`），子行程也隨舊行程結束，所以這些不可能再完成。只動那幾筆，
 不刪資料、不動其他表。前提：**一個 DB 只有一個 CoreService 行程**；將來若 MCP 另起行程共用同一個 DB，
@@ -37,7 +37,16 @@ interface CoreService {
   // --- Agent ---
   runAgentReview(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   /**
-   * 取消這篇稿件正在跑的 Agent 動作（校稿或生圖）。記憶體裡沒有、DB 卻還是 running（上一個行程留下的）
+   * AI 建議英文網址（D-026，P5-T026）：讀目前這一版的標題＋內文開頭跑一趟 Agent，回最多三個合格的 slug。
+   * 日記、標題與內文都空、有 WordPress 密碼（InvalidInputError）、已有 Agent 在跑、一個合格的都沒有（AgentError）都拒絕。
+   * 不建提案、不改 templateData、不建版本、不動核准。規則見 agent-tasks.md「建議英文網址」。
+   */
+  suggestSlugs(
+    uuid: string,
+    input: { provider: AgentId; model?: string; timeoutMs?: number },
+  ): Promise<SlugSuggestionResponse>;
+  /**
+   * 取消這篇稿件正在跑的 Agent 動作（校稿、建議網址或生圖）。記憶體裡沒有、DB 卻還是 running（上一個行程留下的）
    * 也把 DB 那筆結成 cancelled（P5-T020）。
    */
   cancelAgentRun(uuid: string): void;

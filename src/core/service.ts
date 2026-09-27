@@ -27,6 +27,7 @@ import type {
   ReviewItem as ReviewItemView,
   ReviewProposal as ReviewProposalView,
   ReviewResolveResult,
+  SlugSuggestionResponse,
 } from '../contract/api.js';
 import { computeRevisionHash } from './content-hash.js';
 import { computeComparison, computeProofMarks, type CompareRow, type ProofMark } from './diff.js';
@@ -89,6 +90,8 @@ import {
 import { userNoteLength } from '../contract/user-note.js';
 import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../contract/brief-prompt.js';
 import { buildTemplateDataFromSource } from './source-text.js';
+import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from './slug-suggestion.js';
+import { pickSlugSuggestions } from '../contract/slug.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
 import { containsSecret, createSecretScrubber, type Scrubber } from '../config/secrets.js';
@@ -97,6 +100,8 @@ import { AgentRegistry, AgentUnavailableError } from '../agents/registry.js';
 import { createJobWorkspace } from '../agents/workspace.js';
 import {
   buildReviewSchema,
+  SLUG_OUTPUT_SCHEMA,
+  type SlugOutput,
   type ImageBrief,
   type Observation,
   type ReviewChange,
@@ -245,6 +250,13 @@ export interface AgentReviewInput {
   readonly timeoutMs?: number | undefined;
 }
 
+/** AI 建議英文網址（D-026，P5-T026）。輸入內容一律是目前這一版，呼叫端只選交給哪一家。 */
+export interface SlugSuggestionInput {
+  readonly provider: AgentId;
+  readonly model?: string | undefined;
+  readonly timeoutMs?: number | undefined;
+}
+
 export interface PublishInput {
   readonly status: 'draft' | 'publish';
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
@@ -305,6 +317,10 @@ const MAX_AGENT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_IMAGE_TIMEOUT_MS = 300_000;
 /** `agent_runs.purpose` 記的生圖那一趟。 */
 const GENERATE_IMAGE_PURPOSE: AgentRunTask = 'generate-image';
+/** `agent_runs.purpose` 記的「建議英文網址」那一趟（D-026）。 */
+const SUGGEST_SLUG_PURPOSE: AgentRunTask = 'suggest-slug';
+/** 建議網址只回一個小 JSON，一趟通常十幾秒；給到 2 分鐘。 */
+const DEFAULT_SLUG_TIMEOUT_MS = 120_000;
 /** 後端重啟時還沒跑完的 Agent 執行，結掉時寫的原因。 */
 const AGENT_INTERRUPTED_MESSAGE = '後端重啟，這次沒有完成';
 
@@ -1038,6 +1054,129 @@ export class CoreService {
           '請確認目前的內容之後重新派工。',
         { dispatchedOn: dispatchedOn.content_hash, current: latest?.content_hash ?? null },
       );
+    }
+  }
+
+  /**
+   * AI 建議英文網址（D-026，P5-T026）。
+   *
+   * 讀**目前這一版**的標題＋內文開頭（`SLUG_EXCERPT_MAX` 字），跑一趟 Agent，回最多三個合格的候選。
+   * - 用另一份小 schema（`SLUG_OUTPUT_SCHEMA`），不共用校稿那份：這一趟沒有 templateData 可以帶回。
+   * - 候選逐個用 `pickSlugSuggestions` 篩，不合格的丟掉；一個都不剩就明講、那一趟記成失敗。
+   * - **不建提案、不改 templateData、不建版本、不動核准**：結果只回給畫面，使用者點了才填進網址欄。
+   * - 跟其他 Agent 動作共用「同一篇一次一趟」（`activeRuns`）、同一條佇列、同一個 `cancelAgentRun`。
+   * - 日記不提供（網址是日期）。
+   *
+   * 內容被改過**不丟結果**：候選只是建議，不會落地；畫面上的標題改了使用者自己看得出來。
+   */
+  async suggestSlugs(uuid: string, input: SlugSuggestionInput): Promise<SlugSuggestionResponse> {
+    const job = this.requireJob(uuid);
+    this.assertMutable(job);
+    const target = this.targetOf(job);
+    if (!target) throw new InvalidInputError('這個工作項目沒有綁定發布目標，沒辦法建議網址');
+    if (target.contentType === 'diary') {
+      throw new InvalidInputError('日記的網址是日期（YYYYMMDD），不用 AI 建議');
+    }
+    const template = this.requireTemplate(job);
+    const revisionRow = this.requireRevision(job);
+    const templateData = this.payloadOf(revisionRow).templateData;
+    // 截斷**之前**先對整份內容檢查：只查截好的 prompt 的話，密碼剛好跨在第 600 字時，
+    // 前半段照樣會被送出去（P5-T026 審查）。
+    this.assertNoAppPassword(templateData);
+
+    const title = this.titleOf(templateData) ?? '';
+    const body = templateData[template.manifest.publishSlot];
+    const excerpt = typeof body === 'string' ? bodyExcerpt(body) : '';
+    if (title.trim() === '' && excerpt === '') {
+      throw new InvalidInputError('標題和內文都是空的，先寫一點 AI 才有東西可以看');
+    }
+
+    if (this.activeRuns.has(job.uuid)) {
+      throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    }
+
+    const userPrompt = buildSlugUserPrompt(title, excerpt);
+    this.assertNoAppPassword(userPrompt);
+
+    const workspace = job.workspace_path ?? createJobWorkspace(this.draftsDir, job.uuid);
+    const runRow = this.repo.insertAgentRun({
+      jobId: job.id,
+      revisionId: revisionRow.id,
+      provider: input.provider,
+      model: input.model ?? null,
+      purpose: SUGGEST_SLUG_PURPOSE,
+      status: 'running',
+      inputHash: revisionRow.content_hash,
+    });
+    const runId = `${job.uuid}-${runRow.id}`;
+    this.activeRuns.set(job.uuid, { runId, provider: input.provider, rowId: runRow.id });
+
+    try {
+      const result = await this.agents.runStructured<SlugOutput>(
+        input.provider,
+        {
+          systemPrompt: buildSlugSystemPrompt(),
+          userPrompt,
+          workspaceDir: workspace,
+          model: input.model,
+          timeoutMs: input.timeoutMs ?? DEFAULT_SLUG_TIMEOUT_MS,
+          maxOutputBytes: MAX_AGENT_OUTPUT_BYTES,
+        },
+        SLUG_OUTPUT_SCHEMA,
+        runId,
+      );
+
+      if (!result.ok) {
+        const status: AgentRunStatus =
+          result.reason === 'timeout' ? 'timeout' : result.reason === 'cancelled' ? 'cancelled' : 'failed';
+        const message = this.scrub(result.message);
+        if (this.repo.agentRunById(runRow.id)?.status === 'running') {
+          this.repo.finishAgentRun(runRow.id, { status, outputHash: null, errorMessage: message });
+        }
+        throw new AgentError(message, this.scrub(result.issues));
+      }
+
+      // 等待期間被取消（排在佇列裡才被取消的那一個照樣會跑完）或稿件不能再改了，就不給。
+      const after = this.repo.agentRunById(runRow.id);
+      if (after !== null && after.status !== 'running') {
+        throw new AgentError(`這次建議網址已經是 ${after.status}，結果不採用`);
+      }
+      const fresh = this.repo.jobById(job.id);
+      if (!fresh) throw new AgentError('工作項目在 Agent 執行期間被刪除了，結果不採用');
+      this.assertMutable(fresh);
+
+      const picked = pickSlugSuggestions(result.data.slugs);
+      if (picked.slugs.length === 0) {
+        const message =
+          `AI 沒給出能用的網址（給了 ${picked.dropped} 個，格式都不合格）。再按一次試試，或自己填。`;
+        this.repo.finishAgentRun(runRow.id, { status: 'failed', outputHash: null, errorMessage: message });
+        throw new AgentError(message);
+      }
+
+      this.repo.finishAgentRun(runRow.id, { status: 'succeeded', outputHash: null, errorMessage: null });
+      this.repo.insertEvent({
+        jobId: job.id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'ui',
+        eventType: 'slug_suggested',
+        status: 'succeeded',
+        // 不記候選本身：它們沒有被採用，採用時會進版本紀錄。
+        detail: { provider: input.provider, count: picked.slugs.length, dropped: picked.dropped },
+      });
+      return picked;
+    } catch (error) {
+      const row = this.repo.agentRunById(runRow.id);
+      if (row?.status === 'running') {
+        this.repo.finishAgentRun(runRow.id, {
+          status: 'failed',
+          outputHash: null,
+          errorMessage: this.scrub(error instanceof Error ? error.message : String(error)),
+        });
+      }
+      throw error;
+    } finally {
+      if (this.activeRuns.get(job.uuid)?.runId === runId) this.activeRuns.delete(job.uuid);
     }
   }
 
@@ -1960,7 +2099,8 @@ export class CoreService {
   private contentRunActive(job: JobRow): boolean {
     const active = this.activeRuns.get(job.uuid);
     if (!active) return false;
-    return this.repo.agentRunById(active.rowId)?.purpose !== GENERATE_IMAGE_PURPOSE;
+    const purpose = this.repo.agentRunById(active.rowId)?.purpose;
+    return purpose !== GENERATE_IMAGE_PURPOSE && purpose !== SUGGEST_SLUG_PURPOSE;
   }
 
   /**
@@ -3621,7 +3761,7 @@ function isCandidateCurrent(candidate: ImageCandidateRow, brief: ImageBriefRow):
 
 /** `agent_runs.purpose` → 畫面上的 task。舊資料沒有 generate-image，一律照舊當成 review。 */
 function taskOfPurpose(purpose: string): AgentRunTask {
-  if (purpose === 'images' || purpose === GENERATE_IMAGE_PURPOSE) return purpose;
+  if (purpose === 'images' || purpose === GENERATE_IMAGE_PURPOSE || purpose === SUGGEST_SLUG_PURPOSE) return purpose;
   return 'review';
 }
 

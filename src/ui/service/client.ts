@@ -19,6 +19,8 @@ import type {
   SetupDestinationsResponse,
   SetupSaveResponse,
   SetupStatus,
+  SlugSuggestionRequest,
+  SlugSuggestionResponse,
   TermsResponse,
   UpdateImageBriefRequest,
   UpdateImageBriefResponse,
@@ -243,6 +245,9 @@ const httpApi: PublisherApi = {
   async cancelAgent(uuid: string) {
     await sendJson<unknown>(`/api/jobs/${uuid}/agent`, 'DELETE');
   },
+
+  suggestSlugs: (uuid: string, input: SlugSuggestionRequest) =>
+    sendJson<SlugSuggestionResponse>(`/api/jobs/${uuid}/slug-suggestions`, 'POST', input),
 
   resolveReview: (uuid: string, input: { itemIds: number[]; decision: 'apply' | 'skip' }) =>
     sendJson<ReviewResolveResult>(`/api/jobs/${uuid}/review/resolve`, 'POST', input),

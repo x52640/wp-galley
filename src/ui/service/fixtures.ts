@@ -2,6 +2,8 @@ import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { hasWpImageClass } from '../../contract/media-marker.js';
 import { normalizeUserNote, USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../../contract/brief-prompt.js';
+import { pickSlugSuggestions } from '../../contract/slug.js';
+import { runLocksContent } from '../lib/agent-tasks.js';
 import type {
   AddMediaInput,
   AuthorOption,
@@ -37,6 +39,8 @@ import type {
   SetupConnectionResult,
   SetupProblem,
   SetupProblemKind,
+  SlugSuggestionRequest,
+  SlugSuggestionResponse,
   Term,
 } from './types.js';
 
@@ -933,9 +937,9 @@ function figureHtml(asset: MediaAsset): string {
 }
 
 /** 照錨點自動放（跟後端 autoPlace 同一套規則：忽略空白、剛好一段才放）。 */
-/** 校稿或一鍵配圖正在跑（生圖不算）：這時建新版本會讓那一趟的結果作廢，跟後端 contentRunActive 一樣。 */
+/** 校稿或一鍵配圖正在跑（生圖、建議網址不算）：這時建新版本會讓那一趟的結果作廢，跟後端 contentRunActive 一樣。 */
 function contentRunActive(job: FixtureJob): boolean {
-  return job.agentRun?.status === 'running' && job.agentRun.task !== 'generate-image';
+  return runLocksContent(job.agentRun);
 }
 
 async function fixtureAutoPlace(job: FixtureJob, asset: MediaAsset, brief: ImageBrief): Promise<AutoPlaceResult> {
@@ -1064,6 +1068,22 @@ async function fixtureGenerate(job: FixtureJob, briefId: number): Promise<ImageC
 }
 
 const delay = (ms = 220): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 假的「AI 建議的網址」（D-026）：照標題挑一組，故意混一個不合格的，走跟後端同一套篩選
+ * （`pickSlugSuggestions`）。`&slug=none` 模擬一個合格的都沒有。
+ */
+function fixtureSlugIdeas(title: string): string[] {
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('slug') === 'none') {
+    return ['Yuan_Shan', '遠山的呼喚'];
+  }
+  if (title.includes('遠山的呼喚')) {
+    return ['a-distant-cry-from-spring-review', 'A_Distant_Cry', 'a-distant-cry-from-spring', 'yamada-distant-cry-from-spring'];
+  }
+  if (title.includes('看得見的錯誤')) return ['visible-mistakes', 'Seeing_Errors', 'mistakes-you-can-see', 'on-seeing-our-errors'];
+  if (title.includes('文章要怎麼寫')) return ['how-to-structure-writing', 'writing-without-mess', 'organize-your-article'];
+  return ['new-article', 'notes-on-this-topic', 'thoughts-and-notes'];
+}
 
 export const fixtureApi: PublisherApi = {
   async listJobs(filter) {
@@ -1306,6 +1326,35 @@ export const fixtureApi: PublisherApi = {
     }
     job.imageBriefs = job.imageBriefs.map((row) => (row.id === briefId ? next : row));
     return { brief: clone(next), notice: null };
+  },
+
+  async suggestSlugs(uuid: string, input: SlugSuggestionRequest): Promise<SlugSuggestionResponse> {
+    const job = mustGet(uuid);
+    if (job.target?.contentType === 'diary') throw new Error('日記的網址是日期（YYYYMMDD），不用 AI 建議');
+    if (job.agentRun?.status === 'running') throw new Error('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    const data = job.currentRevision?.templateData ?? {};
+    const title = typeof data['title'] === 'string' ? data['title'] : (job.title ?? '');
+    const startedAt = new Date().toISOString();
+    job.agentRun = {
+      status: 'running',
+      provider: input.provider,
+      task: 'suggest-slug',
+      briefId: null,
+      startedAt,
+      finishedAt: null,
+      errorMessage: null,
+    };
+    // 不動 templateData、不建版本、不動核准：跟後端一樣只回候選。
+    await delay(2600);
+    if (job.agentRun.status === 'cancelled') throw new Error('執行已取消');
+    const picked = pickSlugSuggestions(fixtureSlugIdeas(title));
+    if (picked.slugs.length === 0) {
+      const message = `AI 沒給出能用的網址（給了 ${picked.dropped} 個，格式都不合格）。再按一次試試，或自己填。`;
+      job.agentRun = { ...job.agentRun, status: 'failed', finishedAt: new Date().toISOString(), errorMessage: message };
+      throw new Error(message);
+    }
+    job.agentRun = { ...job.agentRun, status: 'succeeded', finishedAt: new Date().toISOString() };
+    return picked;
   },
 
   async cancelAgent(uuid: string) {

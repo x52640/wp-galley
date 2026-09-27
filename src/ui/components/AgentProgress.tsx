@@ -21,6 +21,7 @@ const TASK_VERB: Record<AgentRun['task'], string> = {
   review: '正在讀你的文章',
   images: '正在想該配什麼圖',
   'generate-image': '正在生圖',
+  'suggest-slug': '正在想英文網址',
 };
 
 /**
@@ -28,6 +29,11 @@ const TASK_VERB: Record<AgentRun['task'], string> = {
  * 超過「平常」之後換一句安撫，但不假裝知道還剩多少。
  */
 export function waitingNote(task: AgentRun['task'], seconds: number): string {
+  if (task === 'suggest-slug') {
+    return seconds < 60
+      ? '通常十幾秒到一分鐘。想好會列在網址欄下面，點了才填進去'
+      : '比平常久一點；真的等太久就按停止再試一次';
+  }
   if (task === 'generate-image') {
     return seconds < 120
       ? '通常一分鐘左右。生好會先放在卡片上給你看，不會自動上傳'

@@ -243,7 +243,7 @@ function clip(text: string, keep: 'head' | 'tail'): string {
  * 再把三個以上連在一起（中間可以有空白）的 =、＝、━、─、═ 換成「…」。
  * 這只是讓 prompt 的結構不容易被假冒；真正的邊界是 Codex 的 read-only 沙箱。
  */
-function neutralize(text: string): string {
+export function neutralize(text: string): string {
   return text
     .replace(/[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '')
     .replace(/[=＝━─═](?:\s*[=＝━─═]){2,}/g, '…');

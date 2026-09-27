@@ -13,7 +13,7 @@ import { formatBytes } from '../../lib/format.js';
 import { prepareForUpload } from '../../lib/svg-to-png.js';
 import { useConfirm } from '../ConfirmDialog.js';
 import { formatElapsed, useElapsedSeconds, waitingNote } from '../AgentProgress.js';
-import { agentStatusText } from '../../lib/agent-tasks.js';
+import { agentStatusText, runLocksContent } from '../../lib/agent-tasks.js';
 import { ErrorNote, Field, Spinner, useAction } from './shared.js';
 import { USER_NOTE_MAX, userNoteLength } from '../../../contract/user-note.js';
 import { BRIEF_PROMPT_MAX, briefPromptLength } from '../../../contract/brief-prompt.js';
@@ -812,9 +812,9 @@ function MediaRow({
   const measured = blocks.length > 0;
   /**
    * 校稿／一鍵配圖跑的時候，任何會產生新版本的動作都要鎖住：Agent 跑完發現內容變了，
-   * 整趟結果會被丟掉（後端 assertAgentResultStillApplies）。生圖那一趟不檢查內容，不擋。
+   * 整趟結果會被丟掉（後端 assertAgentResultStillApplies）。生圖與建議網址不檢查內容，不擋。
    */
-  const contentRunActive = job.agentRun?.status === 'running' && job.agentRun.task !== 'generate-image';
+  const contentRunActive = runLocksContent(job.agentRun);
   const placedInBody =
     asset.placedAfterBlockIndex !== null && asset.placedAfterBlockIndex >= 0;
 
