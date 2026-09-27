@@ -13,7 +13,7 @@
 ## 進行中
 
 - P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。未決：任何一趟 Agent 回同一個 key 會蓋掉使用者改過的描述（見 agent-tasks.md），已問使用者要不要修。
-- 下一個：[P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），`ready`。
+- 下一個：[P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），`in_progress`。
 - P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。
 
 ## 上次停在哪（2026-09-24 收官）

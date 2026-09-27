@@ -1,7 +1,7 @@
 ---
 id: P5-T026
 phase: 5
-status: ready
+status: in_progress
 depends_on: [P5-T025]
 specs: [agent-tasks.md, agent-cli.md, http-api.md, core-service.md, security.md, design-system.md, templates.md]
 write_paths: ["src/agents/", "src/core/", "src/contract/", "src/server/routes/", "src/ui/", "tests/", "docs/specs/", "docs/tasks/P5-T026-suggest-slug.md", "docs/CURRENT_TASK.md"]
