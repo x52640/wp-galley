@@ -4,12 +4,17 @@ import type { PublishTargetSummary } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { NO_TARGETS_MESSAGE, typeLabel } from './JobList.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
+import { newJobRequest } from '../lib/write-in-place.js';
 
 /**
- * 新稿件：選類型、貼原稿，其他都等進了工作區再說。
+ * 新稿件：只問類型與標題，其他都等進了文章再說（D-030，P5-T029）。
+ *
+ * 以前這裡有一個內文大框，那是「在別處寫好再貼上」時代的設計：沒有格式工具列、不會自動存檔。
+ * 現在按「建立並打開」就進文章畫面、直接在打字模式，游標在內文開頭，工具列就在上面。
  *
  * 從總覽按「新長文／新日記」進來時類型已經定了，不再問；從拖放或貼上進來時文字
- * 已經在了，只差一個類型。**類型決定發到哪裡**，所以選完就寫出來，不讓人猜。
+ * 已經在了，只差一個類型——這條路帶著原稿建立，照舊轉成段落，不進打字模式。
+ * **類型決定發到哪裡**，所以選完就寫出來，不讓人猜。
  */
 
 function today(): string {
@@ -34,12 +39,12 @@ export function NewJob({
   presetTarget?: string | undefined;
   /** 從拖放或貼上進來時帶的原稿。 */
   initialText?: string | undefined;
-  onCreated: (uuid: string) => void;
+  /** `edit`：建好直接進打字模式（沒有帶原稿的時候）。 */
+  onCreated: (uuid: string, options: { edit: boolean }) => void;
   onCancel: () => void;
 }): JSX.Element {
   const [targets, setTargets] = useState<PublishTargetSummary[] | null>(null);
   const [targetKey, setTargetKey] = useState<string | null>(presetTarget ?? null);
-  const [source, setSource] = useState(initialText ?? '');
   const [title, setTitle] = useState(() => firstLineTitle(initialText ?? ''));
   const [loadError, setLoadError] = useState<string | null>(null);
   const create = useAction();
@@ -65,7 +70,7 @@ export function NewJob({
   const target = targets?.find((item) => item.key === targetKey) ?? null;
   const isDiary = target?.contentType === 'diary';
   const locked = presetTarget !== undefined && target !== null;
-  const chars = source.replace(/\s/g, '').length;
+  const chars = (initialText ?? '').replace(/\s/g, '').length;
 
   return (
     <div className="b0">
@@ -135,15 +140,14 @@ export function NewJob({
           </div>
         </Field>
 
-        <Field label={`內文${chars > 0 ? `・${chars.toLocaleString()} 字` : ''}`} hint="純文字或 HTML 都可以。">
-          <textarea
-            className="input textarea compose-body"
-            rows={16}
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-            placeholder="把稿子貼進來…"
-          />
-        </Field>
+        {chars > 0 ? (
+          <p className="compose-dest" role="status">
+            <Icon name="file-text" size={14} />
+            已帶入貼上的原稿，{chars.toLocaleString()} 字。建立後在文章上繼續改。
+          </p>
+        ) : (
+          <p className="field-hint">建立之後直接在文章上寫，粗體、連結、標題的工具列就在上面。</p>
+        )}
 
         <ErrorNote message={create.error} />
 
@@ -154,16 +158,13 @@ export function NewJob({
           <button
             type="button"
             className="btn btn-primary btn-big"
-            disabled={create.busy || targetKey === null || source.trim().length === 0}
+            disabled={create.busy || targetKey === null}
             onClick={() =>
               void create.run(async () => {
                 if (targetKey === null) return;
-                const result = await api.createJob({
-                  targetKey,
-                  sourceText: source,
-                  ...(title.trim() === '' ? {} : { title: title.trim() }),
-                });
-                onCreated(result.uuid);
+                const { request, editOnOpen } = newJobRequest({ targetKey, title, initialText });
+                const result = await api.createJob(request);
+                onCreated(result.uuid, { edit: editOnOpen });
               })
             }
           >

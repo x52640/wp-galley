@@ -1,4 +1,5 @@
 import { escapeHtml } from './html-blocks.js';
+import { EMPTY_BODY_HTML } from '../contract/empty-body.js';
 import type { LoadedTemplate } from '../templates/types.js';
 
 /**
@@ -48,6 +49,7 @@ export function titleFromSource(sourceText: string): string {
  * 產生初版 templateData。
  *
  * 只填 `title` 與模板的 `publishSlot`；其他必填欄位由使用者或 Agent 補。
+ * 原稿是空的（新稿件先建再寫，P5-T029）時正文是一個空段落，不是空字串：schema 要求非空。
  * 補不齊時 renderRevision 會擋下來並說明缺什麼欄位，這比我們亂填好。
  */
 export function buildTemplateDataFromSource(
@@ -58,6 +60,7 @@ export function buildTemplateDataFromSource(
   const data: Record<string, unknown> = {
     title: (title ?? titleFromSource(sourceText)).slice(0, MAX_TITLE_LENGTH),
   };
-  data[template.manifest.publishSlot] = sourceTextToHtml(sourceText);
+  const html = sourceTextToHtml(sourceText);
+  data[template.manifest.publishSlot] = html.length === 0 ? EMPTY_BODY_HTML : html;
   return data;
 }

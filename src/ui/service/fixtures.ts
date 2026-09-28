@@ -1,3 +1,5 @@
+import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../../contract/empty-body.js';
+import { checkPlainTitle } from '../../contract/plain-title.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { hasWpImageClass } from '../../contract/media-marker.js';
 import { normalizeUserNote, USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
@@ -141,6 +143,18 @@ const LONGFORM_BODY = [
   '<p class="wp-block-paragraph has-medium-font-size">所以問題從來不是「怎麼不要犯錯」，而是「錯了以後多快會知道」。</p>',
 ].join('\n');
 
+/** 標題與貼上的原稿是字：跟後端的 autoescape 一樣逃脫。 */
+function escapeText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** 跟後端 getJob 一樣：正文空的就標出來，發布面板的「還不能發布」也列出來（P5-T029）。 */
+function syncEmptyBody(job: FixtureJob): void {
+  job.bodyEmpty = isBlankBody(job.currentRevision?.publishHtml);
+  const others = job.blockers.filter((blocker) => blocker !== EMPTY_BODY_MESSAGE);
+  job.blockers = job.bodyEmpty ? [EMPTY_BODY_MESSAGE, ...others] : others;
+}
+
 /** 模擬 buildPreviewDocument 的輸出：自成一份文件、樣式內嵌、正文在 .preview-body。 */
 function previewDocument(job: JobDetail): string {
   const data = job.currentRevision?.templateData ?? {};
@@ -151,7 +165,8 @@ function previewDocument(job: JobDetail): string {
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <style>
 :root { color-scheme: light; }
-body { margin:0; background:#fff; }
+/* 跟真的模板一樣不重設 body 的外距（瀏覽器預設 8px）：校樣的高度量測要把它算進去（P5-T029）。 */
+body { background:#fff; }
 .preview-article { max-width:46rem; margin:0 auto; padding:2rem 1.25rem 4rem;
   font-family:'PingFang TC','Noto Sans TC',system-ui,sans-serif; font-size:1.0625rem;
   line-height:1.9; color:#23262b; }
@@ -176,7 +191,7 @@ body { margin:0; background:#fff; }
 <header class="preview-frame" aria-label="佈景主題外框（不會發布）">
 <p class="preview-frame-note">以下外框由網站佈景主題產生，發布台不會送出</p>
 ${featured ? `<figure class="preview-featured"><img src="${featured.url ?? ''}" alt="${featured.altText ?? ''}"></figure>` : ''}
-<h1 class="preview-title">${title}</h1>
+<h1 class="preview-title">${escapeText(title)}</h1>
 <p class="preview-meta">2026 年 8 月 28 日</p>
 </header>
 <div class="preview-body" aria-label="正文（會發布的內容）">
@@ -624,7 +639,7 @@ function baseDiary(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'SOURCE',
     title: '20260828',
     target: DIARY_TARGET,
-    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 120 },
     currentRevision: revision(1, 'source', { title: '20260828', slug: '20260828', body: DIARY_BODY }, '3a91c0d4e8b25f77'),
     revisionCount: 1,
     previewUrl: `/api/jobs/${uuid}/preview`,
@@ -637,6 +652,7 @@ function baseDiary(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     agentRun: null,
     review: null,
     imageBriefs: [],
+    bodyEmpty: false,
     sourceText: '今天讀完這本書想到很多事……',
     createdAt: '2026-08-28T09:05:00Z',
     updatedAt: '2026-08-28T09:40:00Z',
@@ -650,7 +666,7 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
     state: 'RENDERED',
     title: '看得見的錯誤',
     target: LONGFORM_TARGET,
-    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 120 },
     currentRevision: revision(
       3,
       'agent_review',
@@ -668,6 +684,7 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
     agentRun: null,
     review: null,
     imageBriefs: [],
+    bodyEmpty: false,
     sourceText: null,
     createdAt: '2026-08-27T14:00:00Z',
     updatedAt: '2026-08-28T10:02:00Z',
@@ -681,7 +698,7 @@ function baseArticle(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'RENDERED',
     title: '文章要怎麼寫才不會亂',
     target: POST_TARGET,
-    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 200 },
     currentRevision: revision(
       1,
       'source',
@@ -699,6 +716,7 @@ function baseArticle(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     agentRun: null,
     review: null,
     imageBriefs: [],
+    bodyEmpty: false,
     sourceText: '第一次架站的人最常問的問題……',
     createdAt: '2026-09-23T08:00:00Z',
     updatedAt: '2026-09-23T08:10:00Z',
@@ -1134,10 +1152,14 @@ export const fixtureApi: PublisherApi = {
       agentRun: null,
       blockers: ['還沒渲染，先按「渲染」產生校樣'],
       sourceText: input.sourceText,
+      // 原稿可以是空的（P5-T029）：跟後端一樣存成一個空段落。
       currentRevision: revision(
         1,
         'source',
-        { title: input.title ?? '未命名', body: `<p>${input.sourceText.slice(0, 400)}</p>` },
+        {
+          title: input.title ?? '未命名',
+          body: input.sourceText.trim() === '' ? EMPTY_BODY_HTML : `<p>${escapeText(input.sourceText.slice(0, 400))}</p>`,
+        },
         nextHash(),
       ),
     });
@@ -1149,6 +1171,7 @@ export const fixtureApi: PublisherApi = {
     await delay(90);
     const job = mustGet(uuid);
     syncPlacement(job);
+    syncEmptyBody(job);
     return clone(job);
   },
 
@@ -1160,6 +1183,17 @@ export const fixtureApi: PublisherApi = {
   async createRevision(uuid: string, input: CreateRevisionInput) {
     await delay();
     const job = mustGet(uuid);
+    // 在文章上改的標題（P5-T029）：跟後端同一條規則。
+    let editedTitle: string | undefined;
+    if (input.editedTitle !== undefined) {
+      const checked = checkPlainTitle(input.editedTitle, {
+        diary: job.target?.contentType === 'diary',
+        maxLength: job.template?.titleMaxLength ?? null,
+      });
+      if (!checked.ok) throw new Error(checked.message);
+      editedTitle = checked.title;
+      job.title = checked.title;
+    }
     invalidateApproval(job, '內容有新的修改');
     const current = job.currentRevision;
     const next = revision(
@@ -1169,7 +1203,10 @@ export const fixtureApi: PublisherApi = {
         ...(current?.templateData ?? {}),
         ...(input.templateData ?? {}),
         // 示範資料不做後端的整理（normalizeEditedBody），原樣收下。
-        ...(input.editedBody === undefined ? {} : { body: input.editedBody }),
+        ...(input.editedBody === undefined
+          ? {}
+          : { body: input.editedBody.trim() === '' ? EMPTY_BODY_HTML : input.editedBody }),
+        ...(editedTitle === undefined ? {} : { title: editedTitle }),
       },
       nextHash(),
     );
@@ -1235,6 +1272,7 @@ export const fixtureApi: PublisherApi = {
    */
   async runAgent(uuid: string, input: AgentReviewInput): Promise<AgentRunResult> {
     const job = mustGet(uuid);
+    if (isBlankBody(job.currentRevision?.publishHtml)) throw new Error(EMPTY_BODY_AGENT_MESSAGE);
     const task = input.task ?? 'review';
     const startedAt = new Date().toISOString();
     job.agentRun = {
@@ -1692,6 +1730,7 @@ export const fixtureApi: PublisherApi = {
   async approve(uuid: string, contentHash: string): Promise<Approval> {
     await delay(320);
     const job = mustGet(uuid);
+    if (isBlankBody(job.currentRevision?.publishHtml)) throw new Error(EMPTY_BODY_MESSAGE);
     const approval: Approval = {
       id: Math.floor(Math.random() * 900) + 100,
       contentHash,
@@ -1714,6 +1753,7 @@ export const fixtureApi: PublisherApi = {
 
   async publish(uuid: string, input: PublishInput): Promise<PublishResult> {
     const job = mustGet(uuid);
+    if (isBlankBody(job.currentRevision?.publishHtml)) throw new Error(EMPTY_BODY_MESSAGE);
     const listed = fixtureAuthors();
     if (listed.listUnavailable && (input.authorId !== undefined || listed.defaultAuthorId !== null)) {
       throw new Error('讀不到站上的作者清單，這次沒有發布，免得作者被記成發布台的帳號；稍後再試。');

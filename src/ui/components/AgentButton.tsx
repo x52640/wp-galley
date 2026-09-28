@@ -33,7 +33,9 @@ export function AgentButton({
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const running = job.agentRun?.status === 'running';
-  const disabled = send.busy || running || job.currentRevision === null;
+  // 正文是空的（新稿件剛建好，P5-T029）：AI 沒東西可看，後端也會擋。停用並說明，不讓人按了才報錯。
+  const empty = job.bodyEmpty;
+  const disabled = send.busy || running || job.currentRevision === null || empty;
 
   useEffect(() => onError(send.error), [send.error, onError]);
 
@@ -75,7 +77,7 @@ export function AgentButton({
         className="btn split-main"
         disabled={disabled}
         onClick={() => run(CHECK.task, CHECK.instruction)}
-        title={`交給 ${providerLabel}：錯字加疑點一起跑`}
+        title={empty ? '正文是空的，先寫點內容再請 AI 看' : `交給 ${providerLabel}：錯字加疑點一起跑`}
       >
         {send.busy || running ? <Spinner /> : <Icon name="sparkles" size={16} />}
         {running ? 'AI 看稿中…' : '請 AI 看一遍'}

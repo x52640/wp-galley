@@ -7,6 +7,7 @@ import { NewJob } from './components/NewJob.js';
 import { SETUP_SKIPPED_KEY, SetupWizard } from './components/SetupWizard.js';
 import { Workspace } from './components/Workspace.js';
 import { Icon } from './icons.js';
+import { keepEditOnOpen } from './lib/write-in-place.js';
 
 /**
  * 路由。
@@ -42,6 +43,11 @@ export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
   /** 在總覽拖放或貼上的原稿，帶進新稿件畫面。只活在這一次導覽裡。 */
   const [pendingText, setPendingText] = useState<string | undefined>(undefined);
+  /**
+   * 剛建好、要直接進打字模式的那一篇（P5-T029）。只對建立後第一次打開生效：重新整理、離開那一篇
+   * （回總覽、上一頁、換到別篇）、進了打字模式、載入失敗都會清掉（審查 #4，keepEditOnOpen）。
+   */
+  const [editOnOpen, setEditOnOpen] = useState<string | null>(null);
   const fixtures = isFixtureMode();
 
   useEffect(() => {
@@ -49,6 +55,12 @@ export function App(): JSX.Element {
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
+
+  // 畫面離開剛建好的那一篇就作廢「直接進打字模式」。只跟著 route 跑：建立當下（還在新稿件畫面）不會被清掉，
+  // 導覽到那一篇時 route 對得上、留著。
+  useEffect(() => {
+    setEditOnOpen((pending) => keepEditOnOpen(pending, route));
+  }, [route]);
 
   // 還沒設定（沒有 WordPress 連線或沒有站台設定檔）就自動進設定精靈；已經設定好就不打擾（P8-T002）。
   // 只在打開發布台時看一次，而且只從稿件總覽轉過去：使用者直接開某篇稿件的網址時不搶走畫面。
@@ -77,6 +89,7 @@ export function App(): JSX.Element {
   const openJob = useCallback((uuid: string) => go(`/jobs/${encodeURIComponent(uuid)}`), []);
   const backToList = useCallback(() => {
     setPendingText(undefined);
+    setEditOnOpen(null);
     go('/');
   }, []);
   const startNew = useCallback((target?: string, text?: string) => {
@@ -84,8 +97,9 @@ export function App(): JSX.Element {
     go(target === undefined ? '/new' : `/new/${encodeURIComponent(target)}`);
   }, []);
   const created = useCallback(
-    (uuid: string) => {
+    (uuid: string, options: { edit: boolean }) => {
       setPendingText(undefined);
+      setEditOnOpen(options.edit ? uuid : null);
       openJob(uuid);
     },
     [openJob],
@@ -121,7 +135,14 @@ export function App(): JSX.Element {
             onCancel={backToList}
           />
         )}
-        {route.name === 'job' && <Workspace uuid={route.uuid} onBack={backToList} />}
+        {route.name === 'job' && (
+          <Workspace
+            uuid={route.uuid}
+            onBack={backToList}
+            startEditing={editOnOpen === route.uuid}
+            onStartedEditing={() => setEditOnOpen(null)}
+          />
+        )}
         {route.name === 'diagnostics' && <Diagnostics onBack={backToList} />}
         {route.name === 'setup' && <SetupWizard onDone={backToList} onExit={backToList} />}
       </div>

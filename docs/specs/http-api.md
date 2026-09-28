@@ -86,6 +86,12 @@
   貼上保留哪些標籤、連結收哪些 scheme 都照它。只是給畫面用；後端驗證仍讀 manifest 本身。
 - `AgentRunResult.imageBriefs` 是 Agent 交回來的原樣（`ImageBriefDraft`，沒有 id）；
   存進去之後的樣子在 `JobDetail.imageBriefs`（`ImageBrief`）。
+- `POST /api/jobs` 的 `sourceText` 可以是空字串（P5-T029）：建出來的正文是一個空段落。
+  `JobDetail.bodyEmpty`（新增欄位）：目前這一版的正文是空的（沒有字、也沒有圖片或影音，`contract/empty-body.ts`）；
+  這時 `blockers` 多一條「正文是空的，先寫點內容再發布」，`POST /agent` 400、`POST /approve` 400。
+- `POST /revisions` 的 `editedTitle`（選填字串，P5-T029）：在文章上直接改的標題，只換 `title`。可以單獨給，或跟
+  `editedBody` 一起給（同一個新版本）；跟 `templateData` 互斥。內容規則（一行、非空、不超過模板 schema 的 `title.maxLength`）在 CoreService，不合 400。
+  `JobDetail.template.titleMaxLength`（新增欄位，`number | null`）：這篇模板的標題上限，給畫面擋；後端從 schema 自己讀。
 - `POST /revisions` 的 `editedBody` 與 `templateData` 互斥：`editedBody` 是「直接在文章上改」送回來的正文，
   只換正文、其他欄位沿用上一版；後端先整理瀏覽器編輯器的雜訊（`b`→`strong`、拆 `span`、`<p><ul>`、
   `ul` 直接包 `ul`、清單項目裡的 div、h1→h2 等，`src/core/html-blocks.ts` 的 `normalizeEditedBody`，

@@ -90,7 +90,7 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   Agent 的東西，都在 `CoreService.assertNoAppPassword` 一處檢查，含遮蔽器認得的任何密碼就丟
   `InvalidInputError`「內容裡有你的 WordPress 應用程式密碼，請刪掉再存」（400 `INVALID_INPUT`），**在任何寫入、
   任何派工之前**；錯誤訊息、details、log 都不含密碼。
-  - 涵蓋：`createJob`（原稿、標題、templateData）、`createRevision`（整份新內容、editedBody、sourceText、reason
+  - 涵蓋：`createJob`（原稿、標題、templateData）、`createRevision`（整份新內容、editedBody、editedTitle、sourceText、reason
     ——放圖、設封面、套用校稿都經過它）、上傳／換圖／「用這張」的替代文字與說明、派校稿（指示＋**組好的
     prompt**）、請 AI 配一張（那句話＋組好的 prompt）、在卡片上改配圖描述（改的 prompt 或那句話＋重組好的 prompt，P5-T025）、生圖（組好的 prompt）。派工檢查組好的 prompt，所以密碼
     設定之前就存進去的舊內容也送不出去。

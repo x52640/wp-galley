@@ -76,6 +76,8 @@ const CreateRevisionBody = z.object({
   templateData: z.record(z.string(), z.unknown()).optional(),
   editedBody: z.string().max(500_000).optional(),
   resolveItemId: z.number().int().positive().optional(),
+  // 內容規則（一行、非空、120 字）在 CoreService，MCP 也走那裡；這裡只限大小。
+  editedTitle: z.string().max(1_000).optional(),
   sourceText: z.string().max(200_000).optional(),
   featuredMediaId: z.number().int().positive().nullable().optional(),
   origin: z.enum(['source', 'agent_review', 'media', 'template_switch', 'chat', 'manual']).optional(),
@@ -390,6 +392,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
         ...(body.templateData === undefined ? {} : { templateData: body.templateData }),
         ...(body.editedBody === undefined ? {} : { editedBody: body.editedBody }),
         ...(body.resolveItemId === undefined ? {} : { resolveItemId: body.resolveItemId }),
+        ...(body.editedTitle === undefined ? {} : { editedTitle: body.editedTitle }),
         ...(body.sourceText === undefined ? {} : { sourceText: body.sourceText }),
         ...(body.featuredMediaId === undefined ? {} : { featuredMediaId: body.featuredMediaId }),
         ...(body.origin === undefined ? {} : { origin: body.origin }),

@@ -36,7 +36,19 @@ import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
 
 type SheetKey = 'source' | 'publish' | null;
 
-export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }): JSX.Element {
+export function Workspace({
+  uuid,
+  onBack,
+  startEditing = false,
+  onStartedEditing,
+}: {
+  uuid: string;
+  onBack: () => void;
+  /** 剛從新稿件畫面建好（D-030，P5-T029）：一打開就進打字模式，游標在內文開頭。 */
+  startEditing?: boolean;
+  /** 已經進了打字模式：上層把旗標清掉，之後重新讀取不會再進一次。 */
+  onStartedEditing?: () => void;
+}): JSX.Element {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
@@ -197,6 +209,21 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
       nonce: Date.now(),
     });
   }, []);
+  // 新稿件建好直接進打字模式。等稿件讀到了才進（startEdit 要看有沒有 AI 在跑）；
+  // 校樣還沒載入也沒關係，ProofView 會等 iframe 載入完再把游標放進去。
+  const loadedUuid = job !== null && isLoaded(job) ? job.uuid : null;
+  useEffect(() => {
+    if (!startEditing || loadedUuid !== uuid) return;
+    startEdit(null);
+    onStartedEditing?.();
+  }, [startEditing, loadedUuid, uuid, startEdit, onStartedEditing]);
+  // 剛建好的那一篇載入失敗（或發布目標已經不在）：這次不進打字模式，旗標也清掉，
+  // 不然之後重新讀取成功、或再打開同一篇時會莫名進打字模式（審查 #4）。
+  const loadFailed = (error !== null && job === null) || (job !== null && !isLoaded(job));
+  useEffect(() => {
+    if (startEditing && loadFailed) onStartedEditing?.();
+  }, [startEditing, loadFailed, onStartedEditing]);
+
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);
     setEditNotice(notice ?? null);
@@ -290,6 +317,12 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
         </div>
 
         <div className="docbar-right">
+          {/* 正文空的（新稿件剛建好）：AI 與發布都還不能用，講出來，不要只是一排灰掉的按鈕（P5-T029）。 */}
+          {job.bodyEmpty && !isFinished(job.state) && (
+            <span className="docbar-hint" role="status">
+              先寫點內容，才能請 AI 看、發布
+            </span>
+          )}
           {!isFinished(job.state) && <AgentButton job={job} refresh={refresh} onError={setAgentError} />}
           {job.published ? (
             <a className="btn" href={job.published.link} target="_blank" rel="noreferrer">
@@ -389,14 +422,16 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                   )
                 : null
             }
-            onSaveEdit={async (html) => {
+            onSaveEdit={async ({ editedBody, editedTitle }) => {
               const base = job.currentRevision?.contentHash;
+              // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
               const saved = await api.createRevision(job.uuid, {
-                editedBody: html,
+                ...(editedBody === undefined ? {} : { editedBody }),
+                ...(editedTitle === undefined ? {} : { editedTitle }),
                 origin: 'manual',
                 reason: '直接在文章上改',
                 // 從卡片進來改的：存成新版本時那張卡片一起結案，不用再按一次「不用改」。
-                ...(editing?.itemId == null ? {} : { resolveItemId: editing.itemId }),
+                ...(editing?.itemId == null || editedBody === undefined ? {} : { resolveItemId: editing.itemId }),
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
@@ -420,7 +455,7 @@ export function Workspace({ uuid, onBack }: { uuid: string; onBack: () => void }
                       onClick={() => startEdit(null)}
                     >
                       <Icon name="file-text" size={13} />
-                      改原文
+                      {job.bodyEmpty ? '開始寫' : '改原文'}
                     </button>
                   </>
                 )}
