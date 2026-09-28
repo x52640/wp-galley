@@ -1,11 +1,11 @@
 ---
 id: P5-T028
 phase: 5
-status: in_progress
+status: done
 depends_on: []
 specs: [review-proposals.md, templates.md, security.md, design-system.md, http-api.md, core-service.md]
 write_paths: ["src/ui/", "src/core/", "src/templates/", "src/contract/", "src/wordpress/block-serialize.ts", "tests/", "docs/specs/", "docs/tasks/P5-T028-rich-edit-toolbar.md", "docs/CURRENT_TASK.md"]
-contract_change: none
+contract_change: additive
 expected_commit: "feat(P5-T028): 直接在文章上改時可以加格式"
 ---
 
@@ -52,9 +52,27 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立（2026-09-28）
-- 已通過驗證：—
-- 下一步：派實作 subagent；commit 後跑 Codex review 讀 diff（使用者要求）
+- 最後完成：實作（subagent，2026-09-28）：共用整理規則 `src/contract/rich-text.ts`（前端貼上／存檔、後端 normalizeEditedBody
+  共用）、工具列 `FormatBar.tsx`＋`lib/rich-format.ts`（純規則）＋`lib/rich-commands.ts`（對 iframe 下指令）、sanitize 的 b/i 轉換、
+  `JobDetail.template` 加 `allowedTags`／`allowedSchemes`（契約新增欄位）、spec 更新
+- 已通過驗證：`npm run verify` 65 檔 / 1213 測試；`?fixtures=1` 用無頭 Chrome 走過工具列、⌘B／⌘I／⌘K、連結輸入框（擋 javascript:）、
+  貼上髒 HTML、存檔、不支援格式的提醒
+- Codex 審查（PR #2）6 條 medium 已修（未 commit）：沒實質改動就存檔時還原畫面並重量；繼承的粗斜體往下套到區塊內、不包住清單；
+  清單項目攤平時區塊與後面的字分段、穿過包裝取出子清單；子清單後面還有字的項目照原樣留著（發布走 wp:html 保底），
+  補「沒改過的合法正文逐字不變」不變式測試；連結輸入框每次打開以 session 為 key 重建。verify 65 檔 / 1241 測試
+- Codex 第二輪（6 條 medium）已修（未 commit）：存檔改成「沒改的頂層區塊原樣保留、只整理改過的」（LCS 序列比對，
+  前後端共用 `cleanRichEdit`，後端用上一版 templateData 正文並逐字沿用原始片段）；F1 只在分段邊界修空白；F2 連結包區塊時拆到各段；
+  F3 改過的區塊裡攤平標題／引用／分隔線要進 dropped；F4 `font-weight/font-style: normal` 把外層 strong／em 切開；
+  F5 連結網址規則統一成 `safeHref`（使用者 2026-09-28 裁定：`#` 與單一 `/` 站內路徑收，其他相對路徑拒絕並提醒），sanitize 也用它；
+  F6 游標在 li 裡就是清單情境。verify 65 檔 / 1271 測試
+- Codex 第三輪（6 條）已修（未 commit）：比對基準改成上一版 sanitize 後的 publishHtml（前後端同一份），保留的區塊輸出基準的
+  正規化 HTML、不拼原始字串；「不粗／不斜」對任何元素有效；連結包圖片區塊時移進 figure（發布走 wp:html，見 CURRENT_TASK 殘餘）；
+  http(s) 必須有主機；工具列粗／斜照實際樣式。verify 65 檔 / 1294 測試
+- Codex 第四輪（5 條）已修（未 commit）：style 照 CSS 規則逐條解析（mso-bidi-* 不再誤判）；「不粗／不斜」標記傳到所有祖先、
+  巢狀同名 strong／em 合併；行內貼上保留前後空白；連結包圖片時圖說與被包住的圖片都帶連結、包不進去的進 dropped；
+  網址主機檢查先拿掉 tab／LF／CR 與頭尾控制字元。verify 65 檔 / 1306 測試
+- Codex 第五輪（parseStyle 2 條）已修（未 commit）：先依 CSS 規則拿掉註解、處理跳脫字元；font-weight／font-style 的無效值忽略、不覆蓋前面有效的。verify 65 檔 / 1310 測試
+- 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 
 ## 完成結果

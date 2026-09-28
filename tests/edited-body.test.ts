@@ -119,3 +119,224 @@ describe('normalizeEditedBody：頂層的裸文字（全選刪光重打之後常
     );
   });
 });
+
+/**
+ * P5-T028：直接在文章上改時可以加格式。前端存檔前整理過一次；後端不信任前端，
+ * 照同一套規則再整理，再走 schema、sanitize、結構驗證。這裡鎖住「存檔 → 渲染 → 古騰堡區塊」整條。
+ */
+describe('P5-T028：格式存檔後渲染與區塊正確', () => {
+  const SOURCE = '第一段。\n\n第二段。';
+  it('巢狀結構：子清單直接在 ul 裡、清單項目裡的 div、引用裡的 div', () => {
+    expect(normalizeEditedBody('<ul><li>一</li><ul><li>一之一</li></ul></ul>')).toBe(
+      '<ul><li>一<ul><li>一之一</li></ul></li></ul>',
+    );
+    expect(normalizeEditedBody('<ul><li><div>一</div><div>二</div></li></ul>')).toBe('<ul><li>一<br>二</li></ul>');
+    expect(normalizeEditedBody('<blockquote><div>一</div><div>二</div></blockquote>')).toBe(
+      '<blockquote><p>一</p><p>二</p></blockquote>',
+    );
+  });
+
+  it('Chrome 的 <p><ul> 字串（瀏覽器序列化後）不留空段落', () => {
+    expect(normalizeEditedBody('<p>前</p><p><ul><li>項</li></ul></p><p>後</p>')).toBe(
+      '<p>前</p>\n<ul><li>項</li></ul>\n<p>後</p>',
+    );
+  });
+
+  it('span 的粗斜體樣式轉成 strong／em；font-weight:normal 的 b 不是粗體', () => {
+    expect(normalizeEditedBody('<p><span style="font-weight:700">粗</span><b style="font-weight:normal">不粗</b></p>')).toBe(
+      '<p><strong>粗</strong>不粗</p>',
+    );
+  });
+
+  it('h1 變 h2、h4 變 h3（長文只准 h2／h3，不然整份退回）', () => {
+    expect(normalizeEditedBody('<h1>一</h1><h4>二</h4>')).toBe('<h2>一</h2>\n<h3>二</h3>');
+  });
+
+  it('給了 allowedSchemes 就把 javascript: 連結拆成純文字', () => {
+    expect(normalizeEditedBody('<p><a href="javascript:alert(1)">x</a></p>', { allowedSchemes: ['https'] })).toBe('<p>x</p>');
+  });
+
+  it('長文：連結、粗斜體、H2、H3、清單、引用、分隔線存得起來，區塊標記正確、沒有 wp:html', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const uuid = core.createJob({ targetKey: 'read-think', sourceText: SOURCE, title: '長文' }).uuid;
+    // 模擬 Chrome 的 contenteditable 在各種操作之後的 innerHTML。
+    const edited = [
+      '<p>有<b>粗體</b>、<i>斜體</i>與<a href="https://example.com/">連結</a></p>',
+      '<h2>大標</h2>',
+      '<h3>小標</h3>',
+      '<p><ul><li>項目一</li><li>項目二</li></ul></p>',
+      '<p><ol><li>第一</li><ul><li>第一之一</li></ul></ol></p>',
+      '<blockquote>引用一<br>引用二</blockquote>',
+      '<hr>',
+      '<p><a href="javascript:alert(1)">壞連結</a>結尾</p>',
+    ].join('');
+    core.createRevision(uuid, { editedBody: edited, origin: 'manual' });
+    const rendered = core.render(uuid);
+    const html = rendered.publishHtml;
+    expect(html).toContain('<strong>粗體</strong>');
+    expect(html).toContain('<em>斜體</em>');
+    expect(html).toContain('<a href="https://example.com/">連結</a>');
+    expect(html).not.toContain('javascript');
+    expect(html).toContain('壞連結結尾');
+
+    const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+    const { DEFAULT_BLOCK_DEFAULTS } = await import('../src/wordpress/block-types.js');
+    // 字級用 null（通用站台的樣子），比對的是區塊的形狀，不是這個站的字級設定。
+    const result = toBlockMarkup(html, {
+      ...DEFAULT_BLOCK_DEFAULTS,
+      paragraphFontSize: null,
+      headingFontSize: null,
+      listItemFontSize: null,
+    });
+    expect(result.fallbackCount).toBe(0);
+    const markup = result.markup;
+    expect(markup).toContain('<!-- wp:heading -->\n<h2 class="wp-block-heading">大標</h2>\n<!-- /wp:heading -->');
+    expect(markup).toContain('<!-- wp:heading {"level":3} -->\n<h3 class="wp-block-heading">小標</h3>\n<!-- /wp:heading -->');
+    expect(markup).toContain(
+      '<!-- wp:list -->\n<ul class="wp-block-list"><!-- wp:list-item -->\n<li>項目一</li>\n<!-- /wp:list-item -->\n\n<!-- wp:list-item -->\n<li>項目二</li>\n<!-- /wp:list-item --></ul>\n<!-- /wp:list -->',
+    );
+    expect(markup).toContain('<!-- wp:list {"ordered":true} -->\n<ol class="wp-block-list"><!-- wp:list-item -->\n<li>第一<!-- wp:list -->');
+    expect(markup).toContain(
+      '<!-- wp:quote -->\n<blockquote class="wp-block-quote"><!-- wp:paragraph -->\n<p>引用一</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:paragraph -->\n<p>引用二</p>\n<!-- /wp:paragraph --></blockquote>\n<!-- /wp:quote -->',
+    );
+    expect(markup).toContain('<!-- wp:separator -->\n<hr class="wp-block-separator has-alpha-channel-opacity"/>\n<!-- /wp:separator -->');
+    expect(markup).not.toContain('wp:html');
+  });
+
+  it('審查 #5：沒動到的「子清單後面還有字」清單，改別段存檔後結構不變，發布照舊走 wp:html 保底', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const list = '<ol><li>A<ul><li>B</li></ul>Conclusion</li><li>C</li></ol>';
+    const uuid = core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      title: '20260928',
+      templateData: { title: '20260928', body: `<p>一</p>\n${list}` },
+    }).uuid;
+    // 使用者只改了第一段。
+    core.createRevision(uuid, { editedBody: `<p>一改過</p>\n${list}` });
+    const html = core.render(uuid).publishHtml;
+    expect(html).toBe(`<p>一改過</p>\n${list}`);
+    const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+    const result = toBlockMarkup(html);
+    expect(result.fallbackCount).toBe(1);
+    expect(result.markup).toContain(`<!-- wp:html -->\n${list}\n<!-- /wp:html -->`);
+  });
+
+  it('審查 #2：清單身上的粗體，後端整理與古騰堡輸出都還是兩個項目', async () => {
+    const normalized = normalizeEditedBody('<ul style="font-weight:bold"><li>A</li><li>B</li></ul>');
+    expect(normalized).toBe('<ul><li><strong>A</strong></li><li><strong>B</strong></li></ul>');
+    const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+    const result = toBlockMarkup(normalized);
+    expect(result.blocks[0]).toMatchObject({ type: 'list', items: [{ html: '<strong>A</strong>' }, { html: '<strong>B</strong>' }] });
+  });
+
+  it('第二輪審查：改一段存檔，上一版裡整理規則會動的區塊（清單裡的標題與引用、../ 連結）原樣保留', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const touchy = '<ul><li><h2>Heading</h2><blockquote><p>Quote</p></blockquote></li></ul>';
+    const uuid = core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      title: '20260928',
+      templateData: { title: '20260928', body: `<p>一</p>\n${touchy}\n<p>三</p>` },
+    }).uuid;
+    core.createRevision(uuid, { editedBody: `<p>一</p>\n${touchy}\n<p>三改過</p>` });
+    const body = core.getJob(uuid).currentRevision?.templateData['body'];
+    expect(body).toBe(`<p>一</p>\n${touchy}\n<p>三改過</p>`);
+  });
+
+  describe('第三輪審查 #1／#2：比對基準＝上一版實際會發布的正文', () => {
+    /** 建一篇日記，正文是 body；回傳 uuid 與「前端校樣上看到的」publishHtml。 */
+    async function diaryWith(body: string): Promise<{ uuid: string; shown: string }> {
+      fixture = await createCoreFixture();
+      const uuid = fixture.core.createJob({
+        targetKey: 'diary',
+        sourceText: SOURCE,
+        title: '20260928',
+        templateData: { title: '20260928', body },
+      }).uuid;
+      return { uuid, shown: fixture.core.render(uuid).publishHtml };
+    }
+
+    it.each([
+      ['沒關的註解', '<p>A<!-- unfinished'],
+      ['沒關的引用', '<blockquote><p>A'],
+      ['沒關的清單', '<ul><li>A'],
+    ])('上一版正文有%s：後面新加的段落不會被吞掉', async (_name, body) => {
+      const { uuid, shown } = await diaryWith(body);
+      fixture!.core.createRevision(uuid, { editedBody: `${shown}\n<p>New paragraph</p>` });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html).toContain('<p>New paragraph</p>');
+      expect(html.match(/A/g)).toHaveLength(1);
+    });
+
+    it('parse5 修補後範圍重疊的 <p><strong>A</p>B<p>C</p>：只改 C，A 不重複', async () => {
+      const { uuid, shown } = await diaryWith('<p><strong>A</p>B<p>C</p>');
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('>C<', '>C改<') });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html.match(/A/g)).toHaveLength(1);
+      expect(html).toContain('C改');
+      const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+      expect(toBlockMarkup(html).markup.match(/A/g)).toHaveLength(1);
+    });
+
+    it('上一版正文有 sanitize 會改的 class：只改別段，清單原樣保留、不誤報也不整理', async () => {
+      const list = '<ul class="other"><li><h2>Heading</h2><blockquote><p>Quote</p></blockquote><hr></li></ul>';
+      const { uuid, shown } = await diaryWith(`<p>Before</p>${list}`);
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('Before', 'After') });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html).toContain('<h2>Heading</h2><blockquote><p>Quote</p></blockquote>');
+      expect(html).not.toContain('Heading<br');
+      // 頂層區塊之間統一用換行（正文慣例），區塊本身跟校樣上的一樣。
+      expect(html).toBe(shown.replace('Before', 'After').replace('</p><ul>', '</p>\n<ul>'));
+    });
+
+    it('上一版正文有 b 與會被拒的連結：只改別段，其他區塊跟校樣上看到的一樣', async () => {
+      const { uuid, shown } = await diaryWith('<p>Before</p>\n<p><b>粗</b><a href="../x">相對</a></p>\n<p>後</p>');
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('Before', 'After') });
+      expect(fixture!.core.render(uuid).publishHtml).toBe(shown.replace('Before', 'After'));
+    });
+
+    it('基準區塊跟前端的判斷一致：同一份 publishHtml 在前端算的 dropped 是空的', async () => {
+      const { shown } = await diaryWith('<p>Before</p><ul class="other"><li><h2>Heading</h2><hr></li></ul>');
+      const { cleanRichEdit, richUnits } = await import('../src/contract/rich-text.js');
+      const { htmlToRich } = await import('../src/core/html-blocks.js');
+      const result = cleanRichEdit(htmlToRich(shown.replace('Before', 'After')), richUnits(htmlToRich(shown)), {
+        allowedTags: ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'br', 'hr'],
+        allowedSchemes: ['https', 'http', 'mailto'],
+      });
+      expect(result.dropped).toEqual([]);
+    });
+
+    it('改到那個區塊本身時照樣整理並提醒（不漏報）', async () => {
+      const { shown } = await diaryWith('<p>Before</p><ul class="other"><li><h2>Heading</h2><hr>tail</li></ul>');
+      const { cleanRichEdit, richUnits } = await import('../src/contract/rich-text.js');
+      const { htmlToRich } = await import('../src/core/html-blocks.js');
+      const result = cleanRichEdit(htmlToRich(shown.replace('Heading', 'Heading改')), richUnits(htmlToRich(shown)), {
+        allowedTags: ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'br', 'hr'],
+        allowedSchemes: ['https', 'http', 'mailto'],
+      });
+      expect(result.dropped).toEqual(['標題', '分隔線']);
+    });
+  });
+
+  it('日記（flexible）同樣存得起來', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const uuid = core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260928' }).uuid;
+    core.createRevision(uuid, { editedBody: '<p>一<b>二</b></p><h3>標</h3><ul><li>項</li></ul><hr>' });
+    const html = core.render(uuid).publishHtml;
+    expect(html).toBe('<p>一<strong>二</strong></p>\n<h3>標</h3>\n<ul><li>項</li></ul>\n<hr />');
+  });
+
+  it('稿件詳情帶著模板的 allowedTags 與 allowedSchemes（工具列靠它決定按鈕）', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const uuid = core.createJob({ targetKey: 'read-think', sourceText: SOURCE, title: '長文' }).uuid;
+    const detail = core.getJob(uuid);
+    expect(detail.template?.allowedTags).toEqual(expect.arrayContaining(['a', 'strong', 'em', 'h2', 'h3', 'ul', 'ol', 'blockquote', 'hr']));
+    expect(detail.template?.allowedSchemes).toEqual(['https', 'http', 'mailto']);
+  });
+});

@@ -5,6 +5,30 @@ import { Icon } from '../icons.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
+import { FormatBar, type LinkEditorState } from './FormatBar.js';
+import {
+  availableCommands,
+  decideEditSave,
+  formatStateFrom,
+  nextLinkEditor,
+  shortcutCommand,
+  type FormatCommand,
+  type FormatState,
+} from '../lib/rich-format.js';
+import {
+  applyLink,
+  cleanEditedBody,
+  snapshotBody,
+  cleanPastedHtml,
+  currentLink,
+  removeLink,
+  runCommand,
+  saveSelection,
+  selectionAncestors,
+  selectionEmphasis,
+  type RichAllow,
+} from '../lib/rich-commands.js';
+import type { RichUnit } from '../../contract/rich-text.js';
 
 /**
  * 中央校樣。
@@ -35,6 +59,12 @@ import type { SuggestionKind } from '../lib/review-kinds.js';
  * 編輯時把 `.preview-body` 設成 contenteditable：使用者看到的是排好版的文章，不是標籤。
  * 這不需要 iframe 跑任何 script——打字是瀏覽器本身的行為，貼上的攔截與游標定位都由外層做。
  * 編輯中暫停字上標記與頁邊符號（位置會隨打字跑掉）。存檔送的是正文 HTML，後端整理後照常渲染。
+ *
+ * **六、格式工具列（P5-T028）。**
+ * 編輯中上方多一排格式按鈕（連結、粗體、斜體、H2、H3、段落、清單、引用、分隔線），出現哪些照模板的
+ * allowedTags；⌘B／⌘I／⌘K 也由外層掛在文件上的 keydown 處理。指令一律由外層對 iframe 文件下
+ * （`lib/rich-commands.ts`），iframe 仍然不跑 script。貼上改成保留 allowlist 內的格式、其餘丟掉；
+ * 存檔前先用共用規則（`contract/rich-text.ts`）整理一次，後端再整理一次。
  *
  * **五、在這裡插圖（P5-T016）。**
  * 段落之間（含最前面與最後面）滑鼠移過去出現「在這裡插圖」。跟頁邊符號一樣畫在 iframe 外層，
@@ -217,6 +247,28 @@ export function ProofView({
   const originalBody = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** 進入編輯那一刻、整理過的正文：存檔時比對「有沒有改」要用同一套整理規則，不然沒改也會算改。 */
+  const originalClean = useRef<string | null>(null);
+  /** 進入編輯那一刻的頂層區塊：存檔時沒動過的區塊原樣保留，只整理改過的（P5-T028 審查）。 */
+  const originalUnits = useRef<RichUnit[] | null>(null);
+
+  // --- 格式（P5-T028） ---
+  const allow: RichAllow = { tags: job.template.allowedTags, schemes: job.template.allowedSchemes };
+  const allowRef = useRef(allow);
+  allowRef.current = allow;
+  const commands = availableCommands(allow.tags);
+  const commandsRef = useRef(commands);
+  commandsRef.current = commands;
+  /** 游標所在的格式；null＝游標不在正文裡（或不在編輯中）。 */
+  const [formatState, setFormatState] = useState<FormatState | null>(null);
+  const formatStateRef = useRef(formatState);
+  formatStateRef.current = formatState;
+  const [linkEditor, setLinkEditor] = useState<LinkEditorState | null>(null);
+  /** 打開連結輸入框時存下的選取範圍與既有連結：焦點離開 iframe 後還要套在同一段字上。 */
+  const linkTarget = useRef<{ range: Range | null; existing: Element | null } | null>(null);
+  const linkSessions = useRef(0);
+  /** 存檔時發現有模板不支援、會被拿掉的格式：先講出來，使用者按「照樣存」才存。 */
+  const [dropWarning, setDropWarning] = useState<string[] | null>(null);
 
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
@@ -354,6 +406,68 @@ export function ProofView({
     onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
   }, []);
 
+  const editBody = (): HTMLElement | null =>
+    frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body') ?? null;
+
+  /** 重讀游標所在的格式（按鈕亮起與停用）。 */
+  const refreshFormat = useCallback(() => {
+    const doc = frameRef.current?.contentDocument;
+    const body = doc?.querySelector('.preview-body');
+    if (!doc || !body || !editingRef.current) {
+      setFormatState(null);
+      return;
+    }
+    const ancestors = selectionAncestors(doc, body);
+    setFormatState(ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body)));
+  }, []);
+
+  const openLinkEditor = useCallback(() => {
+    const doc = frameRef.current?.contentDocument;
+    const body = doc?.querySelector('.preview-body');
+    if (!doc || !body || !commandsRef.current.includes('link')) return;
+    const existing = currentLink(doc, body);
+    linkTarget.current = { range: saveSelection(doc, body), existing };
+    linkSessions.current += 1;
+    const counter = linkSessions.current;
+    setLinkEditor((previous) => nextLinkEditor(previous, existing?.getAttribute('href') ?? null, counter));
+  }, []);
+
+  const closeLinkEditor = useCallback((refocus = true) => {
+    setLinkEditor(null);
+    const target = linkTarget.current;
+    linkTarget.current = null;
+    const frame = frameRef.current;
+    const body = frame?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+    if (!refocus || !frame || !body) return;
+    frame.contentWindow?.focus();
+    body.focus();
+    if (target?.range) {
+      const selection = frame.contentDocument?.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(target.range);
+    }
+  }, []);
+
+  const doCommand = useCallback(
+    (command: FormatCommand) => {
+      const frame = frameRef.current;
+      const body = frame?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+      const state = formatStateRef.current;
+      if (!frame || !body || !editingRef.current || !commandsRef.current.includes(command)) return;
+      if (command === 'link') {
+        openLinkEditor();
+        return;
+      }
+      if (state === null) return;
+      runCommand(frame, body, command, state);
+      refreshFormat();
+      measure(measureToken.current);
+    },
+    [measure, openLinkEditor, refreshFormat],
+  );
+  const doCommandRef = useRef(doCommand);
+  doCommandRef.current = doCommand;
+
   const handleLoad = useCallback(() => {
     const token = measureToken.current;
     setLoading(false);
@@ -371,15 +485,40 @@ export function ProofView({
       const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
       if (mark && !editingRef.current) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
     });
-    // 編輯中：打字會改變高度，要重量；貼上一律當純文字，不讓別處的樣式與標籤混進來。
+    // 編輯中：打字會改變高度，要重量。
     doc.addEventListener('input', () => {
       if (editingRef.current) measure(measureToken.current);
     });
+    // 貼上（P5-T028）：有格式的剪貼簿只保留模板 allowlist 內的標籤（粗體、連結、標題、清單…），
+    // 樣式、class、span、script、不允許的連結一律拿掉、字留著；只有純文字就照舊插純文字。
     doc.addEventListener('paste', (event) => {
       if (!editingRef.current) return;
       event.preventDefault();
-      const text = event.clipboardData?.getData('text/plain') ?? '';
-      doc.execCommand('insertText', false, text);
+      const html = event.clipboardData?.getData('text/html') ?? '';
+      const cleaned = html.trim().length > 0 ? cleanPastedHtml(html, allowRef.current) : '';
+      if (cleaned.trim().length > 0) {
+        doc.execCommand('insertHTML', false, cleaned);
+      } else {
+        doc.execCommand('insertText', false, event.clipboardData?.getData('text/plain') ?? '');
+      }
+    });
+    // 拖檔案進來：瀏覽器會把圖片直接塞進正文（不經過媒體庫）。擋掉；插圖走「在這裡插圖」。
+    doc.addEventListener('drop', (event) => {
+      if (editingRef.current && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    });
+    // 格式快捷鍵：⌘B／⌘I／⌘K；⌘U（底線，不在 allowlist）攔下來不做事。
+    doc.addEventListener('keydown', (event) => {
+      if (!editingRef.current) return;
+      const shortcut = shortcutCommand(event);
+      if (shortcut === null) return;
+      event.preventDefault();
+      if (shortcut === 'block') return;
+      const state = formatStateRef.current;
+      if (state !== null && !isShortcutEnabled(shortcut, state)) return;
+      doCommandRef.current(shortcut);
+    });
+    doc.addEventListener('selectionchange', () => {
+      if (editingRef.current) refreshFormat();
     });
     // 字型與圖片載入完會改變高度，要再量一次。
     void doc.fonts.ready.then(() => measure(token));
@@ -388,7 +527,7 @@ export function ProofView({
     observer.observe(doc.documentElement);
     observerRef.current = observer;
     window.setTimeout(() => measure(token), 250);
-  }, [measure]);
+  }, [measure, refreshFormat]);
 
   // 從清單點過來的那一段：捲過去並畫框。量測還沒好就先不動，等量完這個 effect
   // 會因為 blocks 改變再跑一次。
@@ -453,13 +592,23 @@ export function ProofView({
       showEditTarget(frame, null);
       body.removeAttribute('contenteditable');
       originalBody.current = null;
+      originalClean.current = null;
+      originalUnits.current = null;
+      setFormatState(null);
+      setLinkEditor(null);
+      setDropWarning(null);
+      linkTarget.current = null;
       return;
     }
     for (const mark of Array.from(body.querySelectorAll('mark[data-hl]'))) {
       mark.replaceWith(...Array.from(mark.childNodes));
     }
     body.normalize();
-    if (originalBody.current === null) originalBody.current = body.innerHTML;
+    if (originalBody.current === null) {
+      originalBody.current = body.innerHTML;
+      originalUnits.current = snapshotBody(body);
+      originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
+    }
     body.setAttribute('contenteditable', 'true');
     // 按 Enter 開新段落用 <p>，不要 Chrome 預設的 <div>。
     doc.execCommand('defaultParagraphSeparator', false, 'p');
@@ -472,6 +621,7 @@ export function ProofView({
     const selection = doc.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
+    refreshFormat();
 
     const scroller = scrollRef.current;
     const anchor = range.startContainer.nodeType === 1 ? (range.startContainer as Element) : range.startContainer.parentElement;
@@ -488,22 +638,40 @@ export function ProofView({
   }, [editing?.nonce, isEditing, loadCount]);
 
   const cancelEdit = (): void => {
-    const body = frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+    const body = editBody();
     if (body && originalBody.current !== null) body.innerHTML = originalBody.current;
     measure(measureToken.current);
     onEndEdit?.();
   };
 
-  const saveEdit = async (): Promise<void> => {
-    const body = frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body');
+  const saveEdit = async (force = false): Promise<void> => {
+    const body = editBody();
     if (!body) return;
-    const html = body.innerHTML.trim();
+    // 存檔前整理一次（P5-T028）：b／i 轉 strong／em、瀏覽器的 div／<p><ul> 整理好、模板不支援的格式拿掉。
+    // 後端照同一套規則再整理一次，再走 sanitize。
+    const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
     // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
     const original = originalBody.current;
-    if (html === (original ?? '').trim()) {
+    const decision = decideEditSave({
+      cleaned: html,
+      originalClean: originalClean.current ?? (original ?? '').trim(),
+      dropped,
+      force,
+    });
+    if (decision === 'unchanged') {
+      // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，
+      // 不然校樣多一個空區塊，「在這裡插圖」的索引會跟後端差一格（審查 #1）。
+      if (original !== null) body.innerHTML = original;
+      measure(measureToken.current);
       onEndEdit?.();
       return;
     }
+    // 格式不能默默消失：有會被拿掉的，先講出來。
+    if (decision === 'confirm-drop') {
+      setDropWarning(dropped);
+      return;
+    }
+    setDropWarning(null);
     setSaving(true);
     setSaveError(null);
     try {
@@ -564,7 +732,7 @@ export function ProofView({
         </div>
         {isEditing ? (
           <div className="proof-editbar" role="status">
-            <span className="proof-editbar-note">直接在文章上打字；貼上的內容會變成純文字。</span>
+            <span className="proof-editbar-note">直接在文章上打字；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。</span>
             <button type="button" className="btn btn-quiet btn-tiny" disabled={saving} onClick={cancelEdit}>
               取消
             </button>
@@ -589,6 +757,48 @@ export function ProofView({
           </>
         )}
       </header>
+      {isEditing && (
+        <FormatBar
+          commands={commands}
+          state={formatState}
+          onCommand={doCommand}
+          link={linkEditor}
+          schemes={allow.schemes}
+          onApplyLink={(href) => {
+            const frame = frameRef.current;
+            const body = editBody();
+            const target = linkTarget.current;
+            setLinkEditor(null);
+            linkTarget.current = null;
+            if (!frame || !body) return;
+            applyLink(frame, body, target?.range ?? null, href, target?.existing ?? null);
+            refreshFormat();
+          }}
+          onRemoveLink={() => {
+            const frame = frameRef.current;
+            const body = editBody();
+            const existing = linkTarget.current?.existing ?? null;
+            setLinkEditor(null);
+            linkTarget.current = null;
+            if (!frame || !body || existing === null) return;
+            removeLink(frame, body, existing);
+            refreshFormat();
+          }}
+          onCloseLink={() => closeLinkEditor()}
+        />
+      )}
+      {dropWarning !== null && (
+        <div className="proof-status proof-status-warn" role="alert">
+          <Icon name="alert" size={15} />
+          <span>這個版型不支援：{dropWarning.join('、')}。存檔時會拿掉這些格式，字會留著。</span>
+          <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setDropWarning(null)}>
+            回去改
+          </button>
+          <button type="button" className="btn btn-primary btn-tiny" disabled={saving} onClick={() => void saveEdit(true)}>
+            照樣存
+          </button>
+        </div>
+      )}
       {saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 沒存成功：{saveError}
@@ -699,6 +909,10 @@ export function ProofView({
       </div>
     </section>
   );
+}
+
+function isShortcutEnabled(command: 'bold' | 'italic' | 'link', state: FormatState): boolean {
+  return command === 'link' || !(command === 'bold' && (state.block === 'h2' || state.block === 'h3'));
 }
 
 /**

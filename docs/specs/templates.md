@@ -30,7 +30,7 @@ templates/<template-id>/
 | `wordpressTargetKey` | 參考用：這個模板主要給哪個 target。**真正決定發到哪裡的是 target 的 `templateId`**；一個模板給多個 target 用時填 `null`（`article-v1`） |
 | `publishSlot` | 哪一個 slot 的 HTML 才是送去 WordPress 的內容（目前都是 `body`） |
 | `requiredSlots` / `optionalSlots` | Agent 必須／可以填的欄位 |
-| `allowedTags` / `allowedAttributes` / `allowedClasses` / `allowedSchemes` | 正文 allowlist，依 [wordpress-site.md](wordpress-site.md) 的實測詞彙訂定 |
+| `allowedTags` / `allowedAttributes` / `allowedClasses` / `allowedSchemes` | 正文 allowlist，依 [wordpress-site.md](wordpress-site.md) 的實測詞彙訂定。sanitize 會把 `b`／`i` 轉成 `strong`／`em`（模板允許後者、不允許前者時），不是拆掉；轉換的不算進 `removedTags`（P5-T028）。連結網址跟編輯整理同一個規則（`safeHref`：絕對網址要在 `allowedSchemes`，另收 `#錨點` 與單一 `/` 開頭的站內路徑），不收的連結整個拆掉、字留著，回報 `a.href`。`allowedTags`／`allowedSchemes` 也隨 `JobDetail.template` 給前端，決定格式工具列的按鈕與連結可用的 scheme |
 | `structureRules` | 結構驗證規則 |
 | `blockDefaults` | 選填。轉成 Gutenberg 區塊時的預設屬性（段落／標題／清單項目字級、圖片尺寸與對齊）。**不寫＝作者站台慣例**（`fontSize: medium`、圖片置中），`longform-v1`／`diary-v1` 就是不寫，輸出因此逐字不變；通用模板全部設 `null` |
 

@@ -1,6 +1,12 @@
 import { parseFragment, serializeOuter } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
 import { findIgnoringSpaces } from '../contract/text-match.js';
+import {
+  cleanRichEdit,
+  richUnits,
+  serializeRichEdit,
+  type RichNode,
+} from '../contract/rich-text.js';
 
 /**
  * 正文的「頂層區塊」拆解。
@@ -434,107 +440,56 @@ export function escapeTextNode(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** 瀏覽器編輯器會用、但模板不認得的行內標籤：換成模板認得的那一個。 */
-const EDITOR_RENAMES: Readonly<Record<string, string>> = { b: 'strong', i: 'em' };
-/** 只帶樣式、沒有語意的包裝：拆掉，裡面的字留著。`mark` 是校樣上的建議標記。 */
-const EDITOR_UNWRAP: ReadonlySet<string> = new Set(['span', 'font', 'mark']);
-/** 編輯器塞進來的屬性。class 不在這裡：正文的 `wp-block-*` class 要留著。 */
-const EDITOR_DROP_ATTRS: ReadonlySet<string> = new Set(['style', 'contenteditable', 'data-hl', 'spellcheck']);
-
-type Element = DefaultTreeAdapterMap['element'];
-
-function cleanChildren(parent: ParentNode): void {
-  const next: Node[] = [];
-  for (const child of childrenOf(parent as Node)) {
-    if (!isElement(child)) {
-      next.push(child);
-      continue;
-    }
-    const element = child as Element;
-    cleanChildren(element);
-    if (EDITOR_UNWRAP.has(element.tagName)) {
-      for (const grandchild of element.childNodes) {
-        grandchild.parentNode = parent;
-        next.push(grandchild as Node);
-      }
-      continue;
-    }
-    const renamed = EDITOR_RENAMES[element.tagName];
-    if (renamed) {
-      element.tagName = renamed;
-      element.nodeName = renamed;
-    }
-    element.attrs = element.attrs.filter((attr) => !EDITOR_DROP_ATTRS.has(attr.name));
-    next.push(element);
-  }
-  (parent as { childNodes: Node[] }).childNodes = next;
-}
-
 /**
- * Chrome 按 Enter 或刪光一段之後留下的空段落：`<p><br></p>`、`<p></p>`。
- *
- * **只認這個形狀。** `<p>&nbsp;</p>` 常是作者刻意留的間隔段，而整理規則作用在整篇，
- * 連使用者沒碰過的段落也會被整理——把它刪掉等於偷改別人的排版（P5-T010 審查）。
+ * HTML 字串 → 共用契約的格式樹（`contract/rich-text.ts`）。註解與其他非元素節點略過。
+ * 前端從 DOM 轉出同一種樹，兩邊整理的是同一種東西。
  */
-function isEditorEmptyParagraph(element: Element): boolean {
-  if (element.tagName !== 'p') return false;
-  return element.childNodes.every((child) =>
-    child.nodeName === '#text'
-      ? /^[ \t\r\n]*$/.test((child as DefaultTreeAdapterMap['textNode']).value)
-      : (child as Element).tagName === 'br',
-  );
+export function htmlToRich(html: string): RichNode[] {
+  return childrenOf(parseFragment(html) as unknown as Node).flatMap((child) => toRich(child));
+}
+
+function toRich(node: Node): RichNode[] {
+  if (node.nodeName === '#text') return [{ type: 'text', text: (node as DefaultTreeAdapterMap['textNode']).value }];
+  if (!isElement(node)) return [];
+  const element = node as DefaultTreeAdapterMap['element'];
+  return [
+    {
+      type: 'element',
+      tag: element.tagName.toLowerCase(),
+      attrs: element.attrs.map((attr) => ({ name: attr.name, value: attr.value })),
+      children: childrenOf(element).flatMap((child) => toRich(child)),
+    },
+  ];
 }
 
 /**
- * 整理「直接在文章上改」送回來的正文（P5-T010）。
+ * 整理「直接在文章上改」送回來的正文（P5-T010、P5-T028）。
  *
  * contenteditable 產出的 HTML 會帶著模板不認得的東西：`<b>`／`<i>`、帶樣式的 `<span>`、
- * 按 Enter 生出的 `<div>` 與 `<p><br></p>`、全選刪光重打之後頂層的裸文字與 `<br>`。
- * 不整理的話 sanitize 會照規則把 `<b>` 拆掉（粗體靜靜消失），hybrid 模板的結構驗證
- * 會因為頂層裸文字整份退回。
+ * 按 Enter 生出的 `<div>` 與 `<p><br></p>`、全選刪光重打之後頂層的裸文字與 `<br>`，
+ * 以及格式工具列（P5-T028）操作後 Chrome 留下的 `<p><ul>`、`ul` 直接包 `ul`、清單項目裡的 div、
+ * 引用裡的裸文字。不整理的話 sanitize 會照規則把 `<b>` 拆掉（粗體靜靜消失），hybrid 模板的結構驗證
+ * 會因為頂層裸文字整份退回，古騰堡轉換會把清單退成 wp:html。
  *
- * 頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），不留給 render 的
- * `wrapBareTopLevelText`：結構驗證跑在它之前，驗的是這裡的輸出。
+ * **只整理使用者改過的頂層區塊**（`contract/rich-text.ts` 的 `cleanRichEdit`，前端存檔前也是同一套）：
+ * 給了 `baseline`（上一版**實際會發布的正文**，也就是 sanitize 之後的 publishHtml——前端校樣顯示的就是它）時
+ * 逐塊比對，對得上的區塊輸出基準裡那份（解析器修補過、已 sanitize）的 HTML，不重新整理——整理規則再怎麼小心，
+ * 也不該改寫使用者沒碰過的內容。沒給就整份整理。
+ * 頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），不留給 render 的 `wrapBareTopLevelText`：
+ * 結構驗證跑在它之前，驗的是這裡的輸出。
  *
- * **這不是安全關卡**：整理完照樣走 schema、sanitize、結構驗證。
+ * **這不是安全關卡**：整理完（含原樣保留的區塊）照樣走 schema、sanitize、結構驗證。這裡不擋標籤
+ * （sanitize 擋）；給了 `allowedSchemes` 時，不收的連結（`safeHref`）拆成純文字。
  */
-export function normalizeEditedBody(html: string): string {
-  const fragment = parseFragment(html) as unknown as ParentNode;
-  cleanChildren(fragment);
-
-  const out: string[] = [];
-  let run = '';
-  const flush = (): void => {
-    const text = run.trim();
-    run = '';
-    if (text.length > 0) out.push(`<p class="wp-block-paragraph">${text}</p>`);
-  };
-
-  for (const child of childrenOf(fragment as Node)) {
-    if (!isElement(child)) {
-      if (child.nodeName === '#text') {
-        // 行內內容之間的空白有意義（`<strong>a</strong> <em>b</em>`）；區塊之間的是排版，flush 會修掉。
-        run += escapeTextNode((child as DefaultTreeAdapterMap['textNode']).value);
-      }
-      continue;
-    }
-    const element = child as Element;
-    if (element.tagName === 'br') {
-      flush();
-      continue;
-    }
-    if (INLINE_TAGS.has(element.tagName)) {
-      run += serializeOuter(element);
-      continue;
-    }
-    flush();
-    if (element.tagName === 'div') {
-      element.tagName = 'p';
-      element.nodeName = 'p';
-    }
-    if (isEditorEmptyParagraph(element)) continue;
-    out.push(serializeOuter(element));
-  }
-  flush();
-  return out.join('\n');
+export function normalizeEditedBody(
+  html: string,
+  options: { allowedSchemes?: readonly string[]; baseline?: string | null } = {},
+): string {
+  const previous = typeof options.baseline === 'string' ? richUnits(htmlToRich(options.baseline)) : null;
+  const result = cleanRichEdit(
+    htmlToRich(html),
+    previous,
+    options.allowedSchemes === undefined ? {} : { allowedSchemes: options.allowedSchemes },
+  );
+  return serializeRichEdit(result);
 }

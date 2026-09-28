@@ -54,6 +54,7 @@ import {
   removeImageFromBody,
   replaceImageInBody,
   splitTopLevelBlocks,
+  wrapBareTopLevelText,
   type TopLevelBlock,
 } from './html-blocks.js';
 import {
@@ -111,6 +112,7 @@ import { applyChanges, isAlreadyDone, type ChangeSlot } from './review-apply.js'
 import type { AgentId } from '../agents/types.js';
 import { buildPreviewDocument } from '../preview/document.js';
 import { renderRevision, RenderError, type RenderResult } from '../templates/render.js';
+import { sanitizeBody } from '../templates/sanitize.js';
 import type { TemplateRegistry } from '../templates/registry.js';
 import type { LoadedTemplate } from '../templates/types.js';
 import { sha256Of, uploadMedia } from '../media/upload.js';
@@ -630,7 +632,13 @@ export class CoreService {
           }
         : null,
       template: template
-        ? { id: template.manifest.id, hash: template.hash, strictness: template.manifest.strictness }
+        ? {
+            id: template.manifest.id,
+            hash: template.hash,
+            strictness: template.manifest.strictness,
+            allowedTags: [...template.manifest.allowedTags],
+            allowedSchemes: [...template.manifest.allowedSchemes],
+          }
         : null,
       currentRevision: revision,
       revisionCount: this.repo.listRevisions(job.id).length,
@@ -745,7 +753,11 @@ export class CoreService {
     const templateData =
       input.editedBody === undefined
         ? (input.templateData ?? base.templateData)
-        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody) };
+        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody, {
+              allowedSchemes: template.manifest.allowedSchemes,
+              // 基準＝上一版實際會發布的正文（跟前端校樣同一份），沒改的頂層區塊原樣沿用（P5-T028 審查）。
+              baseline: publishedBodyOf(template, base.templateData[template.manifest.publishSlot]),
+            }) };
 
     const payload: RevisionPayload = {
       templateData,
@@ -3852,4 +3864,13 @@ function buildUserPrompt(templateData: Record<string, unknown>, instruction?: st
     );
   }
   return parts.join('\n');
+}
+
+/**
+ * 上一版正文實際會發布的樣子：跟 renderRevision 的第 2 步同一套（sanitize → 頂層裸文字包段落）。
+ * 直接在文章上改時拿它當比對基準——前端校樣顯示的就是這一份（P5-T028 第三輪審查 #2）。
+ */
+function publishedBodyOf(template: LoadedTemplate, body: unknown): string | null {
+  if (typeof body !== 'string') return null;
+  return wrapBareTopLevelText(sanitizeBody(body, template.manifest).html.trim());
 }

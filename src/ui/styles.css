@@ -438,6 +438,67 @@ h1, h2, h3 { font-weight: 600; }
 .proof-editbar { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
 .proof-editbar-note { font-size: .82rem; color: var(--shell-text-dim); }
 .proof-sheet[data-editing='yes'] { box-shadow: 0 0 0 2px var(--accent); border-radius: 4px; }
+
+/* 格式工具列（P5-T028）：編輯中才出現，貼在校樣工具列下面。 */
+.format-bar-wrap {
+  position: relative;
+  border-bottom: 1px solid var(--shell-line);
+  padding: .35rem 1rem;
+}
+.format-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .6rem; }
+.format-group { display: flex; align-items: center; gap: .15rem; }
+.format-group + .format-group { padding-left: .6rem; border-left: 1px solid var(--shell-line); }
+.format-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 .4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--shell-text);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast), color var(--fast);
+}
+.format-btn:hover:not(:disabled) { background: var(--shell-panel); border-color: var(--shell-line); }
+.format-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.format-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-strong);
+}
+.format-btn:disabled { opacity: .35; cursor: not-allowed; }
+.format-btn-text { font-size: .8rem; font-weight: 700; letter-spacing: .02em; }
+.format-btn[data-command='h3'] .format-btn-text { font-size: .74rem; }
+
+.link-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .45rem;
+  margin-top: .4rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  box-shadow: 0 6px 18px rgb(0 0 0 / .08);
+}
+.link-editor-label { font-size: .8rem; font-weight: 700; color: var(--shell-text); }
+.link-editor-input { flex: 1 1 16rem; width: auto; min-width: 12rem; padding: .35rem .6rem; font-size: .85rem; }
+.link-editor-error { flex-basis: 100%; margin: 0; font-size: .8rem; color: var(--danger-on-shell); }
+
+.proof-status-warn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  justify-content: center;
+  align-items: center;
+  padding: .6rem 1rem;
+  color: var(--warn-on-shell);
+}
 .margin[data-locked='yes'] { opacity: .45; }
 
 .proof-scroll { flex: 1; overflow-y: auto; padding: 0 1.25rem 3rem; }

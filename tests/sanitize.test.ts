@@ -44,11 +44,12 @@ describe('危險內容一律移除', () => {
   });
 
   it('擋掉 javascript: 連結', () => {
-    expect(clean('<a href="javascript:alert(1)">點</a>')).toBe('<a>點</a>');
+    // P5-T028 審查 F5：不收的連結整個拆掉、字留著（以前留一個沒有 href 的空殼 <a>）。
+    expect(clean('<a href="javascript:alert(1)">點</a>')).toBe('點');
   });
 
   it('擋掉 data: 連結', () => {
-    expect(clean('<a href="data:text/html,<script>x</script>">點</a>')).toBe('<a>點</a>');
+    expect(clean('<a href="data:text/html,<script>x</script>">點</a>')).toBe('點');
   });
 
   it('保留允許的 scheme', () => {
@@ -87,5 +88,34 @@ describe('回報被移除了什麼', () => {
     const result = sanitizeBody('<p class="wp-block-paragraph">好</p>', manifest);
     expect(result.changed).toBe(false);
     expect(result.removedTags).toEqual([]);
+  });
+});
+
+describe('b／i 轉成 strong／em，不是拆掉（P5-T028）', () => {
+  it('allowlist 有 strong／em、沒有 b／i 時轉換', () => {
+    expect(clean('<p>一<b>二</b><i>三</i></p>')).toBe('<p>一<strong>二</strong><em>三</em></p>');
+  });
+
+  it('轉換過的不算被移除', () => {
+    const report = sanitizeBody('<p><b>二</b><u>底</u></p>', manifest);
+    expect(report.removedTags).toEqual(['u']);
+  });
+
+  it('b 身上的屬性照 strong 的規則處理', () => {
+    expect(clean('<p><b style="color:red" onclick="x()">二</b></p>')).toBe('<p><strong>二</strong></p>');
+  });
+});
+
+describe('連結網址：渲染與編輯同一套規則（P5-T028 審查 F5）', () => {
+  it('站內路徑與錨點保留', () => {
+    expect(clean('<p><a href="/about">關於</a><a href="#s2">第二節</a></p>')).toBe('<p><a href="/about">關於</a><a href="#s2">第二節</a></p>');
+  });
+
+  it('其他相對路徑、協定相對、反斜線變形都拆掉，字留著，並回報', () => {
+    for (const href of ['../post', 'post', './x', '?q=1', '//evil.test', '/\\evil.test', ' /\t/evil.test']) {
+      const report = sanitizeBody(`<p><a href="${href}">字</a></p>`, manifest);
+      expect(report.html, href).toBe('<p>字</p>');
+      expect(report.removedAttributes, href).toContain('a.href');
+    }
   });
 });
