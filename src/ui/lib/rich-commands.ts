@@ -7,7 +7,7 @@ import {
   type RichNode,
   type RichUnit,
 } from '../../contract/rich-text.js';
-import type { FormatCommand, FormatState } from './rich-format.js';
+import { emphasisFromComputed, type ComputedEmphasis, type FormatCommand, type FormatState } from './rich-format.js';
 
 /**
  * 直接在文章上改的格式指令：對校樣 iframe 的文件下指令（P5-T028）。
@@ -100,6 +100,15 @@ export function selectionAncestors(doc: Document, body: Element): string[] | nul
     element = element.parentElement;
   }
   return tags;
+}
+
+/** 游標處實際的粗／斜（iframe 自己的 getComputedStyle；樣式由外層讀，iframe 不跑 script）。 */
+export function selectionEmphasis(doc: Document, body: Element): ComputedEmphasis | null {
+  const element = anchorElement(doc, body);
+  const view = doc.defaultView;
+  if (element === null || view === null) return null;
+  const style = view.getComputedStyle(element);
+  return emphasisFromComputed(style.fontWeight, style.fontStyle);
 }
 
 function closestIn(doc: Document, body: Element, selector: string): Element | null {

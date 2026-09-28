@@ -4,10 +4,8 @@ import { findIgnoringSpaces } from '../contract/text-match.js';
 import {
   cleanRichEdit,
   richUnits,
-  serializeRich,
   serializeRichEdit,
   type RichNode,
-  type RichUnit,
 } from '../contract/rich-text.js';
 
 /**
@@ -465,24 +463,6 @@ function toRich(node: Node): RichNode[] {
 }
 
 /**
- * 正文 → 頂層區塊，每塊帶著原始 HTML 片段（parse5 的位置資訊切出來的）。
- * 「沒改的區塊原樣保留」時逐字輸出這個片段，不經過重新序列化。
- */
-export function htmlToRichUnits(html: string): RichUnit[] {
-  const fragment = parseFragment(html, { sourceCodeLocationInfo: true }) as unknown as Node;
-  const nodes: RichNode[] = [];
-  const sources: string[] = [];
-  for (const child of childrenOf(fragment)) {
-    const converted = toRich(child);
-    if (converted.length === 0) continue;
-    const location = (child as { sourceCodeLocation?: { startOffset: number; endOffset: number } | null }).sourceCodeLocation;
-    nodes.push(...converted);
-    sources.push(location ? html.slice(location.startOffset, location.endOffset) : serializeRich(converted));
-  }
-  return richUnits(nodes, sources);
-}
-
-/**
  * 整理「直接在文章上改」送回來的正文（P5-T010、P5-T028）。
  *
  * contenteditable 產出的 HTML 會帶著模板不認得的東西：`<b>`／`<i>`、帶樣式的 `<span>`、
@@ -492,8 +472,9 @@ export function htmlToRichUnits(html: string): RichUnit[] {
  * 會因為頂層裸文字整份退回，古騰堡轉換會把清單退成 wp:html。
  *
  * **只整理使用者改過的頂層區塊**（`contract/rich-text.ts` 的 `cleanRichEdit`，前端存檔前也是同一套）：
- * 給了 `previousBody`（上一版的正文）時逐塊比對，對得上的區塊**逐字**用上一版的原始片段，不重新整理——
- * 整理規則再怎麼小心，也不該改寫使用者沒碰過的內容（審查 F3／F5／#5）。沒給就整份整理。
+ * 給了 `baseline`（上一版**實際會發布的正文**，也就是 sanitize 之後的 publishHtml——前端校樣顯示的就是它）時
+ * 逐塊比對，對得上的區塊輸出基準裡那份（解析器修補過、已 sanitize）的 HTML，不重新整理——整理規則再怎麼小心，
+ * 也不該改寫使用者沒碰過的內容。沒給就整份整理。
  * 頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），不留給 render 的 `wrapBareTopLevelText`：
  * 結構驗證跑在它之前，驗的是這裡的輸出。
  *
@@ -502,9 +483,9 @@ export function htmlToRichUnits(html: string): RichUnit[] {
  */
 export function normalizeEditedBody(
   html: string,
-  options: { allowedSchemes?: readonly string[]; previousBody?: string | null } = {},
+  options: { allowedSchemes?: readonly string[]; baseline?: string | null } = {},
 ): string {
-  const previous = typeof options.previousBody === 'string' ? htmlToRichUnits(options.previousBody) : null;
+  const previous = typeof options.baseline === 'string' ? richUnits(htmlToRich(options.baseline)) : null;
   const result = cleanRichEdit(
     htmlToRich(html),
     previous,

@@ -37,11 +37,26 @@ export interface FormatState {
   readonly quote: boolean;
 }
 
+/** 游標所在處實際的粗／斜（瀏覽器算出來的樣式）。 */
+export interface ComputedEmphasis {
+  readonly bold: boolean;
+  readonly italic: boolean;
+}
+
+/** `getComputedStyle` 的 font-weight／font-style → 粗不粗、斜不斜。600 以上算粗。 */
+export function emphasisFromComputed(fontWeight: string, fontStyle: string): ComputedEmphasis {
+  const weight = fontWeight === 'bold' || fontWeight === 'bolder' ? 700 : Number(fontWeight);
+  return { bold: Number.isFinite(weight) && weight >= 600, italic: fontStyle === 'italic' || fontStyle.startsWith('oblique') };
+}
+
 /**
  * 從游標往外的祖先標籤（最裡面的在前，不含正文容器本身）推出狀態。
  * `b`／`i` 是瀏覽器的產物，也算粗斜體（存檔時才轉成 strong／em）。
+ *
+ * 給了 `computed`（游標處實際的樣式）時，粗／斜照實際樣式：`<strong>A<span style="font-weight:normal">B</span></strong>`
+ * 的 B 不粗，粗體按鈕不能亮（第三輪審查 #6）。標題本來就粗，標題裡的粗體按鈕只看有沒有 strong／b。
  */
-export function formatStateFrom(ancestors: readonly string[]): FormatState {
+export function formatStateFrom(ancestors: readonly string[], computed?: ComputedEmphasis | null): FormatState {
   const tags = ancestors.map((tag) => tag.toLowerCase());
   const list = tags.find((tag) => tag === 'ul' || tag === 'ol') as 'ul' | 'ol' | undefined;
   const textBlock = tags.find((tag) => ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'div'].includes(tag));
@@ -51,9 +66,12 @@ export function formatStateFrom(ancestors: readonly string[]): FormatState {
   if (tags.includes('li')) block = 'list';
   else if (textBlock === 'h1' || textBlock === 'h2') block = 'h2';
   else if (textBlock !== undefined && /^h[3-6]$/.test(textBlock)) block = 'h3';
+  const taggedBold = tags.some((tag) => tag === 'strong' || tag === 'b');
+  const taggedItalic = tags.some((tag) => tag === 'em' || tag === 'i');
+  const inHeading = block === 'h2' || block === 'h3';
   return {
-    bold: tags.some((tag) => tag === 'strong' || tag === 'b'),
-    italic: tags.some((tag) => tag === 'em' || tag === 'i'),
+    bold: computed == null || inHeading ? taggedBold : computed.bold,
+    italic: computed == null ? taggedItalic : computed.italic,
     link: tags.includes('a'),
     block,
     list: list ?? null,

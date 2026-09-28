@@ -147,6 +147,22 @@ export function safeHref(raw: string, schemes: readonly string[]): string | null
   if (!schemes.some((allowed) => allowed.toLowerCase() === scheme)) return null;
   // 還原成原字串之後 scheme 不一樣（中間夾了控制字元），就不收。
   if (!value.toLowerCase().startsWith(`${scheme}:`)) return null;
+  const rest = value.slice(scheme.length + 1);
+  if (scheme === 'http' || scheme === 'https') {
+    // 一定要是 `https://主機…`：`https:next` 沒有主機，瀏覽器會照目前頁面解析成站內路徑（第三輪審查 #5）。
+    // `https:///x` 瀏覽器會自己補成 `https://x/`，寫法可疑，也不收。
+    if (!/^\/\/[^/\\]/.test(rest)) return null;
+    try {
+      const parsed = new URL(value);
+      if (parsed.hostname.length === 0) return null;
+    } catch {
+      return null;
+    }
+    // 驗過之後回傳使用者寫的樣子（不換成 URL 物件的正規化寫法），沒碰過的網址不會被改寫。
+    return value;
+  }
+  // mailto:、tel: 等：冒號後面要有東西，而且不是 `//`（那是在假裝成網址）。
+  if (rest.length === 0 || rest.startsWith('//')) return null;
   return value;
 }
 
@@ -286,7 +302,11 @@ function stripMarkers(nodes: readonly RichNode[]): RichNode[] {
  * 會把區塊攤平、清單邊界被吃掉（審查 #2）——改成往下套到每個區塊裡的行內內容；區塊之間的空白不包。
  * 粗體、斜體、連結（`<a>` 包住區塊，審查 F2）都走這裡。
  */
-function distribute(nodes: readonly RichNode[], wrapRun: (run: RichNode[]) => RichNode[]): RichNode[] {
+function distribute(
+  nodes: readonly RichNode[],
+  wrapRun: (run: RichNode[]) => RichNode[],
+  wrapFigure?: (figure: RichElement) => RichElement,
+): RichNode[] {
   if (nodes.length === 0) return [];
   if (!nodes.some((node) => isBlockish(node))) return wrapRun([...nodes]);
   const out: RichNode[] = [];
@@ -299,7 +319,9 @@ function distribute(nodes: readonly RichNode[], wrapRun: (run: RichNode[]) => Ri
   for (const node of nodes) {
     if (node.type === 'element' && isBlockish(node)) {
       flush();
-      out.push(node.tag === 'hr' || node.tag === 'figure' ? node : element(node.tag, node.attrs, distribute(node.children, wrapRun)));
+      if (node.tag === 'figure') out.push(wrapFigure === undefined ? node : wrapFigure(node));
+      else if (node.tag === 'hr') out.push(node);
+      else out.push(element(node.tag, node.attrs, distribute(node.children, wrapRun, wrapFigure)));
       continue;
     }
     run.push(node);
@@ -321,7 +343,7 @@ function wrapInlineStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic
   return out;
 }
 
-/** 樣式明講「不粗／不斜」的行內包裝：留一個標記，讓外層的 strong／em 知道要在這裡斷開。 */
+/** 在一串行內內容外面留「不粗／不斜」的標記，讓外層的 strong／em 知道要在這裡斷開。 */
 function markNormal(nodes: RichNode[], normalWeight: boolean, normalStyle: boolean): RichNode[] {
   if (nodes.length === 0 || nodes.some((node) => isBlockish(node))) return nodes;
   let out = nodes;
@@ -334,7 +356,23 @@ function cleanNodes(ctx: Context, nodes: readonly RichNode[]): RichNode[] {
   return nodes.flatMap((node) => cleanNode(ctx, node));
 }
 
+/**
+ * 樣式明講「不粗／不斜」（`font-weight:normal`、`font-style:normal`）對**任何元素**都有效——span、a、li、p、
+ * 清單都一樣（第三輪審查 #3）：在它的行內內容上留標記，外層的 strong／em 遇到標記就從那裡切開；
+ * 裡面有區塊時標記放進每個區塊的行內內容。沒有外層粗／斜體時標記最後拿掉，等於沒事。
+ * Google 文件貼上最外層那個 `<b style="font-weight:normal" id="docs-internal-guid-…">` 也是走這條。
+ */
 function cleanNode(ctx: Context, node: RichNode): RichNode[] {
+  const out = cleanNodeInner(ctx, node);
+  if (node.type === 'text') return out;
+  const style = styleOf(node.attrs);
+  const normalWeight = styleBold(style) === false;
+  const normalStyle = styleItalic(style) === false;
+  if (!normalWeight && !normalStyle) return out;
+  return distribute(out, (run) => markNormal(run, normalWeight, normalStyle));
+}
+
+function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
   if (node.type === 'text') {
     if (ctx.options.mode === 'paste' && /\n/.test(node.text)) {
       // 原始碼的換行與縮排在網頁上本來就顯示成一個空白。
@@ -355,7 +393,8 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
 
   // 粗體／斜體：瀏覽器的 b／i 換成模板認得的 strong／em。
   if (tag === 'b' || tag === 'strong') {
-    if (bold === false) return markNormal(wrapStyled(ctx, children, false, italic), true, italicStyle === false);
+    // 明講不粗（Google 文件最外層那個 b）：不是粗體；標記由 cleanNode 統一加。
+    if (bold === false) return wrapStyled(ctx, children, false, italic);
     if (!isAllowed(ctx, 'strong')) {
       reportDropped(ctx, 'strong', children);
       return children;
@@ -367,7 +406,7 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
     return wrapStyled(ctx, wrapExcept(children, NO_BOLD, (inner) => [element('strong', attrs, inner)]), false, italic);
   }
   if (tag === 'i' || tag === 'em') {
-    if (italicStyle === false) return markNormal(wrapStyled(ctx, children, bold === true, false), false, true);
+    if (italicStyle === false) return wrapStyled(ctx, children, bold === true, false);
     if (!isAllowed(ctx, 'em')) {
       reportDropped(ctx, 'em', children);
       return children;
@@ -396,7 +435,7 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
     if (accepted === null || !isAllowed(ctx, 'a')) {
       // 有網址卻不收（不允許的 scheme、`../` 相對路徑）或模板不允許連結：字留著，講出來。
       if (href !== undefined) reportDropped(ctx, 'a', children);
-      return markNormal(wrapStyled(ctx, children, bold === true, italic), bold === false, italicStyle === false);
+      return wrapStyled(ctx, children, bold === true, italic);
     }
     if (children.length === 0) return [];
     const attrs =
@@ -404,7 +443,17 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
         ? [{ name: 'href', value: accepted }]
         : keepAttrs(ctx, node.attrs).map((attr) => (attr.name === 'href' ? { name: 'href', value: accepted } : attr));
     // 連結包著區塊（`<a>A<ul>…</ul></a>`、`<a><div>…</div>字</a>`）：連結拆到各段的字上，區塊邊界留著（審查 F2）。
-    return wrapStyled(ctx, distribute(children, (run) => [element('a', attrs, run)]), bold === true, italic);
+    // 連結包著圖片區塊（`<a><figure><img></figure></a>`）：照古騰堡圖片連結的寫法把連結放進 figure 包住 img
+    // （`<figure><a href><img></a></figure>`），連結不消失（第三輪審查 #4）。
+    const linkFigure = (figure: RichElement): RichElement =>
+      element(
+        'figure',
+        figure.attrs,
+        figure.children.map((child) =>
+          child.type === 'element' && child.tag === 'img' ? element('a', attrs, [child]) : child,
+        ),
+      );
+    return wrapStyled(ctx, distribute(children, (run) => [element('a', attrs, run)], linkFigure), bold === true, italic);
   }
 
   if (tag === 'p' || tag === 'blockquote' || tag === 'ul' || tag === 'ol' || tag === 'li' || tag === 'figure' || tag === 'figcaption') {
@@ -437,9 +486,9 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
     const attrs = keepAttrs(ctx, node.attrs);
     return wrapStyled(ctx, distribute(children, (run) => [element(tag, attrs, run)]), bold === true, italic);
   }
-  // 其他（span、font、mark、u…）：拆掉包裝，字留著。樣式裡的粗斜體轉成 strong／em，明講「不粗／不斜」的留標記。
+  // 其他（span、font、mark、u…）：拆掉包裝，字留著。樣式裡的粗斜體轉成 strong／em（明講「不粗／不斜」的由 cleanNode 留標記）。
   reportDropped(ctx, tag, children);
-  return markNormal(wrapStyled(ctx, children, bold === true, italic), bold === false, italicStyle === false);
+  return wrapStyled(ctx, children, bold === true, italic);
 }
 
 // ---------------------------------------------------------------------------
@@ -816,45 +865,39 @@ const ROOT_INLINE = new Set([
   'cite', 'q', 'time', 'del', 'ins', 'font',
 ]);
 
-/** 一個頂層區塊：一個最外層元素，或一串連在一起的最外層行內內容。`key` 是它的正規化 HTML，用來比對有沒有改。 */
+/**
+ * 一個頂層區塊：一個最外層元素，或一串連在一起的最外層行內內容。`key` 是它的正規化 HTML，用來比對有沒有改；
+ * 保留時輸出的也是這份正規化 HTML（HTML 解析器修補過、不是原始字串片段——原始片段可能有沒關的註解或標籤，
+ * 逐字拼回去會吞掉後面新加的區塊，第三輪審查 #1）。
+ */
 export interface RichUnit {
   readonly key: string;
   readonly nodes: readonly RichNode[];
-  /** 原始 HTML 片段（後端從字串切出來的）；有的話保留時逐字輸出它。 */
-  readonly source?: string;
 }
 
-/**
- * 切成頂層區塊。最外層的空白（區塊之間的排版）不屬於任何區塊。
- * `sources`：跟 `nodes` 一一對應的原始片段（後端用 parse5 的位置資訊切），給了就記在區塊上。
- */
-export function richUnits(nodes: readonly RichNode[], sources?: readonly string[]): RichUnit[] {
+/** 切成頂層區塊。最外層的空白（區塊之間的排版）不屬於任何區塊。 */
+export function richUnits(nodes: readonly RichNode[]): RichUnit[] {
   const units: RichUnit[] = [];
-  let run: { node: RichNode; source: string | undefined }[] = [];
-  const make = (items: { node: RichNode; source: string | undefined }[]): RichUnit => {
-    const unitNodes = items.map((item) => item.node);
-    const unit: RichUnit = { key: serializeRich(unitNodes), nodes: unitNodes };
-    return sources === undefined ? unit : { ...unit, source: items.map((item) => item.source ?? '').join('') };
-  };
+  let run: RichNode[] = [];
+  const make = (unitNodes: RichNode[]): RichUnit => ({ key: serializeRich(unitNodes), nodes: unitNodes });
   const flush = (): void => {
-    while (run.length > 0 && isWhitespace(run[run.length - 1]!.node)) run.pop();
+    while (run.length > 0 && isWhitespace(run[run.length - 1]!)) run.pop();
     if (run.length > 0) units.push(make(run));
     run = [];
   };
-  nodes.forEach((node, index) => {
-    const source = sources?.[index];
+  for (const node of nodes) {
     if (node.type === 'text') {
-      if (isWhitespace(node) && run.length === 0) return;
-      run.push({ node, source });
-      return;
+      if (isWhitespace(node) && run.length === 0) continue;
+      run.push(node);
+      continue;
     }
     if (ROOT_INLINE.has(node.tag)) {
-      run.push({ node, source });
-      return;
+      run.push(node);
+      continue;
     }
     flush();
-    units.push(make([{ node, source }]));
-  });
+    units.push(make([node]));
+  }
   flush();
   return units;
 }
@@ -898,7 +941,9 @@ export interface RichEditResult {
 
 /**
  * 編輯存檔的整理（前後端共用，審查 F3／F5／#5 的根本修法）：
- * 編輯後的正文跟進入編輯時的正文逐個**頂層區塊**比對（最長共同子序列，不是位置對齊），
+ * 編輯後的正文跟**基準**逐個**頂層區塊**比對（最長共同子序列，不是位置對齊）。基準一律是上一版
+ * **實際會發布的正文**（sanitize 之後的 publishHtml）：前端看到的校樣就是它，後端也自己算出同一份，
+ * 兩邊的區塊鍵才對得上（第三輪審查 #2）。
  * 對得上的＝使用者沒碰過，**原樣保留**；只有改過或新增的區塊跑整理規則。連在一起的改動區塊一起整理。
  * `original` 為 null（拿不到上一版）就整份整理。
  *
@@ -944,10 +989,10 @@ export function cleanRichEdit(
   return { pieces, dropped };
 }
 
-/** 把 `cleanRichEdit` 的結果接回 HTML：保留的區塊有原始片段就逐字用它，頂層區塊之間用換行（後端的正文慣例）。 */
+/** 把 `cleanRichEdit` 的結果接回 HTML：保留的區塊輸出基準裡那份正規化 HTML，頂層區塊之間用換行（後端的正文慣例）。 */
 export function serializeRichEdit(result: RichEditResult): string {
   return result.pieces
-    .map((piece) => (piece.kept ? (piece.unit.source ?? serializeRich(piece.unit.nodes)) : serializeRich(piece.nodes, '\n')))
+    .map((piece) => (piece.kept ? serializeRich(piece.unit.nodes) : serializeRich(piece.nodes, '\n')))
     .filter((part) => part.length > 0)
     .join('\n');
 }

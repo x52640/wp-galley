@@ -247,6 +247,81 @@ describe('P5-T028：格式存檔後渲染與區塊正確', () => {
     expect(body).toBe(`<p>一</p>\n${touchy}\n<p>三改過</p>`);
   });
 
+  describe('第三輪審查 #1／#2：比對基準＝上一版實際會發布的正文', () => {
+    /** 建一篇日記，正文是 body；回傳 uuid 與「前端校樣上看到的」publishHtml。 */
+    async function diaryWith(body: string): Promise<{ uuid: string; shown: string }> {
+      fixture = await createCoreFixture();
+      const uuid = fixture.core.createJob({
+        targetKey: 'diary',
+        sourceText: SOURCE,
+        title: '20260928',
+        templateData: { title: '20260928', body },
+      }).uuid;
+      return { uuid, shown: fixture.core.render(uuid).publishHtml };
+    }
+
+    it.each([
+      ['沒關的註解', '<p>A<!-- unfinished'],
+      ['沒關的引用', '<blockquote><p>A'],
+      ['沒關的清單', '<ul><li>A'],
+    ])('上一版正文有%s：後面新加的段落不會被吞掉', async (_name, body) => {
+      const { uuid, shown } = await diaryWith(body);
+      fixture!.core.createRevision(uuid, { editedBody: `${shown}\n<p>New paragraph</p>` });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html).toContain('<p>New paragraph</p>');
+      expect(html.match(/A/g)).toHaveLength(1);
+    });
+
+    it('parse5 修補後範圍重疊的 <p><strong>A</p>B<p>C</p>：只改 C，A 不重複', async () => {
+      const { uuid, shown } = await diaryWith('<p><strong>A</p>B<p>C</p>');
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('>C<', '>C改<') });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html.match(/A/g)).toHaveLength(1);
+      expect(html).toContain('C改');
+      const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+      expect(toBlockMarkup(html).markup.match(/A/g)).toHaveLength(1);
+    });
+
+    it('上一版正文有 sanitize 會改的 class：只改別段，清單原樣保留、不誤報也不整理', async () => {
+      const list = '<ul class="other"><li><h2>Heading</h2><blockquote><p>Quote</p></blockquote><hr></li></ul>';
+      const { uuid, shown } = await diaryWith(`<p>Before</p>${list}`);
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('Before', 'After') });
+      const html = fixture!.core.render(uuid).publishHtml;
+      expect(html).toContain('<h2>Heading</h2><blockquote><p>Quote</p></blockquote>');
+      expect(html).not.toContain('Heading<br');
+      // 頂層區塊之間統一用換行（正文慣例），區塊本身跟校樣上的一樣。
+      expect(html).toBe(shown.replace('Before', 'After').replace('</p><ul>', '</p>\n<ul>'));
+    });
+
+    it('上一版正文有 b 與會被拒的連結：只改別段，其他區塊跟校樣上看到的一樣', async () => {
+      const { uuid, shown } = await diaryWith('<p>Before</p>\n<p><b>粗</b><a href="../x">相對</a></p>\n<p>後</p>');
+      fixture!.core.createRevision(uuid, { editedBody: shown.replace('Before', 'After') });
+      expect(fixture!.core.render(uuid).publishHtml).toBe(shown.replace('Before', 'After'));
+    });
+
+    it('基準區塊跟前端的判斷一致：同一份 publishHtml 在前端算的 dropped 是空的', async () => {
+      const { shown } = await diaryWith('<p>Before</p><ul class="other"><li><h2>Heading</h2><hr></li></ul>');
+      const { cleanRichEdit, richUnits } = await import('../src/contract/rich-text.js');
+      const { htmlToRich } = await import('../src/core/html-blocks.js');
+      const result = cleanRichEdit(htmlToRich(shown.replace('Before', 'After')), richUnits(htmlToRich(shown)), {
+        allowedTags: ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'br', 'hr'],
+        allowedSchemes: ['https', 'http', 'mailto'],
+      });
+      expect(result.dropped).toEqual([]);
+    });
+
+    it('改到那個區塊本身時照樣整理並提醒（不漏報）', async () => {
+      const { shown } = await diaryWith('<p>Before</p><ul class="other"><li><h2>Heading</h2><hr>tail</li></ul>');
+      const { cleanRichEdit, richUnits } = await import('../src/contract/rich-text.js');
+      const { htmlToRich } = await import('../src/core/html-blocks.js');
+      const result = cleanRichEdit(htmlToRich(shown.replace('Heading', 'Heading改')), richUnits(htmlToRich(shown)), {
+        allowedTags: ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'br', 'hr'],
+        allowedSchemes: ['https', 'http', 'mailto'],
+      });
+      expect(result.dropped).toEqual(['標題', '分隔線']);
+    });
+  });
+
   it('日記（flexible）同樣存得起來', async () => {
     fixture = await createCoreFixture();
     const { core } = fixture;

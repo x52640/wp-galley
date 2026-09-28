@@ -4,6 +4,7 @@ import {
   formatStateFrom,
   isCommandActive,
   decideEditSave,
+  emphasisFromComputed,
   isCommandEnabled,
   nextLinkEditor,
   parseLinkInput,
@@ -196,5 +197,38 @@ describe('F6：清單項目裡還包著段落（Google 文件貼上）', () => {
 
   it('清單外面的引用段落不受影響', () => {
     expect(formatStateFrom(['p', 'blockquote']).block).toBe('paragraph');
+  });
+});
+
+describe('第三輪 #6：粗／斜照游標處實際的樣式', () => {
+  it('strong 裡明講不粗的字：粗體不亮', () => {
+    const state = formatStateFrom(['span', 'strong', 'p'], { bold: false, italic: false });
+    expect(isCommandActive('bold', state)).toBe(false);
+  });
+
+  it('沒有 strong 但樣式是粗的（外面整段粗）：粗體亮', () => {
+    expect(formatStateFrom(['span', 'p'], { bold: true, italic: false }).bold).toBe(true);
+  });
+
+  it('斜體同理', () => {
+    expect(formatStateFrom(['span', 'em', 'p'], { bold: false, italic: false }).italic).toBe(false);
+    expect(formatStateFrom(['p'], { bold: false, italic: true }).italic).toBe(true);
+  });
+
+  it('標題本來就粗：粗體只看有沒有 strong／b', () => {
+    expect(formatStateFrom(['h2'], { bold: true, italic: false }).bold).toBe(false);
+    expect(formatStateFrom(['strong', 'h2'], { bold: true, italic: false }).bold).toBe(true);
+  });
+
+  it('拿不到樣式時退回看標籤', () => {
+    expect(formatStateFrom(['strong', 'p'], null).bold).toBe(true);
+  });
+
+  it('font-weight／font-style 的換算', () => {
+    expect(emphasisFromComputed('700', 'normal')).toEqual({ bold: true, italic: false });
+    expect(emphasisFromComputed('600', 'italic')).toEqual({ bold: true, italic: true });
+    expect(emphasisFromComputed('400', 'oblique 10deg')).toEqual({ bold: false, italic: true });
+    expect(emphasisFromComputed('bold', 'normal').bold).toBe(true);
+    expect(emphasisFromComputed('500', 'normal').bold).toBe(false);
   });
 });

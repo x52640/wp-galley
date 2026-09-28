@@ -9,7 +9,7 @@ import {
   type RichElement,
   type RichNode,
 } from '../src/contract/rich-text.js';
-import { htmlToRich, htmlToRichUnits, normalizeEditedBody } from '../src/core/html-blocks.js';
+import { htmlToRich, normalizeEditedBody } from '../src/core/html-blocks.js';
 
 /**
  * P5-T028：直接在文章上改時可以加格式。
@@ -265,7 +265,7 @@ describe('不變式：沒改過的合法正文，整理後逐字不變（審查 
     const original = ['<p>會改的一段</p>', ...LEGAL].join('\n');
     const edited = original.replace('會改的一段', '改過了');
     expect(editAgainst(original, edited)).toEqual({ html: edited, dropped: [] });
-    expect(normalizeEditedBody(edited, { previousBody: original })).toBe(edited);
+    expect(normalizeEditedBody(edited, { baseline: original })).toBe(edited);
   });
 
   it('全部接在一起（最外層用換行分隔，同後端的慣例）也不變', () => {
@@ -343,18 +343,10 @@ describe('新策略：沒改的頂層區塊原樣保留，只整理改過的（�
     expect(result.dropped).toEqual(['連結']);
   });
 
-  it('後端：沒改的區塊逐字用上一版的原始片段（連 <br/>、單引號這種寫法都不動）', () => {
-    const previous = "<p class='a'>一<br/>二</p>\n\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三</p>";
-    // 前端送回來的是瀏覽器序列化過的樣子。
+  it('後端：保留的區塊輸出基準的正規化 HTML（不拼原始字串片段）', () => {
+    const baseline = '<p class="a">一<br>二</p>\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三</p>';
     const edited = '<p class="a">一<br>二</p>\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三改過</p>';
-    expect(normalizeEditedBody(edited, { previousBody: previous })).toBe(
-      "<p class='a'>一<br/>二</p>\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三改過</p>",
-    );
-  });
-
-  it('後端：區塊切法與原始片段', () => {
-    const units = htmlToRichUnits('前面的字 <b>粗</b>\n<p>段</p>\n  \n<hr/>');
-    expect(units.map((unit) => unit.source)).toEqual(['前面的字 <b>粗</b>', '<p>段</p>', '<hr/>']);
+    expect(normalizeEditedBody(edited, { baseline })).toBe(edited);
   });
 
   it('頂層的字改過：跟前後的區塊分開整理，包成段落', () => {
@@ -444,5 +436,78 @@ describe('F5 連結網址規則（使用者 2026-09-28 裁定）', () => {
       html: '<p><a href="/about">站內</a>相對</p>',
       dropped: ['連結'],
     });
+  });
+});
+
+describe('Codex 第三輪 #3：「不粗／不斜」對任何元素都有效', () => {
+  it('連結帶 font-weight:normal：連結的字不粗，前後照粗', () => {
+    expect(edit('<p><strong>A<a href="/x" style="font-weight:normal">B</a>C</strong></p>').html).toBe(
+      '<p><strong>A</strong><a href="/x">B</a><strong>C</strong></p>',
+    );
+  });
+
+  it('清單、項目、段落帶 normal：裡面的字不被外層粗體包到', () => {
+    expect(paste('<b><ul style="font-weight:normal"><li>A</li></ul><p>B</p></b>')).toBe('<ul><li>A</li></ul><p><strong>B</strong></p>');
+    expect(paste('<b><ul><li style="font-weight:400">A</li><li>B</li></ul></b>')).toBe(
+      '<ul><li>A</li><li><strong>B</strong></li></ul>',
+    );
+    expect(paste('<i><p style="font-style:normal">A</p><p>B</p></i>')).toBe('<p>A</p><p><em>B</em></p>');
+  });
+
+  it('Google 文件最外層的 <b style="font-weight:normal" id="docs-internal-guid-…">：包整段時內容不會全變粗', () => {
+    const html =
+      '<b style="font-weight:normal;" id="docs-internal-guid-9f1e"><p dir="ltr"><span style="font-weight:400">一般</span>' +
+      '<span style="font-weight:700">粗</span></p><ul><li><span style="font-weight:400">項</span></li></ul></b>';
+    expect(paste(html)).toBe('<p>一般<strong>粗</strong></p><ul><li>項</li></ul>');
+    expect(paste('<b style="font-weight:normal" id="docs-internal-guid-1">純文字 <span style="font-weight:700">粗</span></b>')).toBe(
+      '純文字 <strong>粗</strong>',
+    );
+  });
+});
+
+describe('Codex 第三輪 #4：圖片連結', () => {
+  it('<a> 包著圖片區塊：連結移進 figure 包住 img（古騰堡圖片連結的寫法），不消失', () => {
+    expect(
+      edit('<a href="/image"><figure class="wp-block-image size-large"><img src="https://a.test/i.jpg" alt="" class="wp-image-7"></figure></a>'),
+    ).toEqual({
+      html: '<figure class="wp-block-image size-large"><a href="/image"><img src="https://a.test/i.jpg" alt="" class="wp-image-7"></a></figure>',
+      dropped: [],
+    });
+  });
+
+  it('已經是 figure > a > img 的：原樣', () => {
+    const html = '<figure class="wp-block-image"><a href="https://a.test/big.jpg"><img src="https://a.test/i.jpg" alt=""></a><figcaption class="wp-element-caption">說明</figcaption></figure>';
+    expect(edit(html)).toEqual({ html, dropped: [] });
+  });
+
+  it('連結包著圖片與文字：圖片、文字各自帶連結', () => {
+    expect(edit('<a href="/x"><figure><img src="https://a.test/i.jpg" alt=""></figure>說明</a>').html).toBe(
+      '<figure><a href="/x"><img src="https://a.test/i.jpg" alt=""></a></figure>\n<p class="wp-block-paragraph"><a href="/x">說明</a></p>',
+    );
+  });
+});
+
+describe('Codex 第三輪 #5：http(s) 一定要有主機', () => {
+  it('https:next、http:/x、https:///x 不收', () => {
+    for (const href of ['https:next', 'http:/x', 'https:///x', 'https://', 'http:\\\\evil.test', 'https:%2F%2Fevil.test']) {
+      expect(safeHref(href, SCHEMES), href).toBeNull();
+    }
+  });
+
+  it('合法的絕對網址收，而且回傳原本的寫法（不改寫成正規化形式）', () => {
+    expect(safeHref('https://a.test', SCHEMES)).toBe('https://a.test');
+    expect(safeHref('https://例子.測試/路徑?q=一', SCHEMES)).toBe('https://例子.測試/路徑?q=一');
+    expect(safeHref('HTTP://A.test:8080/x', SCHEMES)).toBe('HTTP://A.test:8080/x');
+  });
+
+  it('mailto 要有收件人', () => {
+    expect(safeHref('mailto:a@b.c', SCHEMES)).toBe('mailto:a@b.c');
+    expect(safeHref('mailto:', SCHEMES)).toBeNull();
+    expect(safeHref('mailto://evil.test', SCHEMES)).toBeNull();
+  });
+
+  it('編輯與貼上都照同一套：沒主機的連結只留字', () => {
+    expect(paste('<p><a href="https:next">下一篇</a></p>')).toBe('<p>下一篇</p>');
+    expect(edit('<p><a href="https:next">下一篇</a></p>')).toEqual({ html: '<p>下一篇</p>', dropped: ['連結'] });
   });
 });

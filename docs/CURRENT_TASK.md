@@ -13,7 +13,7 @@
 ## 進行中
 
 - [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），已 commit，**PR 待 Codex 審查與使用者合併**；之後待使用者手動驗證（只存草稿）
-  （verify 65 檔 / 1271 測試，未 commit）。
+  （verify 65 檔 / 1294 測試，未 commit）。
 - [P5-T027](tasks/P5-T027-keep-edited-brief.md)：使用者改過的配圖描述不被 AI 蓋掉（D-027），已 commit（審查 3 條低度，只改文件說法），**待使用者手動驗證**。
 - P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。蓋掉使用者改過描述的問題 → P5-T027。
 - [P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），已 commit（審查後修 3 條），**待使用者手動驗證**（真實 CLI 是否接受新 schema、是否用官方英文片名；只存草稿）。
@@ -46,6 +46,10 @@
 `plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
 
 ## 已知殘餘（記錄，不擋進度）
+
+- 帶連結的圖片（`<figure><a href><img></a></figure>`）存得住、連結不丟，但發布時 `block-parse.ts` 還不認得 figure 裡的 `<a>`，
+  整塊會走 wp:html 保底，不是帶 `linkDestination: custom` 的圖片區塊。要改 `block-parse.ts`／`block-types.ts`／`block-serialize.ts`
+  （P5-T028 的 write_paths 只含最後一個），另開 Task（P5-T028 第三輪審查 #4）。
 
 - 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
   `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。

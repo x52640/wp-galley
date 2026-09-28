@@ -65,6 +65,9 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
   F3 改過的區塊裡攤平標題／引用／分隔線要進 dropped；F4 `font-weight/font-style: normal` 把外層 strong／em 切開；
   F5 連結網址規則統一成 `safeHref`（使用者 2026-09-28 裁定：`#` 與單一 `/` 站內路徑收，其他相對路徑拒絕並提醒），sanitize 也用它；
   F6 游標在 li 裡就是清單情境。verify 65 檔 / 1271 測試
+- Codex 第三輪（6 條）已修（未 commit）：比對基準改成上一版 sanitize 後的 publishHtml（前後端同一份），保留的區塊輸出基準的
+  正規化 HTML、不拼原始字串；「不粗／不斜」對任何元素有效；連結包圖片區塊時移進 figure（發布走 wp:html，見 CURRENT_TASK 殘餘）；
+  http(s) 必須有主機；工具列粗／斜照實際樣式。verify 65 檔 / 1294 測試
 - 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 

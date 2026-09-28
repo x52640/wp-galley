@@ -31,7 +31,7 @@ interface CoreService {
   /**
    * `editedBody`：直接在文章上改，只換正文，先經 normalizeEditedBody 整理（P5-T010）。
    * 整理規則跟前端存檔前同一份（`contract/rich-text.ts`，P5-T028），並帶模板的 allowedSchemes：不收的連結拆成純文字。
-   * 帶上一版的正文（base.templateData 的 publishSlot）：沒改的頂層區塊逐字保留，只整理改過的。
+   * 帶基準＝上一版正文經 sanitize 與補段落後實際會發布的樣子（跟前端校樣同一份）：沒改的頂層區塊輸出基準的 HTML，只整理改過的。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;
   listRevisions(uuid: string): Revision[];

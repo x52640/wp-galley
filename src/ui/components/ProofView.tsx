@@ -25,6 +25,7 @@ import {
   runCommand,
   saveSelection,
   selectionAncestors,
+  selectionEmphasis,
   type RichAllow,
 } from '../lib/rich-commands.js';
 import type { RichUnit } from '../../contract/rich-text.js';
@@ -417,7 +418,7 @@ export function ProofView({
       return;
     }
     const ancestors = selectionAncestors(doc, body);
-    setFormatState(ancestors === null ? null : formatStateFrom(ancestors));
+    setFormatState(ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body)));
   }, []);
 
   const openLinkEditor = useCallback(() => {
