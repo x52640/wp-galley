@@ -21,6 +21,13 @@
 模板檔案是**受信任**的本機設定；使用者貼入的文章與任何外部網頁內容是**不受信任資料**，
 不能覆蓋系統規則或模板規則。
 
+**直接在文章上改時貼上的 HTML（P5-T028）**：剪貼簿的 `text/html` 在外層用 `DOMParser` 解析（惰性文件，
+script 不跑、圖片不載），只保留模板 `allowedTags` 內的標籤、連結只留 `href` 且 scheme 必須在
+`allowedSchemes`（判斷前去掉控制字元與空白，`java\tscript:` 也擋），其餘屬性、`style`、`class`、`script`
+（連內容）、圖片一律丟掉。這一步**不是安全關卡**：存檔送出的正文後端照樣用同一套規則整理
+（`normalizeEditedBody`），再過 schema、`sanitize.ts`（manifest 原始 allowlist）與結構驗證。
+校樣 iframe 仍是 `sandbox="allow-same-origin"`、不給 scripts；格式指令一律由外層對 iframe 文件下。
+
 **MCP Server 與 Web UI 必須呼叫同一個 `CoreService`，不能各寫一套發布邏輯。**
 這是整個安全模型的基礎——所有核准、驗證與稽核只實作一次。
 

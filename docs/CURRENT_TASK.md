@@ -12,7 +12,8 @@
 
 ## 進行中
 
-- [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），`in_progress`。
+- [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），已 commit，**PR 待 Codex 審查與使用者合併**；之後待使用者手動驗證（只存草稿）
+  （verify 65 檔 / 1213 測試，未 commit）。
 - [P5-T027](tasks/P5-T027-keep-edited-brief.md)：使用者改過的配圖描述不被 AI 蓋掉（D-027），已 commit（審查 3 條低度，只改文件說法），**待使用者手動驗證**。
 - P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。蓋掉使用者改過描述的問題 → P5-T027。
 - [P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），已 commit（審查後修 3 條），**待使用者手動驗證**（真實 CLI 是否接受新 schema、是否用官方英文片名；只存草稿）。
@@ -58,7 +59,7 @@
 - ~~prompt 同時帶過期的原稿（sourceText）~~ → P5-T017 已處理：prompt 只送目前這一版；sourceText 仍是
   「最早貼上的原稿」的紀錄，不跟著更新（刻意的）。模板 `rules.md` 裡還有「原稿」的字眼（指使用者的文章，
   不是那份過期的稿子），在 `templates/`，P5-T017 沒動。
-- 直接在文章上改的整理規則只處理頂層：巢狀 `div`（例如清單項目裡）不轉成段落、空標題不刪（P5-T010 審查，少見）。
+- ~~直接在文章上改的整理規則只處理頂層：巢狀 `div` 不轉成段落、空標題不刪~~ → P5-T028 已處理（清單項目、引用裡的 div，空標題刪掉）。
 - 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
   以 spec 為準。
 - 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。

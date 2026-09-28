@@ -110,6 +110,10 @@ const PAGE_TARGET: PublishTargetSummary = {
   allowCreateTerms: false,
 };
 
+/** 模板允許的正文標籤（照 templates 底下各模板的 manifest.json 抄；示範資料沒有後端可以問）。 */
+const TEMPLATE_TAGS = ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'figure', 'figcaption', 'img', 'br', 'hr'];
+const TEMPLATE_SCHEMES = ['https', 'http', 'mailto'];
+
 /** 只用核心區塊、沒有字級 class：通用模板不帶任何佈景主題設定。 */
 const ARTICLE_BODY = [
   '<p>第一次架站的人最常問的問題，不是「要用哪個佈景主題」，而是「文章要怎麼寫才不會亂」。</p>',
@@ -620,7 +624,7 @@ function baseDiary(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'SOURCE',
     title: '20260828',
     target: DIARY_TARGET,
-    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible' },
+    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
     currentRevision: revision(1, 'source', { title: '20260828', slug: '20260828', body: DIARY_BODY }, '3a91c0d4e8b25f77'),
     revisionCount: 1,
     previewUrl: `/api/jobs/${uuid}/preview`,
@@ -646,7 +650,7 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
     state: 'RENDERED',
     title: '看得見的錯誤',
     target: LONGFORM_TARGET,
-    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid' },
+    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
     currentRevision: revision(
       3,
       'agent_review',
@@ -677,7 +681,7 @@ function baseArticle(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'RENDERED',
     title: '文章要怎麼寫才不會亂',
     target: POST_TARGET,
-    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid' },
+    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
     currentRevision: revision(
       1,
       'source',

@@ -1,11 +1,11 @@
 ---
 id: P5-T028
 phase: 5
-status: in_progress
+status: done
 depends_on: []
 specs: [review-proposals.md, templates.md, security.md, design-system.md, http-api.md, core-service.md]
 write_paths: ["src/ui/", "src/core/", "src/templates/", "src/contract/", "src/wordpress/block-serialize.ts", "tests/", "docs/specs/", "docs/tasks/P5-T028-rich-edit-toolbar.md", "docs/CURRENT_TASK.md"]
-contract_change: none
+contract_change: additive
 expected_commit: "feat(P5-T028): 直接在文章上改時可以加格式"
 ---
 
@@ -52,9 +52,12 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立（2026-09-28）
-- 已通過驗證：—
-- 下一步：派實作 subagent；commit 後跑 Codex review 讀 diff（使用者要求）
+- 最後完成：實作（subagent，2026-09-28）：共用整理規則 `src/contract/rich-text.ts`（前端貼上／存檔、後端 normalizeEditedBody
+  共用）、工具列 `FormatBar.tsx`＋`lib/rich-format.ts`（純規則）＋`lib/rich-commands.ts`（對 iframe 下指令）、sanitize 的 b/i 轉換、
+  `JobDetail.template` 加 `allowedTags`／`allowedSchemes`（契約新增欄位）、spec 更新
+- 已通過驗證：`npm run verify` 65 檔 / 1213 測試；`?fixtures=1` 用無頭 Chrome 走過工具列、⌘B／⌘I／⌘K、連結輸入框（擋 javascript:）、
+  貼上髒 HTML、存檔、不支援格式的提醒
+- 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 
 ## 完成結果

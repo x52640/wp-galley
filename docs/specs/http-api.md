@@ -82,11 +82,14 @@
 - `review/accept-all` 與 `DELETE /review` 要帶 `proposalId`：這兩個是整份操作，只認
   「目前那一份」的話，確認對話框開著的時候如果又跑了一次校稿，按下去就會作用在使用者
   沒看過的那一份上。逐項處理不需要——`itemIds` 本身就只屬於某一份提案。
+- `JobDetail.template` 帶 `allowedTags` 與 `allowedSchemes`（manifest 原樣，P5-T028）：格式工具列出現哪些按鈕、
+  貼上保留哪些標籤、連結收哪些 scheme 都照它。只是給畫面用；後端驗證仍讀 manifest 本身。
 - `AgentRunResult.imageBriefs` 是 Agent 交回來的原樣（`ImageBriefDraft`，沒有 id）；
   存進去之後的樣子在 `JobDetail.imageBriefs`（`ImageBrief`）。
 - `POST /revisions` 的 `editedBody` 與 `templateData` 互斥：`editedBody` 是「直接在文章上改」送回來的正文，
-  只換正文、其他欄位沿用上一版；後端先整理瀏覽器編輯器的雜訊（`b`→`strong`、拆 `span` 等，
-  `src/core/html-blocks.ts` 的 `normalizeEditedBody`），再照常走 schema、sanitize、結構驗證。
+  只換正文、其他欄位沿用上一版；後端先整理瀏覽器編輯器的雜訊（`b`→`strong`、拆 `span`、`<p><ul>`、
+  `ul` 直接包 `ul`、清單項目裡的 div、h1→h2 等，`src/core/html-blocks.ts` 的 `normalizeEditedBody`，
+  規則本體在共用契約 `src/contract/rich-text.ts`，前端存檔前用同一份整理過一次），再照常走 schema、sanitize、結構驗證。
   它不是信任來源。沒改內容時前端不送；整理後跟目前這一版相同（例如只多按一個 Enter）時後端不建新版本、
   不撤銷核准，回傳目前那一版。
   `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下

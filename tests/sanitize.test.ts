@@ -89,3 +89,18 @@ describe('回報被移除了什麼', () => {
     expect(result.removedTags).toEqual([]);
   });
 });
+
+describe('b／i 轉成 strong／em，不是拆掉（P5-T028）', () => {
+  it('allowlist 有 strong／em、沒有 b／i 時轉換', () => {
+    expect(clean('<p>一<b>二</b><i>三</i></p>')).toBe('<p>一<strong>二</strong><em>三</em></p>');
+  });
+
+  it('轉換過的不算被移除', () => {
+    const report = sanitizeBody('<p><b>二</b><u>底</u></p>', manifest);
+    expect(report.removedTags).toEqual(['u']);
+  });
+
+  it('b 身上的屬性照 strong 的規則處理', () => {
+    expect(clean('<p><b style="color:red" onclick="x()">二</b></p>')).toBe('<p><strong>二</strong></p>');
+  });
+});

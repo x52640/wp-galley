@@ -630,7 +630,13 @@ export class CoreService {
           }
         : null,
       template: template
-        ? { id: template.manifest.id, hash: template.hash, strictness: template.manifest.strictness }
+        ? {
+            id: template.manifest.id,
+            hash: template.hash,
+            strictness: template.manifest.strictness,
+            allowedTags: [...template.manifest.allowedTags],
+            allowedSchemes: [...template.manifest.allowedSchemes],
+          }
         : null,
       currentRevision: revision,
       revisionCount: this.repo.listRevisions(job.id).length,
@@ -745,7 +751,7 @@ export class CoreService {
     const templateData =
       input.editedBody === undefined
         ? (input.templateData ?? base.templateData)
-        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody) };
+        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody, { allowedSchemes: template.manifest.allowedSchemes }) };
 
     const payload: RevisionPayload = {
       templateData,

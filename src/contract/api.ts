@@ -345,6 +345,13 @@ export interface JobTemplate {
   readonly id: string;
   readonly hash: string;
   readonly strictness: string;
+  /**
+   * 模板允許的正文標籤（manifest 的 allowedTags）。直接在文章上改的格式工具列靠它決定出現哪些按鈕，
+   * 貼上也只保留這些（P5-T028）。後端 sanitize 仍用 manifest 原始規則再驗一次。
+   */
+  readonly allowedTags: readonly string[];
+  /** 連結可用的 scheme（manifest 的 allowedSchemes）。連結輸入框只收這些。 */
+  readonly allowedSchemes: readonly string[];
 }
 
 export interface Revision {

@@ -43,8 +43,22 @@ function buildOptions(manifest: TemplateManifest): sanitizeHtml.IOptions {
     // script / style 的**內容**也要丟掉，不能只拿掉標籤留下程式碼。
     nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript'],
     disallowedTagsMode: 'discard',
+    // 瀏覽器編輯器與外來內容常用 b／i；模板認得的是 strong／em。拆掉的話粗體會靜靜消失（P5-T028）。
+    transformTags: renameTags(manifest),
   };
 }
+
+/** b→strong、i→em：只在模板允許目標、不允許來源時轉換。轉換後的標籤照目標的屬性規則處理。 */
+function renameTags(manifest: TemplateManifest): Record<string, string> {
+  const allowed = new Set(manifest.allowedTags.map((tag) => tag.toLowerCase()));
+  const renames: Record<string, string> = {};
+  for (const [from, to] of Object.entries(SEMANTIC_RENAMES)) {
+    if (allowed.has(to) && !allowed.has(from)) renames[from] = to;
+  }
+  return renames;
+}
+
+const SEMANTIC_RENAMES: Readonly<Record<string, string>> = { b: 'strong', i: 'em' };
 
 export function sanitizeBody(html: string, manifest: TemplateManifest): SanitizeReport {
   const removedTags = new Set<string>();
@@ -57,8 +71,11 @@ export function sanitizeBody(html: string, manifest: TemplateManifest): Sanitize
 
   // 先掃一遍原始 HTML，記下哪些標籤與屬性不在 allowlist。
   const allowedTagSet = new Set(manifest.allowedTags.map((t) => t.toLowerCase()));
+  const renames = renameTags(manifest);
   for (const match of html.matchAll(/<\s*([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g)) {
-    const tag = match[1]!.toLowerCase();
+    const raw = match[1]!.toLowerCase();
+    // 會被轉換的（b→strong）不算移除，屬性照轉換後的標籤檢查。
+    const tag = renames[raw] ?? raw;
     if (!allowedTagSet.has(tag)) {
       removedTags.add(tag);
       continue;

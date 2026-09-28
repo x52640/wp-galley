@@ -21,6 +21,50 @@ const PATHS: Record<string, JSX.Element> = {
     </>
   ),
   check: <path d="M20 6 9 17l-5-5" />,
+  // 格式工具列（P5-T028）
+  bold: <path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" />,
+  italic: (
+    <>
+      <line x1="19" x2="10" y1="4" y2="4" />
+      <line x1="14" x2="5" y1="20" y2="20" />
+      <line x1="15" x2="9" y1="4" y2="20" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </>
+  ),
+  list: (
+    <>
+      <path d="M3 12h.01" />
+      <path d="M3 18h.01" />
+      <path d="M3 6h.01" />
+      <path d="M8 12h13" />
+      <path d="M8 18h13" />
+      <path d="M8 6h13" />
+    </>
+  ),
+  'list-ordered': (
+    <>
+      <path d="M10 12h11" />
+      <path d="M10 18h11" />
+      <path d="M10 6h11" />
+      <path d="M4 10h2" />
+      <path d="M4 6h1v4" />
+      <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+    </>
+  ),
+  'text-quote': (
+    <>
+      <path d="M17 6H3" />
+      <path d="M21 12H8" />
+      <path d="M21 18H8" />
+      <path d="M3 12v6" />
+    </>
+  ),
+
   'check-circle': (
     <>
       <circle cx="12" cy="12" r="10" />
