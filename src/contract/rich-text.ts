@@ -227,10 +227,24 @@ export function parseStyle(style: string): Map<string, string> {
   let current = '';
   let quote: string | null = null;
   let depth = 0;
-  for (const ch of style) {
+  for (let i = 0; i < style.length; i++) {
+    const ch = style[i]!;
+    // 跳脫：下一個字元照字面（`\"`、`\'`、`\;` 都不會結束引號或宣告）。
+    if (ch === '\\') {
+      current += ch + (style[i + 1] ?? '');
+      i += 1;
+      continue;
+    }
     if (quote !== null) {
       current += ch;
       if (ch === quote) quote = null;
+      continue;
+    }
+    // CSS 註解（引號外）：整段拿掉，裡面的 `;`、`:` 不算數（第五輪審查 #1）。
+    if (ch === '/' && style[i + 1] === '*') {
+      const close = style.indexOf('*/', i + 2);
+      i = close < 0 ? style.length : close + 1;
+      current += ' ';
       continue;
     }
     if (ch === '"' || ch === "'") quote = ch;
@@ -252,11 +266,29 @@ export function parseStyle(style: string): Map<string, string> {
     if (name.length === 0 || value.length === 0) continue;
     const important = /!\s*important\s*$/i.test(value);
     if (important) value = value.replace(/!\s*important\s*$/i, '').trim();
+    value = value.toLowerCase();
+    // 無效的宣告整條忽略，不覆蓋前面有效的（CSS 規則；第五輪審查 #2）。只判斷我們會讀的兩個屬性。
+    if (!isValidDeclaration(name, value)) continue;
     const previous = result.get(name);
     if (previous !== undefined && previous.important && !important) continue;
-    result.set(name, { value: value.toLowerCase(), important });
+    result.set(name, { value, important });
   }
   return new Map([...result].map(([name, entry]) => [name, entry.value]));
+}
+
+const CSS_WIDE = /^(inherit|initial|unset|revert|revert-layer)$/;
+
+function isValidDeclaration(name: string, value: string): boolean {
+  if (value.length === 0) return false;
+  if (name === 'font-weight') {
+    if (CSS_WIDE.test(value) || /^(normal|bold|bolder|lighter)$/.test(value)) return true;
+    const weight = /^\d+(\.\d+)?$/.test(value) ? Number(value) : NaN;
+    return weight >= 1 && weight <= 1000;
+  }
+  if (name === 'font-style') {
+    return CSS_WIDE.test(value) || /^(normal|italic|oblique)$/.test(value) || /^oblique\s+-?\d+(\.\d+)?(deg|grad|rad|turn)$/.test(value);
+  }
+  return true;
 }
 
 function styleOf(attrs: readonly RichAttr[]): Map<string, string> {
@@ -267,9 +299,11 @@ function styleOf(attrs: readonly RichAttr[]): Map<string, string> {
 function styleBold(style: ReadonlyMap<string, string>): boolean | null {
   const value = style.get('font-weight');
   if (value === undefined) return null;
-  if (/^(bold|bolder)$/.test(value) || /^[6-9]00$/.test(value)) return true;
-  if (/^(normal|lighter)$/.test(value) || /^[1-5]00$/.test(value)) return false;
-  return null;
+  if (value === 'bold' || value === 'bolder') return true;
+  if (value === 'normal' || value === 'lighter') return false;
+  const weight = Number(value);
+  if (!Number.isFinite(weight)) return null; // inherit 之類：沒明講
+  return weight >= 600;
 }
 
 function styleItalic(style: ReadonlyMap<string, string>): boolean | null {

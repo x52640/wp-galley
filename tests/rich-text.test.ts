@@ -605,3 +605,37 @@ describe('Codex 第四輪', () => {
     expect(safeHref('https:/\t/evil.test', SCHEMES)).toBe('https:/\t/evil.test');
   });
 });
+
+describe('Codex 第五輪：parseStyle', () => {
+  it('#1 CSS 註解（含註解裡的 ; 與 :）整段拿掉', async () => {
+    const { parseStyle } = await import('../src/contract/rich-text.js');
+    expect(parseStyle('font-weight:/* x; font-weight:normal */bold').get('font-weight')).toBe('bold');
+    expect(parseStyle('/* a:b; */font-style:italic').get('font-style')).toBe('italic');
+    expect(paste('<span style="font-weight:700; /* ; font-weight: 400 */">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="/* 註解: 1; */ font-style:italic">A</span>')).toBe('<em>A</em>');
+    // 5cf03f5 的 parseStyle 把註解裡的 `font-weight: 400` 當成後一條宣告、蓋掉 700，粗體被丟掉；
+    // 在那之前的寫法（正規表示式取第一個 font-weight）這兩例是對的——這裡鎖住兩者一致。
+  });
+
+  it('#1 引號內的 /* 不是註解；跳脫的引號不會提早結束字串', async () => {
+    const { parseStyle } = await import('../src/contract/rich-text.js');
+    expect(parseStyle('font-family:"a/*b";font-weight:bold').get('font-weight')).toBe('bold');
+    expect(parseStyle('font-family:"a\\";font-weight:400";font-weight:700').get('font-weight')).toBe('700');
+    expect(parseStyle("font-family:'a\\';font-style:normal';font-style:italic").get('font-style')).toBe('italic');
+    expect(paste('<span style="font-family:&quot;x\\&quot;;y&quot;;font-weight:bold">A</span>')).toBe('<strong>A</strong>');
+  });
+
+  it('#2 後面無效的宣告不覆蓋前面有效的', () => {
+    expect(paste('<span style="font-weight:bold; font-weight:">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="font-weight:bold; font-weight: foo">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="font-style:italic; font-style: sideways">A</span>')).toBe('<em>A</em>');
+    expect(paste('<span style="font-weight:bold; font-weight:1001">A</span>')).toBe('<strong>A</strong>');
+  });
+
+  it('#2 有效的後值照常覆蓋；數字粗細照 600 為界', () => {
+    expect(paste('<span style="font-weight:bold; font-weight:300">A</span>')).toBe('A');
+    expect(paste('<span style="font-weight:650">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="font-style:oblique 10deg">A</span>')).toBe('<em>A</em>');
+    expect(edit('<p><strong>A<span style="font-weight:inherit">B</span></strong></p>').html).toBe('<p><strong>AB</strong></p>');
+  });
+});
