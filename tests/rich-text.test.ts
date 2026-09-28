@@ -511,3 +511,97 @@ describe('Codex 第三輪 #5：http(s) 一定要有主機', () => {
     expect(edit('<p><a href="https:next">下一篇</a></p>')).toEqual({ html: '<p>下一篇</p>', dropped: ['連結'] });
   });
 });
+
+describe('Codex 第四輪', () => {
+  it('#1 mso-bidi-font-weight 不是 font-weight（Word 貼上的真實樣本）', () => {
+    expect(edit('<p><strong>A<a href="https://example.test" style="mso-bidi-font-weight:normal">B</a>C</strong></p>').html).toBe(
+      '<p><strong>A<a href="https://example.test">B</a>C</strong></p>',
+    );
+    const word =
+      "<p class=MsoNormal><b><span lang=EN-US style='font-size:12.0pt;mso-bidi-font-size:11.0pt;mso-bidi-font-weight:normal'>粗</span></b>" +
+      "<i><span style='mso-bidi-font-style:normal'>斜</span></i><span style='mso-bidi-font-weight:bold'>不粗</span></p>";
+    expect(paste(word)).toBe('<p><strong>粗</strong><em>斜</em>不粗</p>');
+  });
+
+  it('#1 照 CSS 規則：後面的宣告覆蓋前面、!important 優先、引號裡的分號不算分隔', () => {
+    expect(paste('<span style="font-weight:700;font-weight:400">A</span>')).toBe('A');
+    expect(paste('<span style="font-weight:400;font-weight:700">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="font-weight:700 !important;font-weight:400">A</span>')).toBe('<strong>A</strong>');
+    expect(paste('<span style="font-family:\'a;font-weight:700\';font-style:ITALIC">A</span>')).toBe('<em>A</em>');
+  });
+
+  it('#1 parseStyle 本身', async () => {
+    const { parseStyle } = await import('../src/contract/rich-text.js');
+    expect([...parseStyle(' Font-Weight : Bold ; mso-bidi-font-weight:normal; ;broken')]).toEqual([
+      ['font-weight', 'bold'],
+      ['mso-bidi-font-weight', 'normal'],
+    ]);
+    expect(parseStyle('color:red !important; color:blue').get('color')).toBe('red');
+    expect(parseStyle('color:red !important; color:blue ! important').get('color')).toBe('blue');
+  });
+
+  it('#2 巢狀 strong 裡的不粗字：外層也在那裡斷開，同名巢狀合併成一層', () => {
+    expect(edit('<p><strong><strong>A<span style="font-weight:normal">B</span>C</strong></strong></p>').html).toBe(
+      '<p><strong>A</strong>B<strong>C</strong></p>',
+    );
+    expect(edit('<p><em><em>A<span style="font-style:normal">B</span>C</em></em></p>').html).toBe('<p><em>A</em>B<em>C</em></p>');
+    expect(edit('<p><b><span style="font-weight:700">A<span style="font-weight:normal">B</span></span></b></p>').html).toBe(
+      '<p><strong>A</strong>B</p>',
+    );
+    expect(edit('<p><strong>A<strong>B</strong></strong></p>').html).toBe('<p><strong>AB</strong></p>');
+  });
+
+  it('#3 貼上行內片段：前後空白留著', () => {
+    expect(paste('<span> brave </span>')).toBe(' brave ');
+    expect(paste(' brave ')).toBe(' brave ');
+    expect(paste('a <b>b</b> c')).toBe('a <strong>b</strong> c');
+  });
+
+  it('#3 原始碼排版的頭尾換行不算', () => {
+    expect(paste('\n  <span>x</span>\n')).toBe('x');
+    expect(paste('\n  前面 <b>粗</b> 後面\n')).toBe('前面 <strong>粗</strong> 後面');
+  });
+
+  it('#3 貼上多段：每段頭尾修剪、段內空白留著', () => {
+    expect(paste('<p> 一 <b>二</b> </p>\n<p>三  四</p>')).toBe('<p>一 <strong>二</strong></p><p>三  四</p>');
+  });
+
+  it('#4 連結包著有圖說的圖片：圖片與圖說都帶連結', () => {
+    expect(edit('<a href="/x"><figure><img src="https://a.test/i.jpg" alt=""><figcaption>Caption</figcaption></figure></a>')).toEqual({
+      html: '<figure><a href="/x"><img src="https://a.test/i.jpg" alt=""></a><figcaption><a href="/x">Caption</a></figcaption></figure>',
+      dropped: [],
+    });
+  });
+
+  it('#4 figure 裡 <p><img></p>：被包住的圖片也帶連結', () => {
+    expect(edit('<a href="/x"><figure><p><img src="https://a.test/i.jpg" alt=""></p></figure></a>').html).toBe(
+      '<figure><p><a href="/x"><img src="https://a.test/i.jpg" alt=""></a></p></figure>',
+    );
+  });
+
+  it('#4 圖說裡已經有自己的連結（DOM 才做得出來，HTML 解析器會自己拆開）：外層連結包不進去，要提醒', () => {
+    const img = el('img', [], [{ name: 'src', value: 'https://a.test/i.jpg' }, { name: 'alt', value: '' }]);
+    const tree = [
+      el('a', [el('figure', [img, el('figcaption', [t('看'), el('a', [t('這裡')], [{ name: 'href', value: '/y' }])])])], [
+        { name: 'href', value: '/x' },
+      ]),
+    ];
+    expect(edit(tree)).toEqual({
+      html: '<figure><a href="/x"><img src="https://a.test/i.jpg" alt=""></a><figcaption>看<a href="/y">這裡</a></figcaption></figure>',
+      dropped: ['連結'],
+    });
+  });
+
+  it('#5 tab／LF／CR 冒充主機的都不收', () => {
+    for (const href of ['https://\t/evil.test', 'https://\n/evil.test', 'https://\r/evil.test', 'https://\t\\evil.test', ' \u0001https:///evil.test', 'https:\n//\n/evil.test']) {
+      expect(safeHref(href, SCHEMES), JSON.stringify(href)).toBeNull();
+    }
+    expect(paste('<p><a href="https://&#9;/evil.test">x</a></p>')).toBe('<p>x</p>');
+  });
+
+  it('#5 拿掉 tab／換行之後是合法網址的仍收（瀏覽器看到的也是那個網址），回傳原字串', () => {
+    expect(safeHref('https://a.te\tst/x', SCHEMES)).toBe('https://a.te\tst/x');
+    // 瀏覽器眼中就是 https://evil.test：絕對外站連結，跟直接寫 https://evil.test 一樣收。
+    expect(safeHref('https:/\t/evil.test', SCHEMES)).toBe('https:/\t/evil.test');
+  });
+});

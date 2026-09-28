@@ -68,6 +68,9 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
 - Codex 第三輪（6 條）已修（未 commit）：比對基準改成上一版 sanitize 後的 publishHtml（前後端同一份），保留的區塊輸出基準的
   正規化 HTML、不拼原始字串；「不粗／不斜」對任何元素有效；連結包圖片區塊時移進 figure（發布走 wp:html，見 CURRENT_TASK 殘餘）；
   http(s) 必須有主機；工具列粗／斜照實際樣式。verify 65 檔 / 1294 測試
+- Codex 第四輪（5 條）已修（未 commit）：style 照 CSS 規則逐條解析（mso-bidi-* 不再誤判）；「不粗／不斜」標記傳到所有祖先、
+  巢狀同名 strong／em 合併；行內貼上保留前後空白；連結包圖片時圖說與被包住的圖片都帶連結、包不進去的進 dropped；
+  網址主機檢查先拿掉 tab／LF／CR 與頭尾控制字元。verify 65 檔 / 1306 測試
 - 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 

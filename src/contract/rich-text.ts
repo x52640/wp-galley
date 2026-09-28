@@ -147,13 +147,17 @@ export function safeHref(raw: string, schemes: readonly string[]): string | null
   if (!schemes.some((allowed) => allowed.toLowerCase() === scheme)) return null;
   // 還原成原字串之後 scheme 不一樣（中間夾了控制字元），就不收。
   if (!value.toLowerCase().startsWith(`${scheme}:`)) return null;
-  const rest = value.slice(scheme.length + 1);
+  // 瀏覽器解析網址前會拿掉的字元：頭尾的控制字元與空白、任何位置的 tab／LF／CR。語法檢查要看拿掉之後的樣子，
+  // 不然 `https://<tab>/evil.test` 會用 tab 冒充主機、瀏覽器卻當成 `https:///evil.test`（第四輪審查 #5）。
+  // eslint-disable-next-line no-control-regex
+  const seen = value.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').replace(/[\t\n\r]/g, '');
+  const rest = seen.slice(scheme.length + 1);
   if (scheme === 'http' || scheme === 'https') {
     // 一定要是 `https://主機…`：`https:next` 沒有主機，瀏覽器會照目前頁面解析成站內路徑（第三輪審查 #5）。
     // `https:///x` 瀏覽器會自己補成 `https://x/`，寫法可疑，也不收。
     if (!/^\/\/[^/\\]/.test(rest)) return null;
     try {
-      const parsed = new URL(value);
+      const parsed = new URL(seen);
       if (parsed.hostname.length === 0) return null;
     } catch {
       return null;
@@ -212,24 +216,67 @@ function reportDropped(ctx: Context, tag: string, children: readonly RichNode[])
   addLabel(ctx.dropped, label);
 }
 
-function styleOf(attrs: readonly RichAttr[]): string {
-  return attrs.find((attr) => attr.name === 'style')?.value.toLowerCase() ?? '';
+/**
+ * 解析 style 屬性成「屬性名 → 值」（第四輪審查 #1）。照 CSS 規則：逐條宣告、屬性名完全相符
+ * （`mso-bidi-font-weight` 不是 `font-weight`）、後面的覆蓋前面的，但 `!important` 的只會被後面同樣
+ * `!important` 的覆蓋。引號與括號裡的分號不算分隔（`font-family:"a;b"`、`url(a;b)`）。
+ */
+export function parseStyle(style: string): Map<string, string> {
+  const result = new Map<string, { value: string; important: boolean }>();
+  const declarations: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let depth = 0;
+  for (const ch of style) {
+    if (quote !== null) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    else if (ch === ';' && depth === 0) {
+      declarations.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  declarations.push(current);
+  for (const declaration of declarations) {
+    const colon = declaration.indexOf(':');
+    if (colon < 0) continue;
+    const name = declaration.slice(0, colon).trim().toLowerCase();
+    let value = declaration.slice(colon + 1).trim();
+    if (name.length === 0 || value.length === 0) continue;
+    const important = /!\s*important\s*$/i.test(value);
+    if (important) value = value.replace(/!\s*important\s*$/i, '').trim();
+    const previous = result.get(name);
+    if (previous !== undefined && previous.important && !important) continue;
+    result.set(name, { value: value.toLowerCase(), important });
+  }
+  return new Map([...result].map(([name, entry]) => [name, entry.value]));
+}
+
+function styleOf(attrs: readonly RichAttr[]): Map<string, string> {
+  return parseStyle(attrs.find((attr) => attr.name === 'style')?.value ?? '');
 }
 
 /** 樣式裡的粗體：true＝粗、false＝明講不粗、null＝沒講。 */
-function styleBold(style: string): boolean | null {
-  const match = /font-weight\s*:\s*([^;]+)/.exec(style);
-  if (!match) return null;
-  const value = match[1]!.trim();
-  if (/^(bold|bolder)\b/.test(value) || /^[6-9]00\b/.test(value)) return true;
-  if (/^(normal|lighter)\b/.test(value) || /^[1-5]00\b/.test(value)) return false;
+function styleBold(style: ReadonlyMap<string, string>): boolean | null {
+  const value = style.get('font-weight');
+  if (value === undefined) return null;
+  if (/^(bold|bolder)$/.test(value) || /^[6-9]00$/.test(value)) return true;
+  if (/^(normal|lighter)$/.test(value) || /^[1-5]00$/.test(value)) return false;
   return null;
 }
 
-function styleItalic(style: string): boolean | null {
-  const match = /font-style\s*:\s*([^;]+)/.exec(style);
-  if (!match) return null;
-  return /^(italic|oblique)\b/.test(match[1]!.trim()) ? true : /^normal\b/.test(match[1]!.trim()) ? false : null;
+function styleItalic(style: ReadonlyMap<string, string>): boolean | null {
+  const value = style.get('font-style');
+  if (value === undefined) return null;
+  if (/^(italic|oblique)\b/.test(value)) return true;
+  return value === 'normal' ? false : null;
 }
 
 /** 標題層級照模板允許的挑最近的一個：h1→h2、h4 以下→h3；都不允許就變段落（null）。 */
@@ -256,7 +303,9 @@ function wrapExcept(nodes: readonly RichNode[], marker: string, wrap: (inner: Ri
   if (!containsTag(nodes, marker)) return wrap([...nodes]);
   const out: RichNode[] = [];
   for (const piece of liftMarker(nodes, marker)) {
-    if (piece.outside) out.push(...piece.nodes);
+    // 拿到外面的部分**仍帶著標記**：外層如果還有同樣的 strong／em，也要在這裡斷開（第四輪審查 #2）。
+    // 標記在整份整理完才拿掉（stripMarkers）。
+    if (piece.outside) out.push(element(marker, [], piece.nodes));
     else if (piece.nodes.some((node) => !isWhitespace(node))) out.push(...wrap(piece.nodes));
     else out.push(...piece.nodes);
   }
@@ -287,12 +336,18 @@ function liftMarker(nodes: readonly RichNode[], marker: string): Piece[] {
   return pieces;
 }
 
-/** 整理第一步做完之後拆掉所有暫時標記（沒被外層粗／斜體用到的，本來就只是「不粗」的普通字）。 */
-function stripMarkers(nodes: readonly RichNode[]): RichNode[] {
+/**
+ * 整理第一步做完之後拆掉所有暫時標記（沒被外層粗／斜體用到的，本來就只是「不粗」的普通字），
+ * 順便把巢狀的同名 strong／em 合併成一層（`<strong><strong>A</strong></strong>` → `<strong>A</strong>`）。
+ */
+function stripMarkers(nodes: readonly RichNode[], inStrong = false, inEm = false): RichNode[] {
   return nodes.flatMap((node) => {
     if (node.type === 'text') return [node];
-    const children = stripMarkers(node.children);
+    const strong = node.tag === 'strong';
+    const em = node.tag === 'em';
+    const children = stripMarkers(node.children, inStrong || strong, inEm || em);
     if (node.tag === NO_BOLD || node.tag === NO_ITALIC) return children;
+    if ((strong && inStrong) || (em && inEm)) return children;
     return [element(node.tag, node.attrs, children)];
   });
 }
@@ -445,14 +500,24 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
     // 連結包著區塊（`<a>A<ul>…</ul></a>`、`<a><div>…</div>字</a>`）：連結拆到各段的字上，區塊邊界留著（審查 F2）。
     // 連結包著圖片區塊（`<a><figure><img></figure></a>`）：照古騰堡圖片連結的寫法把連結放進 figure 包住 img
     // （`<figure><a href><img></a></figure>`），連結不消失（第三輪審查 #4）。
-    const linkFigure = (figure: RichElement): RichElement =>
-      element(
-        'figure',
-        figure.attrs,
-        figure.children.map((child) =>
-          child.type === 'element' && child.tag === 'img' ? element('a', attrs, [child]) : child,
-        ),
-      );
+    // 圖說與被包住的圖片（`<figure><p><img></p></figure>`）也要帶到連結（第四輪審查 #4）；
+    // 裡面已經有自己的連結的部分沒辦法再包一層（連結不能包連結），那部分的外層連結會消失，要提醒。
+    const linkInside = (nodes: readonly RichNode[]): RichNode[] =>
+      nodes.map((child) => {
+        if (child.type === 'text') return isWhitespace(child) ? child : element('a', attrs, [child]);
+        if (child.tag === 'a' || containsTag(child.children, 'a')) {
+          if (hasText(child.children) || containsTag(child.children, 'img')) reportDropped(ctx, 'a', [text('x')]);
+          return child;
+        }
+        if (child.tag === 'img') return element('a', attrs, [child]);
+        if (child.tag === 'figcaption' || isBlockish(child)) {
+          return element(child.tag, child.attrs, isBlockish(child) ? linkInside(child.children) : wrapRunInLink(child.children));
+        }
+        return element('a', attrs, [child]);
+      });
+    const wrapRunInLink = (nodes: readonly RichNode[]): RichNode[] =>
+      nodes.some((node) => !isWhitespace(node)) ? [element('a', attrs, [...nodes])] : [...nodes];
+    const linkFigure = (figure: RichElement): RichElement => element('figure', figure.attrs, linkInside(figure.children));
     return wrapStyled(ctx, distribute(children, (run) => [element('a', attrs, run)], linkFigure), bold === true, italic);
   }
 
@@ -849,10 +914,40 @@ export function cleanRich(nodes: readonly RichNode[], options: RichCleanOptions)
   const sink: Sink = options.mode === 'edit' ? ctx.dropped : [];
 
   // 貼上的只有行內內容（例如複製網頁上的一句話）：插在游標處，不包成段落。
+  // 前後的空白要留著（`<span> brave </span>` 貼進 `Hello|world` 要是 `Hello brave world`，第四輪審查 #3）；
+  // 只拿掉原始碼排版造成的頭尾換行（`\n<span>x</span>\n`）。
   if (options.mode === 'paste' && !cleaned.some((node) => isBlockish(node))) {
-    return { nodes: trimInline(inlineFlow(cleaned, sink)), dropped: ctx.dropped };
+    const edges = trimSourceNewlines(nodes);
+    const inline = inlineFlow(stripMarkers(cleanNodes(ctx, edges)), sink);
+    return { nodes: inline, dropped: ctx.dropped };
   }
-  return { nodes: blockFlow(cleaned, 'root', options.mode === 'edit', sink), dropped: ctx.dropped };
+  const blocks = blockFlow(cleaned, 'root', options.mode === 'edit', sink);
+  // 貼上的段落：頭尾空白是來源的排版，修掉；段內的空白留著。編輯時不動（使用者自己打的）。
+  return { nodes: options.mode === 'paste' ? trimTextBlocks(blocks) : blocks, dropped: ctx.dropped };
+}
+
+function trimTextBlocks(nodes: readonly RichNode[]): RichNode[] {
+  return nodes.map((node) => {
+    if (node.type === 'text') return node;
+    if (node.tag === 'p' || node.tag === 'h2' || node.tag === 'h3' || node.tag === 'figcaption') {
+      return element(node.tag, node.attrs, trimInline(node.children));
+    }
+    return element(node.tag, node.attrs, trimTextBlocks(node.children));
+  });
+}
+
+/** 最外層頭尾「含換行的純空白」文字節點是原始碼排版，不是內容；只有空白（沒換行）的留著。 */
+function trimSourceNewlines(nodes: readonly RichNode[]): RichNode[] {
+  const out = [...nodes];
+  const isLayout = (node: RichNode | undefined): boolean =>
+    node !== undefined && node.type === 'text' && isWhitespace(node) && /\n/.test(node.text);
+  while (isLayout(out[0])) out.shift();
+  while (isLayout(out[out.length - 1])) out.pop();
+  const first = out[0];
+  if (first?.type === 'text') out[0] = text(first.text.replace(/^[ \t\r\f]*\n[ \t\r\n\f]*/, ''));
+  const last = out[out.length - 1];
+  if (last?.type === 'text') out[out.length - 1] = text(last.text.replace(/[ \t\r\n\f]*\n[ \t\r\f]*$/, ''));
+  return out;
 }
 
 // ---------------------------------------------------------------------------
