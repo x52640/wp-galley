@@ -444,6 +444,11 @@ export interface JobDetail {
   /** 配圖需求。已經丟掉的不列進來。 */
   readonly imageBriefs: ImageBrief[];
   readonly sourceText: string | null;
+  /**
+   * 目前這一版的正文是空的（P5-T029：可以先建稿再寫；`contract/empty-body.ts`）。
+   * 空的時候 AI 校稿／配圖不給跑、不能核准與發布；畫面靠它停用按鈕並說明。
+   */
+  readonly bodyEmpty: boolean;
 }
 
 export interface RenderOutcome {
@@ -545,6 +550,7 @@ export interface PublishTargetSummary extends JobTarget {
 
 export interface CreateJobRequest {
   readonly targetKey: string;
+  /** 可以是空的（P5-T029）：正文存成一個空段落，建立後直接在文章上寫。 */
   readonly sourceText: string;
   readonly title?: string;
   /** 已經有結構化資料就直接給；沒給就由 sourceText 決定性地轉成段落。 */
@@ -565,6 +571,12 @@ export interface CreateRevisionRequest {
    * 沒有實質改動就不動它。只能跟 `editedBody` 一起用。
    */
   readonly resolveItemId?: number;
+  /**
+   * 在文章上直接改的標題（P5-T029）：只換 `title`，其他欄位沿用上一版；可以單獨給，也可以跟
+   * `editedBody` 一起給（存成同一個新版本）。純文字、一行、不能是空的（`contract/plain-title.ts`）。
+   * 不能跟 `templateData` 同時給。
+   */
+  readonly editedTitle?: string;
   readonly sourceText?: string;
   /** `null` 代表清除精選圖片；不給代表沿用。 */
   readonly featuredMediaId?: number | null;

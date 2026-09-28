@@ -93,6 +93,8 @@ import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../co
 import { buildTemplateDataFromSource } from './source-text.js';
 import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from './slug-suggestion.js';
 import { pickSlugSuggestions } from '../contract/slug.js';
+import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../contract/empty-body.js';
+import { checkPlainTitle } from '../contract/plain-title.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
 import { containsSecret, createSecretScrubber, type Scrubber } from '../config/secrets.js';
@@ -200,6 +202,8 @@ export interface CreateRevisionInput {
   readonly editedBody?: string | undefined;
   /** 從哪張建議卡片進去改的：存成新版本時一起標成已處理。只能跟 editedBody 一起用。 */
   readonly resolveItemId?: number | undefined;
+  /** 在文章上直接改的標題（P5-T029）：只換 title。純文字、一行、非空（contract/plain-title.ts）。 */
+  readonly editedTitle?: string | undefined;
   readonly sourceText?: string | undefined;
   /** `null` 代表清除精選圖片；`undefined` 代表沿用。 */
   readonly featuredMediaId?: number | null | undefined;
@@ -542,9 +546,8 @@ export class CoreService {
     const template = this.templates.get(target.templateId);
     this.assertNoAppPassword(input.sourceText, input.title, input.templateData);
 
-    if (input.sourceText.trim().length === 0 && !input.templateData) {
-      throw new InvalidInputError('原稿是空的。貼上內容或直接給 templateData 才建得起來');
-    }
+    // 原稿可以是空的（D-030，P5-T029）：先建再在文章上寫。正文存成一個空段落
+    // （buildTemplateDataFromSource），schema 與渲染都不放寬；不能發布空文章由核准與發布前置檢查擋。
 
     const uuid = randomUUID();
     const workspace = createJobWorkspace(this.draftsDir, uuid);
@@ -671,6 +674,7 @@ export class CoreService {
       review,
       imageBriefs: this.imageBriefViews(job, media, revision),
       sourceText: revisionRow?.source_text ?? this.repo.listRevisions(job.id)[0]?.source_text ?? null,
+      bodyEmpty: isBlankBody(revisionRow?.rendered_html ?? null),
     };
   }
 
@@ -739,6 +743,16 @@ export class CoreService {
     if (input.editedBody !== undefined && input.templateData !== undefined) {
       throw new InvalidInputError('editedBody 與 templateData 不能同時給：一個只換正文，一個整份取代');
     }
+    if (input.editedTitle !== undefined && input.templateData !== undefined) {
+      throw new InvalidInputError('editedTitle 與 templateData 不能同時給：一個只換標題，一個整份取代');
+    }
+    // 在文章上直接改的標題（P5-T029）：跟前端同一條規則，寫入任何東西之前先驗。
+    let editedTitle: string | undefined;
+    if (input.editedTitle !== undefined) {
+      const checked = checkPlainTitle(input.editedTitle, { diary: this.targetOf(job)?.contentType === 'diary' });
+      if (!checked.ok) throw new InvalidInputError(checked.message);
+      editedTitle = checked.title;
+    }
     // 要一起結案的那張卡片，寫入任何東西之前先驗：驗不過就整個存檔拒絕，不留下半套。
     let resolveRow: ReviewItemRow | null = null;
     if (input.resolveItemId !== undefined) {
@@ -750,14 +764,15 @@ export class CoreService {
         (proposal ? this.repo.listReviewItems(proposal.id) : []).find((row) => row.id === input.resolveItemId) ?? null;
       if (!resolveRow) throw new InvalidInputError(`這一項不屬於目前的校稿提案：${input.resolveItemId}`);
     }
-    const templateData =
+    const bodyData =
       input.editedBody === undefined
         ? (input.templateData ?? base.templateData)
-        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody, {
+        : { ...base.templateData, [template.manifest.publishSlot]: bodyOrEmpty(normalizeEditedBody(input.editedBody, {
               allowedSchemes: template.manifest.allowedSchemes,
               // 基準＝上一版實際會發布的正文（跟前端校樣同一份），沒改的頂層區塊原樣沿用（P5-T028 審查）。
               baseline: publishedBodyOf(template, base.templateData[template.manifest.publishSlot]),
-            }) };
+            })) };
+    const templateData = editedTitle === undefined ? bodyData : { ...bodyData, title: editedTitle };
 
     const payload: RevisionPayload = {
       templateData,
@@ -765,7 +780,7 @@ export class CoreService {
         input.featuredMediaId === undefined ? base.featuredMediaAssetId : input.featuredMediaId,
     };
     // 檢查整份新內容（不只這次送來的欄位）：之後的校稿會把整份送給 Agent。
-    this.assertNoAppPassword(payload.templateData, input.editedBody, input.sourceText, input.reason);
+    this.assertNoAppPassword(payload.templateData, input.editedBody, input.editedTitle, input.sourceText, input.reason);
 
     if (payload.featuredMediaAssetId !== null) {
       const asset = this.repo.mediaById(payload.featuredMediaAssetId);
@@ -776,7 +791,11 @@ export class CoreService {
 
     // 直接在文章上改：整理之後跟目前這一版一樣（例如只多按了一個 Enter）就不算改動——
     // 不建新版本、不撤銷核准。否則核准會為了一個看不見的差異失效。
-    if (input.editedBody !== undefined && baseRow && this.renderPayload(template, payload).contentHash === baseRow.content_hash) {
+    if (
+      (input.editedBody !== undefined || editedTitle !== undefined) &&
+      baseRow &&
+      this.renderPayload(template, payload).contentHash === baseRow.content_hash
+    ) {
       return this.toRevision(baseRow);
     }
 
@@ -913,6 +932,9 @@ export class CoreService {
     const template = this.requireTemplate(job);
     const revisionRow = this.requireRevision(job);
     const payload = this.payloadOf(revisionRow);
+
+    // 空正文（P5-T029）：校稿與配圖都沒東西可看，不花額度跑一趟。
+    if (isBlankBody(revisionRow.rendered_html)) throw new InvalidInputError(EMPTY_BODY_AGENT_MESSAGE);
 
     if (this.activeRuns.has(job.uuid)) {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
@@ -2883,6 +2905,8 @@ export class CoreService {
 
     const revisionRow = this.requireRevision(job);
     this.assertNoAppPassword(this.payloadOf(revisionRow).templateData, revisionRow.rendered_html);
+    // 空文章不給核准（P5-T029）：核准了也發不出去（發布前置檢查會再擋一次）。
+    if (isBlankBody(revisionRow.rendered_html)) throw new InvalidInputError(EMPTY_BODY_MESSAGE);
     if (revisionRow.content_hash !== input.contentHash) {
       throw new ContentChangedError('內容在你按下核准之後又改過了，請重新檢查預覽再核准一次', {
         expected: revisionRow.content_hash,
@@ -3187,6 +3211,11 @@ export class CoreService {
 
     // 4. 需要精選圖片的 target 一定要有精選圖片。
     const payload = this.payloadOf(revisionRow);
+
+    // 4-0. 空文章不發（P5-T029）。核准時已經擋過，這裡是最後一道：發出去的空文章在 WordPress 上是一篇空白頁。
+    if (isBlankBody(revisionRow.rendered_html)) {
+      throw this.rejectPublish(job, actor, EMPTY_BODY_MESSAGE);
+    }
 
     // 4a. 內容裡有 WordPress 應用程式密碼（核准之後才設定密碼的舊內容）就不發（D-023）。
     if (this.hasAppPassword(payload.templateData, revisionRow.rendered_html)) {
@@ -3613,6 +3642,7 @@ export class CoreService {
     const blockers: string[] = [];
     if (!target) blockers.push('這個工作項目沒有綁定發布目標');
     if (!revision) blockers.push('還沒有任何內容');
+    else if (isBlankBody(revision.publishHtml)) blockers.push(EMPTY_BODY_MESSAGE);
     if (this.wordpress === null) blockers.push('WordPress 尚未設定，先到「設定」跑一次設定精靈');
     if (target?.requireFeaturedImage && revision?.featuredMediaId == null) {
       blockers.push('這個發布目標必須設定精選圖片');
@@ -3873,4 +3903,9 @@ function buildUserPrompt(templateData: Record<string, unknown>, instruction?: st
 function publishedBodyOf(template: LoadedTemplate, body: unknown): string | null {
   if (typeof body !== 'string') return null;
   return wrapBareTopLevelText(sanitizeBody(body, template.manifest).html.trim());
+}
+
+/** 整理完變成空字串的正文（使用者把字全刪了）存成一個空段落：schema 要求非空，渲染拒絕空字串（P5-T029）。 */
+function bodyOrEmpty(body: string): string {
+  return body.trim().length === 0 ? EMPTY_BODY_HTML : body;
 }

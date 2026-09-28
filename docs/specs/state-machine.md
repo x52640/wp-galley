@@ -68,7 +68,8 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
 1. job 狀態是 `APPROVED`
 2. 有未撤銷的 approval，且 `approval.content_hash === 目前 revision 的 content_hash`
 3. target 的 `allowCreate` / `allowUpdate` 允許這次操作
-4. `requireFeaturedImage` 的 target 有設精選圖片
+4. `requireFeaturedImage` 的 target 有設精選圖片；正文不是空的（P5-T029，`contract/empty-body.ts` 的 `isBlankBody`：
+   沒有字也沒有圖片或影音）——訊息「正文是空的，先寫點內容再發布」。空文章在 `approve` 就先擋（同一句話），這裡是最後一道。
 5. 更新既有文章時，遠端沒被改過（`assertUnchanged`，比對上次記錄的遠端快照）。
    目前沒有「修改已發布文章」的路徑，這條檢查備而不用，見 `plan.md` Q-5。
 6. 更新既有文章時，遠端那篇必須是草稿——**不論使用者選草稿或公開**；已公開、排程（`future`）、

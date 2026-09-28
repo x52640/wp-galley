@@ -13,6 +13,7 @@ import {
 } from '../../lib/slug-suggest-store.js';
 import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 import { sourceTemplateData } from './template-data.js';
+import { checkPlainTitle } from '../../../contract/plain-title.js';
 
 /**
  * 標題與網址片段。
@@ -60,6 +61,9 @@ export function SourcePanel({
 
   const isDiary = job.target.contentType === 'diary';
   const titleDirty = title !== readString(data, 'title', job.title ?? '');
+  // 跟在文章上改標題同一條規則（P5-T029）：一行、非空。改過才檢查，舊資料不擋。
+  const titleCheck = checkPlainTitle(title, { diary: isDiary });
+  const titleProblem = titleDirty && !titleCheck.ok ? titleCheck.message : null;
   const dirty =
     title !== readString(data, 'title', job.title ?? '') ||
     slug !== readString(data, 'slug') ||
@@ -128,13 +132,13 @@ export function SourcePanel({
         />
       )}
 
-      <ErrorNote message={save.error ?? render.error} />
+      <ErrorNote message={titleProblem ?? save.error ?? render.error} />
 
       <div className="row row-end">
         <button
           type="button"
           className="btn btn-quiet"
-          disabled={save.busy || !dirty}
+          disabled={save.busy || !dirty || titleProblem !== null}
           onClick={() =>
             void save.run(async () => {
               await saveRevision();
@@ -149,7 +153,7 @@ export function SourcePanel({
         <button
           type="button"
           className="btn btn-primary"
-          disabled={render.busy || body.trim().length === 0}
+          disabled={render.busy || body.trim().length === 0 || titleProblem !== null}
           onClick={() =>
             void render.run(async () => {
               if (dirty) await saveRevision();

@@ -1,7 +1,7 @@
 ---
 id: P5-T029
 phase: 5
-status: in_progress
+status: done
 depends_on: [P5-T028]
 specs: [state-machine.md, core-service.md, http-api.md, templates.md, design-system.md, security.md, review-proposals.md]
 write_paths: ["src/ui/", "src/core/", "src/contract/", "src/server/routes/", "src/templates/", "tests/", "docs/specs/", "docs/tasks/P5-T029-write-in-place.md", "docs/CURRENT_TASK.md"]
@@ -49,10 +49,31 @@ D-030。新稿件畫面（`NewJob.tsx`）的內文大框沒有工具列、不會
 - [ ] 擁有這些行為的 spec 已更新
 - [ ] CURRENT_TASK 已更新
 
+## 實作紀錄
+- **空內文在哪一層放寬**：只放寬 CoreService 的 `createJob`（拿掉「原稿是空的」拒絕）。模板 schema 的 `body.minLength: 1`
+  與渲染的「清理後是空字串就拒絕」**都沒動**（`templates/` 不在 write_paths，也不該放寬到發布）：空原稿存成一個空段落
+  `<p class="wp-block-paragraph"></p>`（`src/contract/empty-body.ts`，`buildTemplateDataFromSource` 與 `createRevision` 的 editedBody
+  整理成空字串時都用它）。「空」＝沒有字、也沒有圖片或影音（`isBlankBody`，前後端共用）。
+- **空內文下各動作**：校稿／一鍵配圖（`runAgentReview`）後端 400、前端反灰並說明；核准 400；發布前置檢查第 4 項再擋一次；
+  `blockers` 多一條「正文是空的，先寫點內容再發布」（發布面板照舊列成「還不能發布」）。建議網址、在這裡插圖、渲染照常。
+  `JobDetail.bodyEmpty` 新增欄位給畫面用。
+- **拖放／⌘V 建稿**：路線不變（總覽 → 新稿件畫面選類型 → 建立），新稿件畫面沒有內文框，改成一行「已帶入貼上的原稿，N 字」，
+  建立時照舊送 sourceText、不進打字模式（`lib/write-in-place.ts` 的 `newJobRequest`）。
+- **標題**：`contenteditable="plaintext-only"`；貼上插純文字、換行攤平；Enter 跳到正文開頭；格式快捷鍵在標題裡不做事。
+  存檔 `decideProofSave` 決定送 `editedBody`／`editedTitle` 哪幾個；後端 `editedTitle` 用 `contract/plain-title.ts` 再驗。
+- **捲動兩次的 bug**（使用者回報、併入本 Task）：原因是 `measure()` 只量 body 的底邊，漏掉瀏覽器預設的 body 8px 下外距，
+  iframe 文件永遠比 iframe 高 7–8px、可以捲；滑鼠停在文章上滾輪先把這幾 px 捲完，外層才動。一般瀏覽就會發生
+  （示範資料的樣式有 `body{margin:0}`，所以 `?fixtures=1` 看不到；已改成跟真的模板一樣）。修法：iframe `scrolling="no"`、
+  載入後外層用 CSSOM 設 `html { overflow: hidden }`、高度加上 body 下外距／最後一個子元素的下外距／html 下內距與框線、
+  打字時瀏覽器為了游標把文件捲下去的，量測時捲回頂端（`scroll` 事件觸發重量）。
+  無頭 Chrome 實測（CDP 真的滾輪事件，停在 iframe 上 deltaY=120）：修好後外層 scrollTop 0→120→240、iframe scrollY 一直 0；
+  在同一頁把舊行為還原（拿掉 overflow、高度用舊算法：1334 vs 文件 1341）再滾一次，外層 scrollTop 停在 0。
+  打 30 行字：iframe 高度跟著長到 2044＝文件 scrollHeight、iframe scrollY 0，外層自動捲到游標，往回滾一次外層就動。
+
 ## 中斷／接手紀錄
-- 最後完成：Task 開立（2026-09-28）
-- 已通過驗證：—
-- 下一步：派實作 subagent；commit 後開 PR、Codex 審查
+- 最後完成：實作＋測試＋spec（2026-09-28，subagent）
+- 已通過驗證：`npm run verify` 66 檔／1352 測試綠；`?fixtures=1` 無頭 Chrome 走過新稿件→打字→改標題→儲存、空標題被擋、空內文反灰、發布擋空文章、貼上建稿
+- 下一步：主 session 審查 → 另派審查 → commit、開 PR；使用者手動驗證（只存草稿）
 - Blocker：無
 
 ## 完成結果

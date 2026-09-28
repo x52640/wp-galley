@@ -20,7 +20,11 @@
 ```ts
 interface CoreService {
   // --- 建立與讀取 ---
-  /** 本機站台設定檔不存在（targets.setupRequired）時一律拒絕，訊息就是那句「還沒有站台設定…」。 */
+  /**
+   * 本機站台設定檔不存在（targets.setupRequired）時一律拒絕，訊息就是那句「還沒有站台設定…」。
+   * 原稿可以是空的（D-030，P5-T029）：正文存成一個空段落 `<p class="wp-block-paragraph"></p>`（`contract/empty-body.ts`）。
+   * 模板 schema 的 `body.minLength` 與渲染的「清理後不能是空字串」都不放寬；擋「不能發布空文章」的是 approve 與發布前置檢查。
+   */
   createJob(input: CreateJobInput): Job;
   getJob(uuid: string): JobDetail;
   listJobs(filter?: { state?: JobState[] }): JobSummary[];
@@ -32,6 +36,10 @@ interface CoreService {
    * `editedBody`：直接在文章上改，只換正文，先經 normalizeEditedBody 整理（P5-T010）。
    * 整理規則跟前端存檔前同一份（`contract/rich-text.ts`，P5-T028），並帶模板的 allowedSchemes：不收的連結拆成純文字。
    * 帶基準＝上一版正文經 sanitize 與補段落後實際會發布的樣子（跟前端校樣同一份）：沒改的頂層區塊輸出基準的 HTML，只整理改過的。
+   * 整理完是空字串（字全刪了）存成空段落（P5-T029）。
+   * `editedTitle`（P5-T029）：在文章上直接改的標題，只換 `title`；可單獨給或跟 `editedBody` 一起給（同一個新版本）。
+   * 規則 `contract/plain-title.ts`：不能換行、不能有控制字元、修掉前後空白後不能是空的、最多 120 字，不合就 InvalidInputError、什麼都不寫。
+   * 不能跟 `templateData` 同時給。標題跟正文整理後都跟目前這一版一樣就不建新版本、不撤銷核准。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;
   listRevisions(uuid: string): Revision[];
@@ -39,6 +47,7 @@ interface CoreService {
   render(uuid: string): RenderOutcome;
 
   // --- Agent ---
+  /** 正文是空的（`isBlankBody`）就 InvalidInputError「正文是空的，先寫點內容再請 AI 看」，不跑、不花額度（P5-T029）。 */
   runAgentReview(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   /**
    * AI 建議英文網址（D-026，P5-T026）：讀目前這一版的標題＋內文開頭跑一趟 Agent，回最多三個合格的 slug。

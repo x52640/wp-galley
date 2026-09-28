@@ -28,7 +28,7 @@ templates/<template-id>/
 | --- | --- |
 | `strictness` | `strict` / `hybrid` / `flexible`，由 allowlist 決定行為，不是三段程式碼 |
 | `wordpressTargetKey` | 參考用：這個模板主要給哪個 target。**真正決定發到哪裡的是 target 的 `templateId`**；一個模板給多個 target 用時填 `null`（`article-v1`） |
-| `publishSlot` | 哪一個 slot 的 HTML 才是送去 WordPress 的內容（目前都是 `body`） |
+| `publishSlot` | 哪一個 slot 的 HTML 才是送去 WordPress 的內容（目前都是 `body`）。schema 要求它至少一個字元、渲染拒絕清理後是空字串的正文，這兩道**不為「先建稿再寫」放寬**：空的正文存成一個空段落 `<p class="wp-block-paragraph"></p>`（三個模板都收，P5-T029），不能發布空文章由核准與發布前置檢查擋（[state-machine.md](state-machine.md)） |
 | `requiredSlots` / `optionalSlots` | Agent 必須／可以填的欄位 |
 | `allowedTags` / `allowedAttributes` / `allowedClasses` / `allowedSchemes` | 正文 allowlist，依 [wordpress-site.md](wordpress-site.md) 的實測詞彙訂定。sanitize 會把 `b`／`i` 轉成 `strong`／`em`（模板允許後者、不允許前者時），不是拆掉；轉換的不算進 `removedTags`（P5-T028）。連結網址跟編輯整理同一個規則（`safeHref`：絕對網址要在 `allowedSchemes`，另收 `#錨點` 與單一 `/` 開頭的站內路徑），不收的連結整個拆掉、字留著，回報 `a.href`。`allowedTags`／`allowedSchemes` 也隨 `JobDetail.template` 給前端，決定格式工具列的按鈕與連結可用的 scheme |
 | `structureRules` | 結構驗證規則 |

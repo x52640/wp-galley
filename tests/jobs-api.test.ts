@@ -122,6 +122,7 @@ describe('POST/GET /api/jobs', () => {
         'agentRun',
         'approval',
         'blockers',
+        'bodyEmpty',
         'currentRevision',
         'featuredMediaId',
         'imageBriefs',

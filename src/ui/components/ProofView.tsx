@@ -8,7 +8,6 @@ import type { SuggestionKind } from '../lib/review-kinds.js';
 import { FormatBar, type LinkEditorState } from './FormatBar.js';
 import {
   availableCommands,
-  decideEditSave,
   formatStateFrom,
   nextLinkEditor,
   shortcutCommand,
@@ -29,6 +28,10 @@ import {
   type RichAllow,
 } from '../lib/rich-commands.js';
 import type { RichUnit } from '../../contract/rich-text.js';
+import { isBlankBody } from '../../contract/empty-body.js';
+import { flattenTitleText } from '../../contract/plain-title.js';
+import { readString } from '../lib/format.js';
+import { decideProofSave } from '../lib/write-in-place.js';
 
 /**
  * 中央校樣。
@@ -49,6 +52,11 @@ import type { RichUnit } from '../../contract/rich-text.js';
  * **二、iframe 不自己捲動。**
  * 高度撐到內容的完整高度，捲動交給外層容器。這樣每一段的座標在文件裡是固定的，
  * 頁邊符號只要絕對定位在同一個捲動容器裡就會跟著一起動，不需要同步兩個捲軸。
+ * 「不捲動」是做出來的，不是期望（P5-T029）：iframe 帶 `scrolling="no"`，載入後外層用 CSSOM 把文件的
+ * `html` 設成 `overflow: hidden`（不注入 script），量高度時把 body 的下外距與 html 的下內距算進去
+ * ——以前只量 body 的底邊，漏掉瀏覽器預設的 8px 下外距，文件永遠多出 8px 可以捲，滑鼠停在文章上
+ * 滾輪要先把這 8px 捲完，外層才會動（「要滾兩次」）。文件不能捲，Chrome 就把滾輪直接交給外層。
+ * 打字時瀏覽器為了讓游標看得見仍可能把文件捲下去；量測時一律捲回頂端。
  *
  * **三、建議標在字上（B1）。**
  * 外層把待處理的那段字包進 `<mark>`，顏色用 CSSOM（`element.style`）設定：文件的
@@ -65,6 +73,12 @@ import type { RichUnit } from '../../contract/rich-text.js';
  * allowedTags；⌘B／⌘I／⌘K 也由外層掛在文件上的 keydown 處理。指令一律由外層對 iframe 文件下
  * （`lib/rich-commands.ts`），iframe 仍然不跑 script。貼上改成保留 allowlist 內的格式、其餘丟掉；
  * 存檔前先用共用規則（`contract/rich-text.ts`）整理一次，後端再整理一次。
+ *
+ * **七、標題在文章上直接改（P5-T029）。**
+ * 打字模式裡外框的標題（`.preview-title`）也是可編輯的：`contenteditable="plaintext-only"`，只收純文字；
+ * 貼上一律插純文字、換行攤平成空格，Enter 跳到正文開頭，格式快捷鍵在標題裡不做事。
+ * 按「儲存」時標題與正文一起送，存成同一個新版本；標題清空不准存（`lib/write-in-place.ts`）。
+ * 正文是空的（新稿件剛建好）時放一個空段落與「從這裡開始寫…」的提示（CSSOM 規則，不改正文）。
  *
  * **五、在這裡插圖（P5-T016）。**
  * 段落之間（含最前面與最後面）滑鼠移過去出現「在這裡插圖」。跟頁邊符號一樣畫在 iframe 外層，
@@ -133,6 +147,49 @@ function showEditTarget(frame: HTMLIFrameElement, target: Range | null): void {
   registry.set(EDIT_TARGET, new win.Highlight(target));
 }
 
+/** 打字模式裡標題看得出「可以點進去改」、空正文有提示（P5-T029）。用 CSSOM 插進文件，不動文件的 <style>。 */
+const WRITE_RULES = [
+  '.preview-title[contenteditable] { outline: 1px dashed #B8B2A6; outline-offset: 6px; border-radius: 2px; cursor: text; }',
+  '.preview-title[contenteditable]:focus { outline: 2px solid #1E4F8A; }',
+  '.preview-body[data-blank="yes"] > p:first-child::before { content: "從這裡開始寫…"; color: #9A958C; float: left; height: 0; pointer-events: none; }',
+];
+
+function ensureWriteRules(doc: Document): void {
+  const sheet = doc.styleSheets[0];
+  if (!sheet || doc.documentElement.hasAttribute('data-write-rules')) return;
+  for (const rule of WRITE_RULES) sheet.insertRule(rule, sheet.cssRules.length);
+  doc.documentElement.setAttribute('data-write-rules', '');
+}
+
+function markBlank(body: HTMLElement): void {
+  body.setAttribute('data-blank', isBlankBody(body.innerHTML) ? 'yes' : 'no');
+}
+
+/**
+ * 文件內容的完整高度（P5-T029）。
+ *
+ * 不能用 documentElement.scrollHeight：它至少等於 iframe 目前的高度，高度只會被撐大、不會縮回去。
+ * 量 body 的底邊，再加上 body 的下外距（瀏覽器預設 8px）與最後一個子元素可能穿出來的下外距、html 的下內距與框線
+ * ——少算任何一點，文件就會多出幾 px 可以捲。
+ */
+function contentHeight(doc: Document): number {
+  const win = doc.defaultView;
+  const body = doc.body;
+  const scrollY = win?.scrollY ?? 0;
+  const px = (value: string | undefined): number => {
+    const n = Number.parseFloat(value ?? '');
+    return Number.isFinite(n) ? n : 0;
+  };
+  const bodyStyle = win?.getComputedStyle(body);
+  const htmlStyle = win?.getComputedStyle(doc.documentElement);
+  const last = body.lastElementChild;
+  const lastMargin = last ? px(win?.getComputedStyle(last).marginBottom) : 0;
+  let bottom = body.getBoundingClientRect().bottom + scrollY;
+  if (last) bottom = Math.max(bottom, last.getBoundingClientRect().bottom + scrollY + lastMargin);
+  bottom += px(bodyStyle?.marginBottom) + px(htmlStyle?.paddingBottom) + px(htmlStyle?.borderBottomWidth);
+  return Math.ceil(bottom);
+}
+
 interface BlockBox {
   index: number;
   top: number;
@@ -197,7 +254,7 @@ export function ProofView({
    * 存檔：送出改過的正文 HTML，回傳存完之後那一版的 content hash。成功後由上層結束編輯；
    * 失敗就丟錯，留在編輯中。
    */
-  onSaveEdit?: (html: string) => Promise<string>;
+  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
   /**
@@ -251,6 +308,10 @@ export function ProofView({
   const originalClean = useRef<string | null>(null);
   /** 進入編輯那一刻的頂層區塊：存檔時沒動過的區塊原樣保留，只整理改過的（P5-T028 審查）。 */
   const originalUnits = useRef<RichUnit[] | null>(null);
+  /** 進入編輯那一刻的標題（P5-T029）：取消時還原、存檔時比對有沒有改。 */
+  const originalTitle = useRef<string | null>(null);
+  const savedTitle = readString(job.currentRevision?.templateData ?? null, 'title', job.title ?? '');
+  const isDiary = job.target.contentType === 'diary';
 
   // --- 格式（P5-T028） ---
   const allow: RichAllow = { tags: job.template.allowedTags, schemes: job.template.allowedSchemes };
@@ -374,14 +435,10 @@ export function ProofView({
     const doc = frame?.contentDocument;
     if (!frame || !doc?.body) return;
 
-    // 先讓 iframe 貼齊內容高度，量到的座標才等於文件座標。
-    //
-    // 不能用 documentElement.scrollHeight：它至少等於 iframe 目前的高度，
-    // 於是高度只會被撐大、不會縮回去，短文章下面會拖一片空白。改量 body 的
-    // 底邊，那是純粹的內容高度。
+    // 先讓 iframe 貼齊內容高度，量到的座標才等於文件座標（contentHeight 說明為什麼不用 scrollHeight）。
+    // 文件本身不能捲（html overflow: hidden）；打字時瀏覽器為了游標把它捲下去的，捲回頂端。
     const scrollY = frame.contentWindow?.scrollY ?? 0;
-    const bottom = doc.body.getBoundingClientRect().bottom + scrollY;
-    setHeight(Math.max(Math.ceil(bottom), 200));
+    setHeight(Math.max(contentHeight(doc), 200));
 
     const body = doc.querySelector('.preview-body');
     const children = body ? Array.from(body.children) : [];
@@ -404,6 +461,7 @@ export function ProofView({
     });
     setBlocks(measured);
     onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
+    if (scrollY !== 0) frame.contentWindow?.scrollTo(0, 0);
   }, []);
 
   const editBody = (): HTMLElement | null =>
@@ -474,6 +532,8 @@ export function ProofView({
     measure(token);
     const doc = frameRef.current?.contentDocument;
     if (!doc) return;
+    // 文件不自己捲動（見檔頭「二」）：捲動全部交給外層，滑鼠停在文章上滾一次就動。
+    doc.documentElement.style.overflow = 'hidden';
     // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
     setBodyMissing(doc.querySelector('.preview-body') === null);
     onPreviewedRef.current?.();
@@ -485,15 +545,31 @@ export function ProofView({
       const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
       if (mark && !editingRef.current) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
     });
-    // 編輯中：打字會改變高度，要重量。
+    // 編輯中：打字會改變高度，要重量；正文空不空決定要不要顯示「從這裡開始寫…」。
     doc.addEventListener('input', () => {
-      if (editingRef.current) measure(measureToken.current);
+      if (!editingRef.current) return;
+      const body = doc.querySelector<HTMLElement>('.preview-body');
+      if (body) markBlank(body);
+      measure(measureToken.current);
     });
+    // 打字時瀏覽器可能把文件捲下去讓游標看得見；文件不該自己捲，捲回來並重量高度。
+    doc.addEventListener('scroll', () => {
+      if ((doc.defaultView?.scrollY ?? 0) !== 0) measure(measureToken.current);
+    });
+    const inTitle = (target: EventTarget | null): boolean => {
+      const element = target as Element | null;
+      return typeof element?.closest === 'function' && element.closest('.preview-title') !== null;
+    };
     // 貼上（P5-T028）：有格式的剪貼簿只保留模板 allowlist 內的標籤（粗體、連結、標題、清單…），
     // 樣式、class、span、script、不允許的連結一律拿掉、字留著；只有純文字就照舊插純文字。
     doc.addEventListener('paste', (event) => {
       if (!editingRef.current) return;
       event.preventDefault();
+      // 標題只收純文字、一行（P5-T029）。
+      if (inTitle(event.target)) {
+        doc.execCommand('insertText', false, flattenTitleText(event.clipboardData?.getData('text/plain') ?? '').trim());
+        return;
+      }
       const html = event.clipboardData?.getData('text/html') ?? '';
       const cleaned = html.trim().length > 0 ? cleanPastedHtml(html, allowRef.current) : '';
       if (cleaned.trim().length > 0) {
@@ -504,11 +580,30 @@ export function ProofView({
     });
     // 拖檔案進來：瀏覽器會把圖片直接塞進正文（不經過媒體庫）。擋掉；插圖走「在這裡插圖」。
     doc.addEventListener('drop', (event) => {
-      if (editingRef.current && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+      if (!editingRef.current) return;
+      if (event.dataTransfer?.types.includes('Files') || inTitle(event.target)) event.preventDefault();
     });
     // 格式快捷鍵：⌘B／⌘I／⌘K；⌘U（底線，不在 allowlist）攔下來不做事。
     doc.addEventListener('keydown', (event) => {
       if (!editingRef.current) return;
+      if (inTitle(event.target)) {
+        // 標題是一行：Enter 跳到正文開頭。格式快捷鍵在標題裡不做事（也不讓瀏覽器自己加粗）。
+        if (event.key === 'Enter' && !event.isComposing) {
+          event.preventDefault();
+          const body = doc.querySelector<HTMLElement>('.preview-body');
+          if (!body) return;
+          body.focus();
+          const range = doc.createRange();
+          range.selectNodeContents(body.firstElementChild ?? body);
+          range.collapse(true);
+          const selection = doc.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+          return;
+        }
+        if (shortcutCommand(event) !== null) event.preventDefault();
+        return;
+      }
       const shortcut = shortcutCommand(event);
       if (shortcut === null) return;
       event.preventDefault();
@@ -588,9 +683,13 @@ export function ProofView({
     const doc = frame?.contentDocument;
     const body = doc?.querySelector<HTMLElement>('.preview-body');
     if (!frame || !doc || !body) return;
+    const title = doc.querySelector<HTMLElement>('.preview-title');
     if (editing === null) {
       showEditTarget(frame, null);
       body.removeAttribute('contenteditable');
+      body.removeAttribute('data-blank');
+      title?.removeAttribute('contenteditable');
+      originalTitle.current = null;
       originalBody.current = null;
       originalClean.current = null;
       originalUnits.current = null;
@@ -608,8 +707,17 @@ export function ProofView({
       originalBody.current = body.innerHTML;
       originalUnits.current = snapshotBody(body);
       originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
+      originalTitle.current = title?.textContent ?? null;
+      // 空文章（新稿件剛建好）：放一個有高度的空段落，游標才有地方停（存檔時照樣整理掉）。
+      if (isBlankBody(body.innerHTML)) body.innerHTML = '<p><br></p>';
     }
+    ensureWriteRules(doc);
+    markBlank(body);
     body.setAttribute('contenteditable', 'true');
+    if (title) {
+      title.setAttribute('contenteditable', 'plaintext-only');
+      title.setAttribute('spellcheck', 'false');
+    }
     // 按 Enter 開新段落用 <p>，不要 Chrome 預設的 <div>。
     doc.execCommand('defaultParagraphSeparator', false, 'p');
     setSaveError(null);
@@ -640,8 +748,17 @@ export function ProofView({
   const cancelEdit = (): void => {
     const body = editBody();
     if (body && originalBody.current !== null) body.innerHTML = originalBody.current;
+    restoreTitle();
     measure(measureToken.current);
     onEndEdit?.();
+  };
+
+  const titleElement = (): HTMLElement | null =>
+    frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-title') ?? null;
+  /** 標題改回進入編輯時的字（取消、沒改、後端說沒變）。 */
+  const restoreTitle = (): void => {
+    const title = titleElement();
+    if (title && originalTitle.current !== null) title.textContent = originalTitle.current;
   };
 
   const saveEdit = async (force = false): Promise<void> => {
@@ -652,34 +769,50 @@ export function ProofView({
     const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
     // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
     const original = originalBody.current;
-    const decision = decideEditSave({
-      cleaned: html,
-      originalClean: originalClean.current ?? (original ?? '').trim(),
+    const title = titleElement();
+    // 標題與正文一起決定（P5-T029）：有改的才送；標題清空不准存。
+    const decision = decideProofSave({
+      bodyCleaned: html,
+      bodyOriginal: originalClean.current ?? (original ?? '').trim(),
       dropped,
       force,
+      titleText: title === null ? null : (title.textContent ?? ''),
+      titleOriginal: originalTitle.current ?? savedTitle,
+      diary: isDiary,
     });
-    if (decision === 'unchanged') {
+    if (decision.kind === 'unchanged') {
       // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，
       // 不然校樣多一個空區塊，「在這裡插圖」的索引會跟後端差一格（審查 #1）。
       if (original !== null) body.innerHTML = original;
+      restoreTitle();
       measure(measureToken.current);
       onEndEdit?.();
       return;
     }
+    if (decision.kind === 'invalid-title') {
+      setDropWarning(null);
+      setSaveError(decision.message);
+      title?.focus();
+      return;
+    }
     // 格式不能默默消失：有會被拿掉的，先講出來。
-    if (decision === 'confirm-drop') {
-      setDropWarning(dropped);
+    if (decision.kind === 'confirm-drop') {
+      setDropWarning([...decision.dropped]);
       return;
     }
     setDropWarning(null);
     setSaving(true);
     setSaveError(null);
     try {
-      const savedHash = await onSaveEdit?.(html);
+      const savedHash = await onSaveEdit?.({
+        ...(decision.editedBody === undefined ? {} : { editedBody: decision.editedBody }),
+        ...(decision.editedTitle === undefined ? {} : { editedTitle: decision.editedTitle }),
+      });
       // 整理之後跟原本一樣（例如只多按了一個 Enter），後端不建新版本，校樣也不會重載；
       // 把畫面還原成那一版，不要留著沒整理過的樣子。
       if (savedHash === revisionKey && original !== null) {
         body.innerHTML = original;
+        restoreTitle();
         measure(measureToken.current);
       }
     } catch (cause) {
@@ -732,7 +865,7 @@ export function ProofView({
         </div>
         {isEditing ? (
           <div className="proof-editbar" role="status">
-            <span className="proof-editbar-note">直接在文章上打字；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。</span>
+            <span className="proof-editbar-note">直接在文章上打字，標題也可以點進去改；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。</span>
             <button type="button" className="btn btn-quiet btn-tiny" disabled={saving} onClick={cancelEdit}>
               取消
             </button>
@@ -901,6 +1034,8 @@ export function ProofView({
               title="文章校樣"
               {...(fixtures ? { srcDoc: srcDoc ?? '' } : { src: previewSrc })}
               sandbox="allow-same-origin"
+              // 文件不自己捲動（見檔頭「二」）；載入後外層再用 CSSOM 把 html 設成 overflow: hidden。
+              scrolling="no"
               style={{ height: `${height}px` }}
               onLoad={handleLoad}
             />
@@ -940,7 +1075,10 @@ function editTarget(doc: Document, body: Element, request: ProofEditRequest): { 
       return { caret, target };
     }
   }
-  caret.selectNodeContents(scope);
+  // 沒有指定段落：游標放第一段裡面（第一段是文字段落時），不要停在段落外面——
+  // 停在外面打的字會變成頂層裸文字（新稿件剛建好的空段落就是這種情況，P5-T029）。
+  const first = body.firstElementChild;
+  caret.selectNodeContents(block ?? (first !== null && first.tagName === 'P' ? first : body));
   caret.collapse(true);
   if (block === null) return { caret, target: null };
   const target = doc.createRange();

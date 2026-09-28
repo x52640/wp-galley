@@ -92,9 +92,12 @@ describe('建立與讀取', () => {
     expect(detail.target?.postType).toBe('diary');
   });
 
-  it('空白原稿不給建立', async () => {
+  it('空白原稿也建得起來：正文是一個空段落，之後在文章上寫（D-030，P5-T029）', async () => {
     const { core } = await setup();
-    expect(() => core.createJob({ targetKey: 'diary', sourceText: '   ' })).toThrow(/原稿是空的/);
+    const job = core.createJob({ targetKey: 'diary', sourceText: '   ', title: '20260928' });
+    const detail = core.getJob(job.uuid);
+    expect(detail.currentRevision?.templateData['body']).toBe('<p class="wp-block-paragraph"></p>');
+    expect(detail.bodyEmpty).toBe(true);
   });
 
   it('不存在的發布目標會被擋下並列出可用的', async () => {

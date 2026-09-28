@@ -42,6 +42,8 @@ export function App(): JSX.Element {
   const [route, setRoute] = useState<Route>(() => parse(window.location.hash));
   /** 在總覽拖放或貼上的原稿，帶進新稿件畫面。只活在這一次導覽裡。 */
   const [pendingText, setPendingText] = useState<string | undefined>(undefined);
+  /** 剛建好、要直接進打字模式的那一篇（P5-T029）。只活在這一次導覽裡：重新整理不會再進。 */
+  const [editOnOpen, setEditOnOpen] = useState<string | null>(null);
   const fixtures = isFixtureMode();
 
   useEffect(() => {
@@ -84,8 +86,9 @@ export function App(): JSX.Element {
     go(target === undefined ? '/new' : `/new/${encodeURIComponent(target)}`);
   }, []);
   const created = useCallback(
-    (uuid: string) => {
+    (uuid: string, options: { edit: boolean }) => {
       setPendingText(undefined);
+      setEditOnOpen(options.edit ? uuid : null);
       openJob(uuid);
     },
     [openJob],
@@ -121,7 +124,14 @@ export function App(): JSX.Element {
             onCancel={backToList}
           />
         )}
-        {route.name === 'job' && <Workspace uuid={route.uuid} onBack={backToList} />}
+        {route.name === 'job' && (
+          <Workspace
+            uuid={route.uuid}
+            onBack={backToList}
+            startEditing={editOnOpen === route.uuid}
+            onStartedEditing={() => setEditOnOpen(null)}
+          />
+        )}
         {route.name === 'diagnostics' && <Diagnostics onBack={backToList} />}
         {route.name === 'setup' && <SetupWizard onDone={backToList} onExit={backToList} />}
       </div>

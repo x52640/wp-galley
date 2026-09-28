@@ -903,7 +903,6 @@ h1, h2, h3 { font-weight: 600; }
   font-size: .9rem;
 }
 .input-title { font-family: var(--font-serif); font-size: 1.15rem; font-weight: 600; padding: .65rem .8rem; }
-.compose-body { font-size: 1rem; line-height: 1.9; }
 .compose-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; }
 .compose-why { text-align: right; margin-top: -.5rem; }
 
@@ -1548,6 +1547,7 @@ h1, h2, h3 { font-weight: 600; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.docbar-hint { font-size: .8rem; color: var(--shell-text-dim); }
 .docbar-state { flex: none; font-size: .8rem; color: var(--shell-text-dim); }
 .docbar-state[data-state='APPROVED'], .docbar-state[data-state='PUBLISHED'] { color: var(--seal-on-shell); font-weight: 700; }
 .docbar-state[data-state='FAILED'] { color: var(--danger-on-shell); font-weight: 700; }
