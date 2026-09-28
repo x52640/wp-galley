@@ -159,6 +159,10 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
   瀏覽器產生的 `<b>`／`<i>` 等要轉成 allowlist 的 `<strong>`／`<em>`，不可以默默丟掉格式；後端照舊用原始規則再驗。
   補充（2026-09-28 Remus 裁定，Codex 第二輪審查後）：存檔時**使用者沒改的頂層區塊原樣保留**，只整理改過的區塊（整篇仍過 sanitize）；
   相對連結只保留 `#` 頁內錨點與單一 `/` 開頭的站內路徑，其他相對路徑與 `//host` 拒絕並提醒，渲染、編輯、貼上、連結輸入框共用同一套規則。
+- **D-029 開源名稱 Galley、repo `wp-galley`（2026-09-28 Remus 裁定，無 Task，小修）**：Galley＝校樣（總編核准前的最後一版），
+  對上「AI 當編輯、你當總編」。名稱不含 WordPress（商標政策；說明文字用「for WordPress」）也不含任何 AI 廠商名。
+  npm 的 galley／copydesk／masthead 已被佔用，Copydesk 在 GitHub 已有 AI 寫作工具；`wp-galley` 無人使用。
+  公開 repo：https://github.com/x52640/wp-galley （MIT，commit 作者信箱改 GitHub noreply）。新功能一律開 PR。
 
 ## 待裁定
 
