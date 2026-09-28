@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "本機 AI WordPress 發布台（只監聽 127.0.0.1）",
+  "license": "MIT",
   "engines": {
     "node": ">=22.5.0"
   },
