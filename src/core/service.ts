@@ -94,7 +94,7 @@ import { buildTemplateDataFromSource } from './source-text.js';
 import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from './slug-suggestion.js';
 import { pickSlugSuggestions } from '../contract/slug.js';
 import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../contract/empty-body.js';
-import { checkPlainTitle } from '../contract/plain-title.js';
+import { checkPlainTitle, titleMaxLengthFromSchema } from '../contract/plain-title.js';
 import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
 
 import { containsSecret, createSecretScrubber, type Scrubber } from '../config/secrets.js';
@@ -641,6 +641,7 @@ export class CoreService {
             strictness: template.manifest.strictness,
             allowedTags: [...template.manifest.allowedTags],
             allowedSchemes: [...template.manifest.allowedSchemes],
+            titleMaxLength: titleMaxLengthFromSchema(template.schema),
           }
         : null,
       currentRevision: revision,
@@ -749,7 +750,11 @@ export class CoreService {
     // 在文章上直接改的標題（P5-T029）：跟前端同一條規則，寫入任何東西之前先驗。
     let editedTitle: string | undefined;
     if (input.editedTitle !== undefined) {
-      const checked = checkPlainTitle(input.editedTitle, { diary: this.targetOf(job)?.contentType === 'diary' });
+      const checked = checkPlainTitle(input.editedTitle, {
+        diary: this.targetOf(job)?.contentType === 'diary',
+        // 上限照這篇模板的 schema（通用文章 200、日記與長文 120），不寫死（審查 #2）。
+        maxLength: titleMaxLengthFromSchema(template.schema),
+      });
       if (!checked.ok) throw new InvalidInputError(checked.message);
       editedTitle = checked.title;
     }

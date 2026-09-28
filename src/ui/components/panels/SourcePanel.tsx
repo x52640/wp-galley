@@ -62,7 +62,7 @@ export function SourcePanel({
   const isDiary = job.target.contentType === 'diary';
   const titleDirty = title !== readString(data, 'title', job.title ?? '');
   // 跟在文章上改標題同一條規則（P5-T029）：一行、非空。改過才檢查，舊資料不擋。
-  const titleCheck = checkPlainTitle(title, { diary: isDiary });
+  const titleCheck = checkPlainTitle(title, { diary: isDiary, maxLength: job.template.titleMaxLength });
   const titleProblem = titleDirty && !titleCheck.ok ? titleCheck.message : null;
   const dirty =
     title !== readString(data, 'title', job.title ?? '') ||

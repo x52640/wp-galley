@@ -9,9 +9,10 @@ import { loadPublishTargets } from '../src/wordpress/targets.js';
 import { paths } from '../src/config/paths.js';
 import { AgentRegistry } from '../src/agents/registry.js';
 import { EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../src/contract/empty-body.js';
-import { checkPlainTitle, flattenTitleText } from '../src/contract/plain-title.js';
+import { readFileSync } from 'node:fs';
+import { checkPlainTitle, flattenTitleText, sameTitle, titleMaxLengthFromSchema } from '../src/contract/plain-title.js';
 import { InvalidInputError } from '../src/core/errors.js';
-import { decideProofSave, newJobRequest } from '../src/ui/lib/write-in-place.js';
+import { decideProofSave, keepEditOnOpen, newJobRequest } from '../src/ui/lib/write-in-place.js';
 import { approveJob, createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
 import { FakeAdapter } from './helpers/fake-adapter.js';
 
@@ -61,14 +62,34 @@ describe('checkPlainTitle', () => {
   it('不能換行、不能有控制字元、最多 120 字', () => {
     expect(checkPlainTitle('一\n二').ok).toBe(false);
     expect(checkPlainTitle('一\u0007二').ok).toBe(false);
-    expect(checkPlainTitle('字'.repeat(121)).ok).toBe(false);
-    expect(checkPlainTitle('字'.repeat(120)).ok).toBe(true);
+    expect(checkPlainTitle('字'.repeat(121), { maxLength: 120 }).ok).toBe(false);
+    expect(checkPlainTitle('字'.repeat(120), { maxLength: 120 }).ok).toBe(true);
   });
   it('字面上的角括號是字，不是 HTML', () => {
     expect(checkPlainTitle('<b>粗</b>')).toEqual({ ok: true, title: '<b>粗</b>' });
   });
   it('編輯框裡的換行攤平成空格', () => {
     expect(flattenTitleText('一\n二\r\n三')).toBe('一 二 三');
+  });
+  it('中間的連續空白原樣保留（審查 #1）；編輯器塞的 NBSP 換回一般空格', () => {
+    expect(checkPlainTitle('第一章  開始')).toEqual({ ok: true, title: '第一章  開始' });
+    expect(checkPlainTitle('第一章\t開始')).toEqual({ ok: true, title: '第一章\t開始' });
+    expect(flattenTitleText('第一章\u00a0 開始')).toBe('第一章  開始');
+  });
+  it('比較時空白差異不算改', () => {
+    expect(sameTitle('第一章  開始', '第一章\u00a0開始 ')).toBe(true);
+    expect(sameTitle('第一章\t開始', '第一章 開始')).toBe(true);
+    expect(sameTitle('第一章 開始', '第二章 開始')).toBe(false);
+  });
+  it('上限照模板 schema：日記、長文 120，通用文章 200（審查 #2）', () => {
+    const limit = (id: string): number | null =>
+      titleMaxLengthFromSchema(JSON.parse(readFileSync(join(paths.templates, id, 'schema.json'), 'utf8')));
+    expect(limit('diary-v1')).toBe(120);
+    expect(limit('longform-v1')).toBe(120);
+    expect(limit('article-v1')).toBe(200);
+    expect(titleMaxLengthFromSchema({ properties: { title: { type: 'string' } } })).toBeNull();
+    expect(checkPlainTitle('字'.repeat(200), { maxLength: 200 }).ok).toBe(true);
+    expect(checkPlainTitle('字'.repeat(201), { maxLength: 200 })).toMatchObject({ ok: false, message: '標題最多 200 個字' });
   });
 });
 
@@ -218,6 +239,29 @@ describe('在文章上改標題（後端）', () => {
     expect(core.getJob(uuid).revisionCount).toBe(1);
   });
 
+  it('標題上限照這篇模板：通用文章 150 字存得進去，日記 121 字不行（審查 #2）', async () => {
+    fixture = await createCoreFixture({ targets: await loadPublishTargets(join(paths.config, 'publish-targets.example.json')) });
+    const { core } = fixture;
+    const post = core.createJob({ targetKey: 'post', sourceText: '一段字', title: '短標題' }).uuid;
+    expect(core.getJob(post).template?.titleMaxLength).toBe(200);
+    core.createRevision(post, { editedTitle: '字'.repeat(150) });
+    expect(core.getJob(post).title).toBe('字'.repeat(150));
+    expect(() => core.createRevision(post, { editedTitle: '字'.repeat(201) })).toThrow(/最多 200/);
+    await fixture.cleanup();
+    fixture = await createCoreFixture();
+    const diary = fixture.core.createJob({ targetKey: 'diary', sourceText: '一段字', title: '20260928' }).uuid;
+    expect(fixture.core.getJob(diary).template?.titleMaxLength).toBe(120);
+    expect(() => fixture!.core.createRevision(diary, { editedTitle: '字'.repeat(121) })).toThrow(/最多 120/);
+  });
+
+  it('中間的連續空白存進去原樣保留', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const uuid = core.createJob({ targetKey: 'read-think', sourceText: '一段字', title: '舊標題' }).uuid;
+    core.createRevision(uuid, { editedTitle: ' 第一章  開始 ' });
+    expect(core.getJob(uuid).title).toBe('第一章  開始');
+  });
+
   it('不能跟整份 templateData 一起給', async () => {
     fixture = await createCoreFixture();
     const { core } = fixture;
@@ -314,6 +358,27 @@ describe('打字模式的儲存（前端）', () => {
     const decision = decideProofSave({ ...base, bodyCleaned: '<p>二</p>', titleText: '  ' });
     expect(decision).toMatchObject({ kind: 'invalid-title', message: expect.stringMatching(/YYYYMMDD/) });
   });
+  it('標題有連續空白、進入編輯時與存檔時空白長得不同（NBSP、tab）：沒動就不算改（審查 #1）', () => {
+    expect(
+      decideProofSave({ ...base, titleOriginal: '第一章  開始', bodyCleaned: '<p>一</p>', titleText: '第一章\u00a0 開始' }),
+    ).toEqual({ kind: 'unchanged' });
+    expect(
+      decideProofSave({ ...base, titleOriginal: '第一章\t開始', bodyCleaned: '<p>一</p>', titleText: ' 第一章 開始 ' }),
+    ).toEqual({ kind: 'unchanged' });
+  });
+  it('真的改了：送使用者打的原樣（連續空白保留）', () => {
+    expect(
+      decideProofSave({ ...base, titleOriginal: '第一章  開始', bodyCleaned: '<p>一</p>', titleText: '第二章  開始' }),
+    ).toEqual({ kind: 'save', editedTitle: '第二章  開始' });
+  });
+  it('標題上限照傳進來的模板上限', () => {
+    expect(
+      decideProofSave({ ...base, diary: false, bodyCleaned: '<p>一</p>', titleText: '字'.repeat(150), titleMaxLength: 200 }),
+    ).toEqual({ kind: 'save', editedTitle: '字'.repeat(150) });
+    expect(
+      decideProofSave({ ...base, bodyCleaned: '<p>一</p>', titleText: '字'.repeat(121), titleMaxLength: 120 }),
+    ).toMatchObject({ kind: 'invalid-title', message: '標題最多 120 個字' });
+  });
   it('標題裡的換行攤平', () => {
     expect(decideProofSave({ ...base, bodyCleaned: '<p>一</p>', titleText: '2026\n0928' })).toEqual({
       kind: 'save',
@@ -324,5 +389,20 @@ describe('打字模式的儲存（前端）', () => {
     expect(
       decideProofSave({ ...base, bodyCleaned: '<p>二</p>', titleText: '20260927', dropped: ['底線'] }),
     ).toEqual({ kind: 'confirm-drop', dropped: ['底線'] });
+  });
+});
+
+describe('直接進打字模式只對剛建立、第一次打開生效（審查 #4）', () => {
+  it('導覽到那一篇：留著', () => {
+    expect(keepEditOnOpen('u1', { name: 'job', uuid: 'u1' })).toBe('u1');
+  });
+  it('回總覽、按上一頁回新稿件畫面、換到別篇、去設定：作廢', () => {
+    expect(keepEditOnOpen('u1', { name: 'list' })).toBeNull();
+    expect(keepEditOnOpen('u1', { name: 'new' })).toBeNull();
+    expect(keepEditOnOpen('u1', { name: 'job', uuid: 'u2' })).toBeNull();
+    expect(keepEditOnOpen('u1', { name: 'setup' })).toBeNull();
+  });
+  it('本來就沒有：維持沒有', () => {
+    expect(keepEditOnOpen(null, { name: 'job', uuid: 'u1' })).toBeNull();
   });
 });

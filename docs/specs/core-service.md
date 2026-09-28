@@ -38,7 +38,8 @@ interface CoreService {
    * 帶基準＝上一版正文經 sanitize 與補段落後實際會發布的樣子（跟前端校樣同一份）：沒改的頂層區塊輸出基準的 HTML，只整理改過的。
    * 整理完是空字串（字全刪了）存成空段落（P5-T029）。
    * `editedTitle`（P5-T029）：在文章上直接改的標題，只換 `title`；可單獨給或跟 `editedBody` 一起給（同一個新版本）。
-   * 規則 `contract/plain-title.ts`：不能換行、不能有控制字元、修掉前後空白後不能是空的、最多 120 字，不合就 InvalidInputError、什麼都不寫。
+   * 規則 `contract/plain-title.ts`：不能換行、不能有控制字元、修掉前後空白後不能是空的、長度不超過**該篇模板 schema 的 `title.maxLength`**
+   * （日記、長文 120，通用文章 200；不寫死），不合就 InvalidInputError、什麼都不寫。中間的空白原樣保留。
    * 不能跟 `templateData` 同時給。標題跟正文整理後都跟目前這一版一樣就不建新版本、不撤銷核准。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;

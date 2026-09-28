@@ -171,6 +171,11 @@ function markBlank(body: HTMLElement): void {
  * 不能用 documentElement.scrollHeight：它至少等於 iframe 目前的高度，高度只會被撐大、不會縮回去。
  * 量 body 的底邊，再加上 body 的下外距（瀏覽器預設 8px）與最後一個子元素可能穿出來的下外距、html 的下內距與框線
  * ——少算任何一點，文件就會多出幾 px 可以捲。
+ *
+ * 浮動（`alignleft`／`alignright` 的圖）不撐高父元素：載入時外層把 body 設成 `display: flow-root`（CSSOM），
+ * body 的底邊才包得住最後一張浮動圖。再保險一層：文件的內容比 iframe 目前的高度還高（scrollHeight 大於 clientHeight，
+ * 例如絕對定位的東西穿出來），就用 scrollHeight——iframe 不能捲，少算就是把內容裁掉（P5-T029 審查 #3）。
+ * 只在「超出」時才用 scrollHeight：它至少等於 iframe 目前的高度，平常用它的話高度只會變大、不會縮回去。
  */
 function contentHeight(doc: Document): number {
   const win = doc.defaultView;
@@ -187,7 +192,12 @@ function contentHeight(doc: Document): number {
   let bottom = body.getBoundingClientRect().bottom + scrollY;
   if (last) bottom = Math.max(bottom, last.getBoundingClientRect().bottom + scrollY + lastMargin);
   bottom += px(bodyStyle?.marginBottom) + px(htmlStyle?.paddingBottom) + px(htmlStyle?.borderBottomWidth);
-  return Math.ceil(bottom);
+  const root = doc.documentElement;
+  const measured = Math.ceil(bottom);
+  if (root.scrollHeight > root.clientHeight) return Math.max(measured, root.scrollHeight);
+  // 差不到幾 px 就維持目前的高度：量法跟 scrollHeight 差個一兩 px 時，不會在「超出→撐高→縮回→又超出」之間來回跳。
+  if (root.clientHeight > measured && root.clientHeight - measured < 4) return root.clientHeight;
+  return measured;
 }
 
 interface BlockBox {
@@ -534,6 +544,8 @@ export function ProofView({
     if (!doc) return;
     // 文件不自己捲動（見檔頭「二」）：捲動全部交給外層，滑鼠停在文章上滾一次就動。
     doc.documentElement.style.overflow = 'hidden';
+    // body 包住浮動（alignleft／alignright 的圖），高度才量得到最後一張浮動圖的底（見 contentHeight）。
+    if (doc.body) doc.body.style.display = 'flow-root';
     // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
     setBodyMissing(doc.querySelector('.preview-body') === null);
     onPreviewedRef.current?.();
@@ -779,6 +791,7 @@ export function ProofView({
       titleText: title === null ? null : (title.textContent ?? ''),
       titleOriginal: originalTitle.current ?? savedTitle,
       diary: isDiary,
+      titleMaxLength: job.template.titleMaxLength,
     });
     if (decision.kind === 'unchanged') {
       // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，

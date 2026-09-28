@@ -70,9 +70,19 @@ D-030。新稿件畫面（`NewJob.tsx`）的內文大框沒有工具列、不會
   在同一頁把舊行為還原（拿掉 overflow、高度用舊算法：1334 vs 文件 1341）再滾一次，外層 scrollTop 停在 0。
   打 30 行字：iframe 高度跟著長到 2044＝文件 scrollHeight、iframe scrollY 0，外層自動捲到游標，往回滾一次外層就動。
 
+- **對抗性審查 4 條（low）已修**：
+  1. 標題只差空白被當成改動：`flattenTitleText` 只把換行（與編輯器塞的 NBSP）換成空格、不合併空白；比較改用 `sameTitle`（兩邊一起正規化）；
+     `checkPlainTitle` 只修前後空白，中間空白原樣存。
+  2. 標題上限寫死 120：改成照該篇模板 schema 的 `title.maxLength`（`titleMaxLengthFromSchema`；後端讀模板 schema，前端讀新增的
+     `JobTemplate.titleMaxLength`），通用文章 200。
+  3. 最後一個是浮動圖時高度量不到、被裁：body 用 CSSOM 設 `display: flow-root`；內容超出 iframe 時改用 scrollHeight（差 <4px 維持原高度防來回跳）。
+     無頭 Chrome 實測（長文校樣、插入真實模板的 alignright 規則與最後一張 900px 高的 alignright 圖）：iframe 高 2298、圖底 2258、沒裁；
+     拿掉 flow-root 用舊算法只量到 1398。
+  4. `editOnOpen` 殘留：`keepEditOnOpen` 在 route 變動時作廢（離開那一篇就清掉）、回總覽清掉、工作區載入失敗（或目標不在）也清掉。
+
 ## 中斷／接手紀錄
 - 最後完成：實作＋測試＋spec（2026-09-28，subagent）
-- 已通過驗證：`npm run verify` 66 檔／1352 測試綠；`?fixtures=1` 無頭 Chrome 走過新稿件→打字→改標題→儲存、空標題被擋、空內文反灰、發布擋空文章、貼上建稿
+- 已通過驗證：`npm run verify` 66 檔／1363 測試綠（審查修正後）；`?fixtures=1` 無頭 Chrome 走過新稿件→打字→改標題→儲存、空標題被擋、空內文反灰、發布擋空文章、貼上建稿
 - 下一步：主 session 審查 → 另派審查 → commit、開 PR；使用者手動驗證（只存草稿）
 - Blocker：無
 

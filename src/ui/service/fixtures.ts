@@ -639,7 +639,7 @@ function baseDiary(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'SOURCE',
     title: '20260828',
     target: DIARY_TARGET,
-    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'diary-v1', hash: '9f2c41ab7d6e0c53', strictness: 'flexible', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 120 },
     currentRevision: revision(1, 'source', { title: '20260828', slug: '20260828', body: DIARY_BODY }, '3a91c0d4e8b25f77'),
     revisionCount: 1,
     previewUrl: `/api/jobs/${uuid}/preview`,
@@ -666,7 +666,7 @@ function baseLongform(uuid: string, overrides: Partial<FixtureJob>): FixtureJob 
     state: 'RENDERED',
     title: '看得見的錯誤',
     target: LONGFORM_TARGET,
-    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'longform-v1', hash: '41d7be092ca6f318', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 120 },
     currentRevision: revision(
       3,
       'agent_review',
@@ -698,7 +698,7 @@ function baseArticle(uuid: string, overrides: Partial<FixtureJob>): FixtureJob {
     state: 'RENDERED',
     title: '文章要怎麼寫才不會亂',
     target: POST_TARGET,
-    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES },
+    template: { id: 'article-v1', hash: 'c3f81d2a0b9e4476', strictness: 'hybrid', allowedTags: TEMPLATE_TAGS, allowedSchemes: TEMPLATE_SCHEMES, titleMaxLength: 200 },
     currentRevision: revision(
       1,
       'source',
@@ -1186,7 +1186,10 @@ export const fixtureApi: PublisherApi = {
     // 在文章上改的標題（P5-T029）：跟後端同一條規則。
     let editedTitle: string | undefined;
     if (input.editedTitle !== undefined) {
-      const checked = checkPlainTitle(input.editedTitle, { diary: job.target?.contentType === 'diary' });
+      const checked = checkPlainTitle(input.editedTitle, {
+        diary: job.target?.contentType === 'diary',
+        maxLength: job.template?.titleMaxLength ?? null,
+      });
       if (!checked.ok) throw new Error(checked.message);
       editedTitle = checked.title;
       job.title = checked.title;

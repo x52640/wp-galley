@@ -217,6 +217,12 @@ export function Workspace({
     startEdit(null);
     onStartedEditing?.();
   }, [startEditing, loadedUuid, uuid, startEdit, onStartedEditing]);
+  // 剛建好的那一篇載入失敗（或發布目標已經不在）：這次不進打字模式，旗標也清掉，
+  // 不然之後重新讀取成功、或再打開同一篇時會莫名進打字模式（審查 #4）。
+  const loadFailed = (error !== null && job === null) || (job !== null && !isLoaded(job));
+  useEffect(() => {
+    if (startEditing && loadFailed) onStartedEditing?.();
+  }, [startEditing, loadFailed, onStartedEditing]);
 
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);

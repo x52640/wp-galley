@@ -352,6 +352,11 @@ export interface JobTemplate {
   readonly allowedTags: readonly string[];
   /** 連結可用的 scheme（manifest 的 allowedSchemes）。連結輸入框只收這些。 */
   readonly allowedSchemes: readonly string[];
+  /**
+   * 標題最多幾個字（schema 的 `title.maxLength`；null＝不限）。在文章上改標題、「標題與網址」抽屜照它擋（P5-T029 審查 #2）。
+   * 後端 createRevision 從模板 schema 自己讀，不信這個值。
+   */
+  readonly titleMaxLength: number | null;
 }
 
 export interface Revision {
