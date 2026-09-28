@@ -6,7 +6,15 @@ import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
 import { FormatBar, type LinkEditorState } from './FormatBar.js';
-import { availableCommands, formatStateFrom, shortcutCommand, type FormatCommand, type FormatState } from '../lib/rich-format.js';
+import {
+  availableCommands,
+  decideEditSave,
+  formatStateFrom,
+  nextLinkEditor,
+  shortcutCommand,
+  type FormatCommand,
+  type FormatState,
+} from '../lib/rich-format.js';
 import {
   applyLink,
   cleanEditedBody,
@@ -253,6 +261,7 @@ export function ProofView({
   const [linkEditor, setLinkEditor] = useState<LinkEditorState | null>(null);
   /** 打開連結輸入框時存下的選取範圍與既有連結：焦點離開 iframe 後還要套在同一段字上。 */
   const linkTarget = useRef<{ range: Range | null; existing: Element | null } | null>(null);
+  const linkSessions = useRef(0);
   /** 存檔時發現有模板不支援、會被拿掉的格式：先講出來，使用者按「照樣存」才存。 */
   const [dropWarning, setDropWarning] = useState<string[] | null>(null);
 
@@ -413,7 +422,9 @@ export function ProofView({
     if (!doc || !body || !commandsRef.current.includes('link')) return;
     const existing = currentLink(doc, body);
     linkTarget.current = { range: saveSelection(doc, body), existing };
-    setLinkEditor({ current: existing?.getAttribute('href') ?? null });
+    linkSessions.current += 1;
+    const counter = linkSessions.current;
+    setLinkEditor((previous) => nextLinkEditor(previous, existing?.getAttribute('href') ?? null, counter));
   }, []);
 
   const closeLinkEditor = useCallback((refocus = true) => {
@@ -634,12 +645,22 @@ export function ProofView({
     const { html, dropped } = cleanEditedBody(body, allow);
     // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
     const original = originalBody.current;
-    if (html === (originalClean.current ?? (original ?? '').trim())) {
+    const decision = decideEditSave({
+      cleaned: html,
+      originalClean: originalClean.current ?? (original ?? '').trim(),
+      dropped,
+      force,
+    });
+    if (decision === 'unchanged') {
+      // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，
+      // 不然校樣多一個空區塊，「在這裡插圖」的索引會跟後端差一格（審查 #1）。
+      if (original !== null) body.innerHTML = original;
+      measure(measureToken.current);
       onEndEdit?.();
       return;
     }
     // 格式不能默默消失：有會被拿掉的，先講出來。
-    if (dropped.length > 0 && !force) {
+    if (decision === 'confirm-drop') {
       setDropWarning(dropped);
       return;
     }

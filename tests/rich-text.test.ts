@@ -128,10 +128,9 @@ describe('存檔：整理瀏覽器編輯器產生的形狀', () => {
     );
   });
 
-  it('子清單後面還有字：拆成下一個項目（古騰堡存不了「子清單在字前面」）', () => {
-    expect(edit('<ul><li>一<ul><li>一之一</li></ul>尾巴</li></ul>').html).toBe(
-      '<ul><li>一<ul><li>一之一</li></ul></li><li>尾巴</li></ul>',
-    );
+  it('子清單後面還有字：照原本順序留在同一個項目，不自己造新項目（審查 #5）', () => {
+    const body = '<ol><li>A<ul><li>B</li></ul>Conclusion</li><li>C</li></ol>';
+    expect(edit(body).html).toBe(body);
   });
 
   it('清單項目裡的 div／p 攤平成一行一行（br 分開）', () => {
@@ -206,6 +205,62 @@ describe('存檔：整理瀏覽器編輯器產生的形狀', () => {
     const result = cleanRich(htmlToRich('<p><u>底</u><b>粗</b></p>'), { mode: 'edit' });
     expect(serializeRich(result.nodes)).toBe('<p><u>底</u><strong>粗</strong></p>');
     expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('Codex 審查 #2–#5 的回歸', () => {
+  it('#2 清單身上的粗體套進每個項目，不包住整個清單、不吃掉項目邊界', () => {
+    const html = '<ul style="font-weight:bold"><li>A</li><li>B</li></ul>';
+    expect(paste(html)).toBe('<ul><li><strong>A</strong></li><li><strong>B</strong></li></ul>');
+    expect(edit(html).html).toBe('<ul><li><strong>A</strong></li><li><strong>B</strong></li></ul>');
+  });
+
+  it('#2 粗體／斜體包著好幾段：各段各自粗／斜，段落還是段落', () => {
+    expect(paste('<b><p>一</p><p>二</p></b>')).toBe('<p><strong>一</strong></p><p><strong>二</strong></p>');
+    expect(paste('<span style="font-style:italic"><ul><li>項<ul><li>子</li></ul></li></ul></span>')).toBe(
+      '<ul><li><em>項</em><ul><li><em>子</em></li></ul></li></ul>',
+    );
+  });
+
+  it('#3 項目裡的區塊跟後面的字之間要分開', () => {
+    expect(edit('<ul><li><div>First</div>Second</li></ul>').html).toBe('<ul><li>First<br>Second</li></ul>');
+    expect(edit('<ul><li>Zero<div>First</div>Second</li></ul>').html).toBe('<ul><li>Zero<br>First<br>Second</li></ul>');
+  });
+
+  it('#4 包裝元素裡的子清單照樣是子清單，層級不消失', () => {
+    expect(edit('<ul><li><div>A<ul><li>B</li></ul></div></li></ul>').html).toBe('<ul><li>A<ul><li>B</li></ul></li></ul>');
+    expect(paste('<ol><li><p>A</p><div><ol><li>B</li></ol></div></li></ol>')).toBe('<ol><li>A<ol><li>B</li></ol></li></ol>');
+  });
+});
+
+describe('不變式：沒改過的合法正文，整理後逐字不變（審查 #5）', () => {
+  // 站上實際會出現的形狀（wordpress-site.md 的區塊詞彙）加上 sanitize 放得過的合法 HTML。
+  const LEGAL: readonly string[] = [
+    '<p class="wp-block-paragraph has-medium-font-size">段落 <strong>粗<em>粗斜</em></strong> <a href="https://a.test/?a=1&amp;b=2" title="t">連</a><br>換行</p>',
+    '<p>&nbsp;</p>',
+    '<p><img src="https://a.test/i.png" alt="" class="wp-image-3"> 圖旁的字</p>',
+    '<h2 class="wp-block-heading">大標</h2>',
+    '<h3 class="wp-block-heading has-medium-font-size"><strong>小標</strong></h3>',
+    '<ul class="wp-block-list"><li>a</li><li>b<ul class="wp-block-list"><li>c<ol class="wp-block-list"><li>d</li></ol></li></ul></li></ul>',
+    '<ul>\n<li>有換行縮排</li>\n<li>第二項</li>\n</ul>',
+    '<ol start="3" reversed=""><li>A<ul><li>B</li></ul>Conclusion</li><li>C</li></ol>',
+    '<ol><li>A<ul><li>B</li></ul> <strong>尾巴</strong> 字</li></ol>',
+    '<ul><li><strong>粗項目</strong>與<a href="mailto:a@b.c">信</a></li></ul>',
+    '<blockquote class="wp-block-quote"><p>一</p>\n<p>二</p></blockquote>',
+    '<blockquote class="wp-block-quote"><p>引</p><ul><li>引用裡的清單</li></ul></blockquote>',
+    '<figure class="wp-block-image size-large"><img src="https://a.test/x.jpg" alt="說&quot;明" class="wp-image-5" width="800" height="600"></figure>',
+    '<figure class="wp-block-image aligncenter size-full is-resized"><img src="https://a.test/y.jpg" alt=""><figcaption class="wp-element-caption">圖說 <em>斜</em></figcaption></figure>',
+    '<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide">',
+    '<hr>',
+  ];
+
+  it.each(LEGAL)('%s', (html) => {
+    expect(edit(html)).toEqual({ html, dropped: [] });
+  });
+
+  it('全部接在一起（最外層用換行分隔，同後端的慣例）也不變', () => {
+    const body = LEGAL.join('\n');
+    expect(edit(body)).toEqual({ html: body, dropped: [] });
   });
 });
 

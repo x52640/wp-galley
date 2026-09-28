@@ -154,3 +154,39 @@ export const COMMAND_LABELS: Readonly<Record<FormatCommand, { label: string; hin
   quote: { label: '引用', hint: '引用' },
   hr: { label: '分隔線', hint: '在這段後面加分隔線' },
 };
+
+/** 連結輸入框的一次開啟。 */
+export interface LinkEditorState {
+  /** 已經是連結時的網址；新連結是 null。 */
+  readonly current: string | null;
+  /**
+   * 第幾次打開。輸入框以它當 key：開著 A 的輸入框時改選連結 B 再按連結，要換成 B 的網址重新開始，
+   * 不能留著 A 打到一半的字——不然按「更新」會把 B 改成 A 的網址（審查 #6）。
+   */
+  readonly session: number;
+}
+
+/** 打開（或在開著的時候重新打開）連結輸入框。每次都是新的一次，輸入框內容從 `current` 重新開始。 */
+export function nextLinkEditor(previous: LinkEditorState | null, current: string | null, counter: number): LinkEditorState {
+  return { current, session: Math.max(counter, (previous?.session ?? 0) + 1) };
+}
+
+export type EditSaveDecision = 'unchanged' | 'confirm-drop' | 'save';
+
+/**
+ * 按「儲存」之後要做什麼。
+ * - `unchanged`：整理後跟進入編輯時一樣（例如只按了 Enter 多一個空段落）。不送出，但**畫面要還原成進入編輯時的正文**
+ *   並重量：不還原的話校樣多一個空區塊，之後「在第 n 段後插圖」的索引就跟後端對不上（審查 #1）。
+ * - `confirm-drop`：有模板不支援、會被拿掉的格式，先講出來。
+ * - `save`：送出。
+ */
+export function decideEditSave(input: {
+  readonly cleaned: string;
+  readonly originalClean: string;
+  readonly dropped: readonly string[];
+  readonly force: boolean;
+}): EditSaveDecision {
+  if (input.cleaned === input.originalClean) return 'unchanged';
+  if (input.dropped.length > 0 && !input.force) return 'confirm-drop';
+  return 'save';
+}

@@ -57,6 +57,9 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
   `JobDetail.template` 加 `allowedTags`／`allowedSchemes`（契約新增欄位）、spec 更新
 - 已通過驗證：`npm run verify` 65 檔 / 1213 測試；`?fixtures=1` 用無頭 Chrome 走過工具列、⌘B／⌘I／⌘K、連結輸入框（擋 javascript:）、
   貼上髒 HTML、存檔、不支援格式的提醒
+- Codex 審查（PR #2）6 條 medium 已修（未 commit）：沒實質改動就存檔時還原畫面並重量；繼承的粗斜體往下套到區塊內、不包住清單；
+  清單項目攤平時區塊與後面的字分段、穿過包裝取出子清單；子清單後面還有字的項目照原樣留著（發布走 wp:html 保底），
+  補「沒改過的合法正文逐字不變」不變式測試；連結輸入框每次打開以 session 為 key 重建。verify 65 檔 / 1241 測試
 - 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 

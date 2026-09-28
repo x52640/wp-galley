@@ -3,7 +3,9 @@ import {
   availableCommands,
   formatStateFrom,
   isCommandActive,
+  decideEditSave,
   isCommandEnabled,
+  nextLinkEditor,
   parseLinkInput,
   shortcutCommand,
 } from '../src/ui/lib/rich-format.js';
@@ -134,5 +136,38 @@ describe('連結網址輸入', () => {
     expect(parseLinkInput('   ', schemes).ok).toBe(false);
     expect(parseLinkInput('hello world', schemes).ok).toBe(false);
     expect(parseLinkInput('/relative', schemes).ok).toBe(false);
+  });
+});
+
+describe('審查 #1：沒實質改動就存檔', () => {
+  it('整理後相同＝unchanged（畫面要還原、不送出），就算有會被拿掉的格式也一樣', () => {
+    expect(decideEditSave({ cleaned: '<p>a</p>', originalClean: '<p>a</p>', dropped: [], force: false })).toBe('unchanged');
+    expect(decideEditSave({ cleaned: '<p>a</p>', originalClean: '<p>a</p>', dropped: ['底線'], force: false })).toBe('unchanged');
+  });
+
+  it('有改動：有會被拿掉的格式先確認，按了照樣存才送', () => {
+    expect(decideEditSave({ cleaned: '<p>b</p>', originalClean: '<p>a</p>', dropped: ['底線'], force: false })).toBe('confirm-drop');
+    expect(decideEditSave({ cleaned: '<p>b</p>', originalClean: '<p>a</p>', dropped: ['底線'], force: true })).toBe('save');
+    expect(decideEditSave({ cleaned: '<p>b</p>', originalClean: '<p>a</p>', dropped: [], force: false })).toBe('save');
+  });
+});
+
+describe('審查 #6：開著連結 A 的輸入框時改開連結 B', () => {
+  it('每次打開都是新的一次（輸入框以 session 當 key 重建），網址換成 B 的', () => {
+    const a = nextLinkEditor(null, 'https://a.test/', 1);
+    const b = nextLinkEditor(a, 'https://b.test/', 2);
+    expect(b.current).toBe('https://b.test/');
+    expect(b.session).not.toBe(a.session);
+  });
+
+  it('同一個連結再按一次也重新開始（打到一半的字丟掉）', () => {
+    const first = nextLinkEditor(null, 'https://a.test/', 1);
+    const again = nextLinkEditor(first, 'https://a.test/', 2);
+    expect(again.session).not.toBe(first.session);
+  });
+
+  it('計數器落後也不會撞到上一次的 session', () => {
+    const first = nextLinkEditor(null, null, 5);
+    expect(nextLinkEditor(first, null, 3).session).toBeGreaterThan(first.session);
   });
 });

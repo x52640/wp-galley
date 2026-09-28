@@ -204,6 +204,34 @@ describe('P5-T028：格式存檔後渲染與區塊正確', () => {
     expect(markup).not.toContain('wp:html');
   });
 
+  it('審查 #5：沒動到的「子清單後面還有字」清單，改別段存檔後結構不變，發布照舊走 wp:html 保底', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const list = '<ol><li>A<ul><li>B</li></ul>Conclusion</li><li>C</li></ol>';
+    const uuid = core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      title: '20260928',
+      templateData: { title: '20260928', body: `<p>一</p>\n${list}` },
+    }).uuid;
+    // 使用者只改了第一段。
+    core.createRevision(uuid, { editedBody: `<p>一改過</p>\n${list}` });
+    const html = core.render(uuid).publishHtml;
+    expect(html).toBe(`<p>一改過</p>\n${list}`);
+    const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+    const result = toBlockMarkup(html);
+    expect(result.fallbackCount).toBe(1);
+    expect(result.markup).toContain(`<!-- wp:html -->\n${list}\n<!-- /wp:html -->`);
+  });
+
+  it('審查 #2：清單身上的粗體，後端整理與古騰堡輸出都還是兩個項目', async () => {
+    const normalized = normalizeEditedBody('<ul style="font-weight:bold"><li>A</li><li>B</li></ul>');
+    expect(normalized).toBe('<ul><li><strong>A</strong></li><li><strong>B</strong></li></ul>');
+    const { toBlockMarkup } = await import('../src/wordpress/blocks.js');
+    const result = toBlockMarkup(normalized);
+    expect(result.blocks[0]).toMatchObject({ type: 'list', items: [{ html: '<strong>A</strong>' }, { html: '<strong>B</strong>' }] });
+  });
+
   it('日記（flexible）同樣存得起來', async () => {
     fixture = await createCoreFixture();
     const { core } = fixture;

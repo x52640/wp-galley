@@ -7,6 +7,7 @@ import {
   parseLinkInput,
   type FormatCommand,
   type FormatState,
+  type LinkEditorState,
 } from '../lib/rich-format.js';
 
 /**
@@ -34,10 +35,7 @@ const GROUPS: readonly (readonly FormatCommand[])[] = [
   ['hr'],
 ];
 
-export interface LinkEditorState {
-  /** 已經是連結時的網址；新連結是 null。 */
-  readonly current: string | null;
-}
+export type { LinkEditorState };
 
 export function FormatBar({
   commands,
@@ -102,6 +100,8 @@ export function FormatBar({
       </div>
       {link !== null && (
         <LinkEditor
+          // 每次打開都是新的輸入框：換了目標連結，內容從那個連結的網址重新開始（審查 #6）。
+          key={link.session}
           current={link.current}
           schemes={schemes}
           onApply={onApplyLink}

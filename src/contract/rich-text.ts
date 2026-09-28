@@ -205,10 +205,41 @@ function keepAttrs(ctx: Context, attrs: readonly RichAttr[]): RichAttr[] {
   return attrs.filter((attr) => !isEditorAttribute(attr.name));
 }
 
-/** 用 strong／em 包起來（樣式說它是粗／斜體時）。模板不允許就不包。 */
+/**
+ * 用 strong／em 包起來（樣式說它是粗／斜體時）。模板不允許就不包。
+ *
+ * 裡面有區塊（`<ul style="font-weight:bold"><li>…`、`<b><p>…</p></b>`）時**不能包住整個區塊**：
+ * 包住的話之後行內位置會把區塊攤平，清單邊界就被吃掉（`<li><strong>A<br>B</strong></li>`，審查 #2）。
+ * 改成把粗／斜體往下套到每個區塊裡的行內內容；區塊之間的空白不包。
+ */
 function wrapStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: boolean): RichNode[] {
+  if (nodes.length === 0 || (!bold && !italic)) return nodes;
+  if (!nodes.some((node) => isBlockish(node))) return wrapInlineStyled(ctx, nodes, bold, italic);
+  const out: RichNode[] = [];
+  let run: RichNode[] = [];
+  const flush = (): void => {
+    if (run.some((node) => !isWhitespace(node))) out.push(...wrapInlineStyled(ctx, run, bold, italic));
+    else out.push(...run);
+    run = [];
+  };
+  for (const node of nodes) {
+    if (node.type === 'element' && isBlockish(node)) {
+      flush();
+      out.push(
+        node.tag === 'hr' || node.tag === 'figure'
+          ? node
+          : element(node.tag, node.attrs, wrapStyled(ctx, [...node.children], bold, italic)),
+      );
+      continue;
+    }
+    run.push(node);
+  }
+  flush();
+  return out;
+}
+
+function wrapInlineStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: boolean): RichNode[] {
   let out = nodes;
-  if (out.length === 0) return out;
   if (italic && isAllowed(ctx, 'em')) out = [element('em', [], out)];
   if (bold && isAllowed(ctx, 'strong')) out = [element('strong', [], out)];
   return out;
@@ -244,6 +275,8 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
       return children;
     }
     if (children.length === 0) return [];
+    // 粗體包著區塊（`<b><p>…</p><p>…</p></b>`）：粗體套進每個區塊，不包住區塊。
+    if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, true, italic);
     return wrapStyled(ctx, [element('strong', keepAttrs(ctx, node.attrs), children)], false, italic);
   }
   if (tag === 'i' || tag === 'em') {
@@ -252,6 +285,7 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
       return children;
     }
     if (children.length === 0) return [];
+    if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, bold === true, true);
     return wrapStyled(ctx, [element('em', keepAttrs(ctx, node.attrs), children)], bold === true, false);
   }
 
@@ -488,10 +522,10 @@ function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean): 
 }
 
 /**
- * 清單。古騰堡的清單項目只能是「字，然後子清單」：
+ * 清單：
  * - `ul` 直接包 `ul`（Chrome 縮排、Google 文件的巢狀清單）→ 收進上一個項目；
- * - 子清單後面還有字 → 那段字變成下一個項目；
  * - 清單裡不是項目的內容 → 自成一個項目；
+ * - 項目的內容見 `listItems`（子清單後面的字留在原項目，不拆）；
  * - 沒有字也沒有子清單的項目（`<li><br></li>`）拿掉；一個項目都沒有的清單整個拿掉。
  */
 function listBlock(list: RichElement): RichElement | null {
@@ -532,46 +566,73 @@ function listBlock(list: RichElement): RichElement | null {
   return element(list.tag, list.attrs, items);
 }
 
-function listItems(li: RichElement): RichElement[] {
-  const out: RichElement[] = [];
-  let inline: RichNode[] = [];
-  let nested: RichNode[] = [];
-  let attrs = li.attrs;
+type ItemToken = { readonly kind: 'inline'; readonly node: RichNode } | { readonly kind: 'break' } | { readonly kind: 'list'; readonly node: RichElement };
 
-  const close = (): void => {
-    const content = inlineFlow(inline);
-    const hasNested = nested.some((node) => !isWhitespace(node));
-    if (!isEmptyInline(content) || hasNested) out.push(element('li', attrs, [...content, ...nested]));
-    inline = [];
-    nested = [];
-    attrs = [];
-  };
-
-  for (const child of li.children) {
-    if (child.type === 'element' && (child.tag === 'ul' || child.tag === 'ol')) {
-      const sub = listBlock(child);
-      if (sub !== null) nested.push(sub);
-      continue;
+/**
+ * 把清單項目的內容攤成一串：行內節點、分段、子清單。項目裡的段落、div、標題、引用是「包裝」：
+ * 穿過它往下找，裡面的字前後要分段（`<div>First</div>Second` 不能黏成 `FirstSecond`，審查 #3），
+ * 裡面的子清單照樣是子清單（`<div>A<ul>…</ul></div>` 不能被攤成字，審查 #4）。
+ */
+function itemTokens(nodes: readonly RichNode[]): ItemToken[] {
+  const out: ItemToken[] = [];
+  for (const node of nodes) {
+    if (node.type === 'element' && (node.tag === 'ul' || node.tag === 'ol')) {
+      out.push({ kind: 'list', node });
+    } else if (node.type === 'element' && isBlockish(node)) {
+      if (node.tag === 'hr') continue;
+      out.push({ kind: 'break' }, ...itemTokens(node.children), { kind: 'break' });
+    } else {
+      out.push({ kind: 'inline', node });
     }
-    if (nested.length > 0) {
-      if (isWhitespace(child)) {
-        nested.push(child);
-        continue;
-      }
-      close();
-    }
-    if (child.type === 'element' && isBlockish(child)) {
-      // 項目裡的段落、div、標題、引用：攤平成字，跟前面的字用 br 隔開。
-      const pieces = trimInline(inlineFlow(child.children));
-      if (pieces.length === 0) continue;
-      if (hasContentBefore(inline)) inline.push(element('br', [], []));
-      inline.push(...pieces);
-      continue;
-    }
-    inline.push(child);
   }
-  close();
   return out;
+}
+
+/**
+ * 一個清單項目。內容**照原本的順序**留著，不拆成新項目：子清單後面還有字（`<li>A<ul>…</ul>結論</li>`）
+ * 是合法的 HTML，古騰堡的清單項目存不了這個順序，發布時整個清單走 wp:html 保底（block-parse 的規則）；
+ * 這裡自己拆成新項目會把後面的項目編號往後推，沒改過的正文也會變（審查 #5）。
+ * 沒有字也沒有子清單的項目（`<li><br></li>`）拿掉。
+ */
+function listItems(li: RichElement): RichElement[] {
+  const children: RichNode[] = [];
+  let pendingBreak = false;
+  let hasList = false;
+  for (const token of itemTokens(li.children)) {
+    if (token.kind === 'break') {
+      pendingBreak = true;
+      continue;
+    }
+    if (token.kind === 'list') {
+      const sub = listBlock(token.node);
+      if (sub !== null) {
+        children.push(sub);
+        hasList = true;
+      }
+      pendingBreak = false;
+      continue;
+    }
+    const pieces = inlineFlow([token.node]);
+    if (pieces.length === 0) continue;
+    if (pendingBreak) {
+      // 包裝裡的字頭尾的空白是排版，不是內容。
+      const trimmed = trimInline(pieces);
+      if (trimmed.length === 0) continue;
+      if (hasContentBefore(children) && !endsWithList(children)) children.push(element('br', [], []));
+      children.push(...trimmed);
+      pendingBreak = false;
+      continue;
+    }
+    children.push(...pieces);
+  }
+  const text = children.filter((node) => !(node.type === 'element' && (node.tag === 'ul' || node.tag === 'ol')));
+  if (!hasList && isEmptyInline(text)) return [];
+  return [element('li', li.attrs, children)];
+}
+
+function endsWithList(nodes: readonly RichNode[]): boolean {
+  const last = [...nodes].reverse().find((node) => !isWhitespace(node));
+  return last !== undefined && last.type === 'element' && (last.tag === 'ul' || last.tag === 'ol');
 }
 
 // ---------------------------------------------------------------------------
