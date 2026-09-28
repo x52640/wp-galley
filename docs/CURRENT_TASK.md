@@ -12,6 +12,7 @@
 
 ## 進行中
 
+- [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），`in_progress`。
 - [P5-T027](tasks/P5-T027-keep-edited-brief.md)：使用者改過的配圖描述不被 AI 蓋掉（D-027），已 commit（審查 3 條低度，只改文件說法），**待使用者手動驗證**。
 - P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。蓋掉使用者改過描述的問題 → P5-T027。
 - [P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），已 commit（審查後修 3 條），**待使用者手動驗證**（真實 CLI 是否接受新 schema、是否用官方英文片名；只存草稿）。
