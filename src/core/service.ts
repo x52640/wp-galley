@@ -751,7 +751,11 @@ export class CoreService {
     const templateData =
       input.editedBody === undefined
         ? (input.templateData ?? base.templateData)
-        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody, { allowedSchemes: template.manifest.allowedSchemes }) };
+        : { ...base.templateData, [template.manifest.publishSlot]: normalizeEditedBody(input.editedBody, {
+              allowedSchemes: template.manifest.allowedSchemes,
+              // 上一版的正文：沒改的頂層區塊逐字沿用它（P5-T028 審查）。
+              previousBody: base.templateData[template.manifest.publishSlot] as string | null | undefined ?? null,
+            }) };
 
     const payload: RevisionPayload = {
       templateData,

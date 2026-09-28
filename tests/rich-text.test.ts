@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   cleanRich,
+  cleanRichEdit,
+  richUnits,
+  serializeRichEdit,
   safeHref,
   serializeRich,
   type RichElement,
   type RichNode,
 } from '../src/contract/rich-text.js';
-import { htmlToRich } from '../src/core/html-blocks.js';
+import { htmlToRich, htmlToRichUnits, normalizeEditedBody } from '../src/core/html-blocks.js';
 
 /**
  * P5-T028：直接在文章上改時可以加格式。
@@ -67,7 +70,7 @@ describe('貼上：保留 allowlist 內的格式，其餘丟掉、字留著', ()
     const html =
       '<div class="article"><h1 style="font-size:3em">大標</h1><h4>小節</h4>' +
       '<p>字<font color="red">紅</font><u>底線</u> <script>alert(1)</script><a href="javascript:alert(1)">壞連結</a> ' +
-      '<a href="/relative">相對</a> <a href="https://ok.com" target="_blank" onclick="x()">好</a></p>' +
+      '<a href="../relative">相對</a> <a href="https://ok.com" target="_blank" onclick="x()">好</a></p>' +
       '<img src="https://x.com/a.png" alt="圖"><table><tr><td>格子</td></tr></table></div>';
     expect(paste(html)).toBe(
       '<h2>大標</h2><h3>小節</h3><p>字紅底線 壞連結 相對 <a href="https://ok.com">好</a></p><p>格子</p>',
@@ -258,6 +261,13 @@ describe('不變式：沒改過的合法正文，整理後逐字不變（審查 
     expect(edit(html)).toEqual({ html, dropped: [] });
   });
 
+  it('新策略：全部接在一起、只改最前面加的一段，其他每一塊逐字不變（前端與後端兩條路）', () => {
+    const original = ['<p>會改的一段</p>', ...LEGAL].join('\n');
+    const edited = original.replace('會改的一段', '改過了');
+    expect(editAgainst(original, edited)).toEqual({ html: edited, dropped: [] });
+    expect(normalizeEditedBody(edited, { previousBody: original })).toBe(edited);
+  });
+
   it('全部接在一起（最外層用換行分隔，同後端的慣例）也不變', () => {
     const body = LEGAL.join('\n');
     expect(edit(body)).toEqual({ html: body, dropped: [] });
@@ -270,8 +280,169 @@ describe('safeHref', () => {
     expect(safeHref('mailto:a@b.c', SCHEMES)).toBe('mailto:a@b.c');
     expect(safeHref('javascript:alert(1)', SCHEMES)).toBeNull();
     expect(safeHref('java\nscript:alert(1)', SCHEMES)).toBeNull();
-    expect(safeHref('/relative', SCHEMES)).toBeNull();
+    expect(safeHref('../relative', SCHEMES)).toBeNull();
     expect(safeHref('//evil.com', SCHEMES)).toBeNull();
     expect(safeHref('https://a.com/x', ['http'])).toBeNull();
+  });
+});
+
+/** 編輯存檔：只整理改過的頂層區塊（前端的走法：原始的區塊從同一種樹切出來）。 */
+function editAgainst(original: string, edited: string, tags: readonly string[] = LONGFORM_TAGS): { html: string; dropped: string[] } {
+  const result = cleanRichEdit(htmlToRich(edited), richUnits(htmlToRich(original)), { allowedTags: tags, allowedSchemes: SCHEMES });
+  return { html: serializeRichEdit(result), dropped: result.dropped };
+}
+
+describe('新策略：沒改的頂層區塊原樣保留，只整理改過的（審查 F3／F5／#5）', () => {
+  // 整理規則會改寫的合法形狀：以前使用者沒碰也會被改。
+  const TOUCHY = [
+    '<ul><li><h2>Heading</h2><blockquote><p>Quote</p></blockquote></li></ul>',
+    '<ul><li>A<hr>B</li></ul>',
+    '<p><a href="../post">相對</a></p>',
+    '<ol><li>A<ul><li>B</li></ul>Conclusion</li><li>C</li></ol>',
+    '<p><b>舊的 b</b><span style="color:red">紅</span></p>',
+    '<div>頂層 div</div>',
+  ];
+  const ORIGINAL = ['<p>第一段</p>', ...TOUCHY, '<p>最後一段</p>'].join('\n');
+
+  it('只改第一段：其他區塊（含整理規則會動的形狀）逐字不變，不提醒', () => {
+    const edited = ORIGINAL.replace('第一段', '第一段改過');
+    expect(editAgainst(ORIGINAL, edited)).toEqual({ html: edited, dropped: [] });
+  });
+
+  it('中間插入一段：前後的區塊都還是原樣（序列比對，不是位置對齊）', () => {
+    const edited = ORIGINAL.replace('<p>第一段</p>', '<p>第一段</p>\n<p>新插的<b>一段</b></p>');
+    const expected = ORIGINAL.replace('<p>第一段</p>', '<p>第一段</p>\n<p>新插的<strong>一段</strong></p>');
+    expect(editAgainst(ORIGINAL, edited)).toEqual({ html: expected, dropped: [] });
+  });
+
+  it('刪掉一段：其他區塊都還是原樣', () => {
+    const edited = ORIGINAL.replace('<p>第一段</p>\n', '');
+    expect(editAgainst(ORIGINAL, edited)).toEqual({ html: edited, dropped: [] });
+  });
+
+  it('Enter 多出空段落、又刪掉一段：整理只作用在新的空段落', () => {
+    const edited = ORIGINAL.replace('<p>最後一段</p>', '<p><br></p>').replace('<p>第一段</p>', '<p>第一段</p><p><br></p>');
+    expect(editAgainst(ORIGINAL, edited).html).toBe(ORIGINAL.replace('\n<p>最後一段</p>', ''));
+  });
+
+  it('改過的區塊照樣整理，丟掉的格式一定要提醒（審查 F3）', () => {
+    const edited = ORIGINAL.replace('<ul><li>A<hr>B</li></ul>', '<ul><li>A改<hr>B</li></ul>').replace(
+      '<ul><li><h2>Heading</h2>',
+      '<ul><li><h2>Heading改</h2>',
+    );
+    const result = editAgainst(ORIGINAL, edited);
+    expect(result.html).toContain('<ul><li>A改<br>B</li></ul>');
+    expect(result.html).toContain('<ul><li>Heading改<br>Quote</li></ul>');
+    expect(result.dropped).toEqual(['標題', '引用', '分隔線']);
+  });
+
+  it('改過的區塊裡不收的相對連結：只留字並提醒', () => {
+    const edited = ORIGINAL.replace('相對</a>', '相對改</a>');
+    const result = editAgainst(ORIGINAL, edited);
+    expect(result.html).toContain('<p>相對改</p>');
+    expect(result.dropped).toEqual(['連結']);
+  });
+
+  it('後端：沒改的區塊逐字用上一版的原始片段（連 <br/>、單引號這種寫法都不動）', () => {
+    const previous = "<p class='a'>一<br/>二</p>\n\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三</p>";
+    // 前端送回來的是瀏覽器序列化過的樣子。
+    const edited = '<p class="a">一<br>二</p>\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三改過</p>';
+    expect(normalizeEditedBody(edited, { previousBody: previous })).toBe(
+      "<p class='a'>一<br/>二</p>\n<ul><li>A<ul><li>B</li></ul>尾</li></ul>\n<p>三改過</p>",
+    );
+  });
+
+  it('後端：區塊切法與原始片段', () => {
+    const units = htmlToRichUnits('前面的字 <b>粗</b>\n<p>段</p>\n  \n<hr/>');
+    expect(units.map((unit) => unit.source)).toEqual(['前面的字 <b>粗</b>', '<p>段</p>', '<hr/>']);
+  });
+
+  it('頂層的字改過：跟前後的區塊分開整理，包成段落', () => {
+    const result = editAgainst('<p>一</p>', '<p>一</p>新打的字');
+    expect(result.html).toBe('<p>一</p>\n<p class="wp-block-paragraph">新打的字</p>');
+  });
+});
+
+describe('Codex 第二輪 F1／F2／F4 的回歸', () => {
+  it('F1 項目裡段落的字與字之間的空白不能被修掉', () => {
+    expect(edit('<ul><li><p>Hello <strong>world</strong></p></li></ul>').html).toBe('<ul><li>Hello <strong>world</strong></li></ul>');
+    expect(edit('<ul><li><div>A <em>b</em> c</div><div> d </div></li></ul>').html).toBe('<ul><li>A <em>b</em> c<br>d</li></ul>');
+    expect(paste('<ul><li><p><span>Hello</span> <b>world</b></p></li></ul>')).toBe('<ul><li>Hello <strong>world</strong></li></ul>');
+  });
+
+  it('F2 連結包著子清單：子清單留著，連結拆到兩段字上', () => {
+    expect(edit('<ul><li><a href="https://a.test">A<ul><li>B</li></ul></a></li></ul>').html).toBe(
+      '<ul><li><a href="https://a.test">A</a><ul><li><a href="https://a.test">B</a></li></ul></li></ul>',
+    );
+  });
+
+  it('F2 連結包著區塊與後面的字：分段、連結都在', () => {
+    expect(edit('<ul><li><a href="https://a.test"><div>First</div>Second</a></li></ul>').html).toBe(
+      '<ul><li><a href="https://a.test">First</a><br><a href="https://a.test">Second</a></li></ul>',
+    );
+    expect(paste('<a href="https://a.test"><p>一</p><p>二</p></a>')).toBe(
+      '<p><a href="https://a.test">一</a></p><p><a href="https://a.test">二</a></p>',
+    );
+  });
+
+  it('F2 粗體包著連結包著區塊（多層透明包裝）', () => {
+    expect(paste('<b><a href="https://a.test"><p>一</p><ul><li>二</li></ul></a></b>')).toBe(
+      '<p><strong><a href="https://a.test">一</a></strong></p><ul><li><strong><a href="https://a.test">二</a></strong></li></ul>',
+    );
+  });
+
+  it('F4 粗體裡明講不粗的字：拆開包，不會整理回整段粗', () => {
+    expect(edit('<p><strong>A<span style="font-weight:normal">B</span>C</strong></p>').html).toBe(
+      '<p><strong>A</strong>B<strong>C</strong></p>',
+    );
+    expect(edit('<p><strong>A<span style="font-weight:400">B</span></strong></p>').html).toBe('<p><strong>A</strong>B</p>');
+  });
+
+  it('F4 不粗的字藏在連結裡：連結跟著切開', () => {
+    expect(edit('<p><b>A<a href="https://a.test">L<span style="font-weight:normal">N</span></a></b></p>').html).toBe(
+      '<p><strong>A<a href="https://a.test">L</a></strong><a href="https://a.test">N</a></p>',
+    );
+  });
+
+  it('F4 斜體同理（font-style:normal），b／i 本身帶 normal 也算', () => {
+    expect(edit('<p><em>A<span style="font-style:normal">B</span></em></p>').html).toBe('<p><em>A</em>B</p>');
+    expect(edit('<p><i>A<i style="font-style:normal">B</i></i></p>').html).toBe('<p><em>A</em>B</p>');
+    expect(edit('<p><b>A<b style="font-weight:normal">B</b></b></p>').html).toBe('<p><strong>A</strong>B</p>');
+  });
+
+  it('F4 外面沒有粗體時，不粗的標記單純拿掉', () => {
+    expect(edit('<p>A<span style="font-weight:normal">B</span></p>').html).toBe('<p>AB</p>');
+  });
+
+  it('F4 樣式粗體（span）裡面有不粗的字', () => {
+    expect(paste('<span style="font-weight:700">A<span style="font-weight:400">B</span></span>')).toBe('<strong>A</strong>B');
+  });
+});
+
+describe('F5 連結網址規則（使用者 2026-09-28 裁定）', () => {
+  it('收：絕對網址、#錨點、單一 / 開頭的站內路徑（含 %2F 編碼，那仍是站內路徑）', () => {
+    expect(safeHref('#s2', SCHEMES)).toBe('#s2');
+    expect(safeHref('/about', SCHEMES)).toBe('/about');
+    expect(safeHref(' /about?x=1#y ', SCHEMES)).toBe('/about?x=1#y');
+    expect(safeHref('/%2F%2Fevil.test', SCHEMES)).toBe('/%2F%2Fevil.test');
+  });
+
+  it('不收：其他相對路徑、協定相對、反斜線與空白／控制字元的變形', () => {
+    for (const href of ['../post', 'post', './x', '?q=1', '//evil.test', '/\\evil.test', '/ /evil.test', '/\t/evil.test', '\n//evil.test', '/\u0000/evil.test', '']) {
+      expect(safeHref(href, SCHEMES), JSON.stringify(href)).toBeNull();
+    }
+  });
+
+  it('貼上照同一套：站內路徑與錨點留、其他相對路徑只留字', () => {
+    expect(paste('<p><a href="/about">站內</a><a href="#x">錨</a><a href="../p">相對</a><a href="//evil.test">外</a></p>')).toBe(
+      '<p><a href="/about">站內</a><a href="#x">錨</a>相對外</p>',
+    );
+  });
+
+  it('編輯整理照同一套，丟掉的要提醒', () => {
+    expect(edit('<p><a href="/about">站內</a><a href="./x">相對</a></p>')).toEqual({
+      html: '<p><a href="/about">站內</a>相對</p>',
+      dropped: ['連結'],
+    });
   });
 });

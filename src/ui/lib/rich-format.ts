@@ -46,7 +46,9 @@ export function formatStateFrom(ancestors: readonly string[]): FormatState {
   const list = tags.find((tag) => tag === 'ul' || tag === 'ol') as 'ul' | 'ol' | undefined;
   const textBlock = tags.find((tag) => ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'div'].includes(tag));
   let block: FormatState['block'] = 'paragraph';
-  if (textBlock === 'li') block = 'list';
+  // 在清單項目裡就是清單情境，不管中間夾了 p／div／標題（Google 文件貼上的 `<li><p>…`，審查 F6）：
+  // 不然清單按鈕不亮、H2 防護被繞過、「內文」按了不會離開清單。
+  if (tags.includes('li')) block = 'list';
   else if (textBlock === 'h1' || textBlock === 'h2') block = 'h2';
   else if (textBlock !== undefined && /^h[3-6]$/.test(textBlock)) block = 'h3';
   return {
@@ -130,7 +132,7 @@ export type LinkInputResult = { readonly ok: true; readonly href: string } | { r
  */
 export function parseLinkInput(raw: string, schemes: readonly string[]): LinkInputResult {
   const value = raw.trim();
-  const accepted = `只接受 ${schemes.join('、')} 開頭的網址`;
+  const accepted = `只接受 ${schemes.join('、')} 開頭的網址，或站內的 /路徑、#錨點`;
   if (value.length === 0) return { ok: false, message: '請填網址' };
   if (/\s/.test(value)) return { ok: false, message: '網址裡不能有空白' };
   const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);

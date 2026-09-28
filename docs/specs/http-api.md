@@ -90,6 +90,7 @@
   只換正文、其他欄位沿用上一版；後端先整理瀏覽器編輯器的雜訊（`b`→`strong`、拆 `span`、`<p><ul>`、
   `ul` 直接包 `ul`、清單項目裡的 div、h1→h2 等，`src/core/html-blocks.ts` 的 `normalizeEditedBody`，
   規則本體在共用契約 `src/contract/rich-text.ts`，前端存檔前用同一份整理過一次），再照常走 schema、sanitize、結構驗證。
+  只整理跟上一版正文比對後**改過或新增的頂層區塊**，沒改的逐字沿用上一版的原始片段（序列比對，P5-T028 審查）。
   它不是信任來源。沒改內容時前端不送；整理後跟目前這一版相同（例如只多按一個 Enter）時後端不建新版本、
   不撤銷核准，回傳目前那一版。
   `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下

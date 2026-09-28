@@ -1,7 +1,14 @@
 import { parseFragment, serializeOuter } from 'parse5';
 import type { DefaultTreeAdapterMap } from 'parse5';
 import { findIgnoringSpaces } from '../contract/text-match.js';
-import { cleanRich, serializeRich, type RichNode } from '../contract/rich-text.js';
+import {
+  cleanRichEdit,
+  richUnits,
+  serializeRich,
+  serializeRichEdit,
+  type RichNode,
+  type RichUnit,
+} from '../contract/rich-text.js';
 
 /**
  * 正文的「頂層區塊」拆解。
@@ -458,6 +465,24 @@ function toRich(node: Node): RichNode[] {
 }
 
 /**
+ * 正文 → 頂層區塊，每塊帶著原始 HTML 片段（parse5 的位置資訊切出來的）。
+ * 「沒改的區塊原樣保留」時逐字輸出這個片段，不經過重新序列化。
+ */
+export function htmlToRichUnits(html: string): RichUnit[] {
+  const fragment = parseFragment(html, { sourceCodeLocationInfo: true }) as unknown as Node;
+  const nodes: RichNode[] = [];
+  const sources: string[] = [];
+  for (const child of childrenOf(fragment)) {
+    const converted = toRich(child);
+    if (converted.length === 0) continue;
+    const location = (child as { sourceCodeLocation?: { startOffset: number; endOffset: number } | null }).sourceCodeLocation;
+    nodes.push(...converted);
+    sources.push(location ? html.slice(location.startOffset, location.endOffset) : serializeRich(converted));
+  }
+  return richUnits(nodes, sources);
+}
+
+/**
  * 整理「直接在文章上改」送回來的正文（P5-T010、P5-T028）。
  *
  * contenteditable 產出的 HTML 會帶著模板不認得的東西：`<b>`／`<i>`、帶樣式的 `<span>`、
@@ -466,18 +491,24 @@ function toRich(node: Node): RichNode[] {
  * 引用裡的裸文字。不整理的話 sanitize 會照規則把 `<b>` 拆掉（粗體靜靜消失），hybrid 模板的結構驗證
  * 會因為頂層裸文字整份退回，古騰堡轉換會把清單退成 wp:html。
  *
- * 規則跟前端存檔前那一次是同一份（`contract/rich-text.ts` 的 `cleanRich`，`edit` 模式）；
- * 後端不信任前端，照樣再做一次。頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），
- * 不留給 render 的 `wrapBareTopLevelText`：結構驗證跑在它之前，驗的是這裡的輸出。
- * 沒改過的正文整理完逐字不變（跳脫規則跟 parse5 相同）。
+ * **只整理使用者改過的頂層區塊**（`contract/rich-text.ts` 的 `cleanRichEdit`，前端存檔前也是同一套）：
+ * 給了 `previousBody`（上一版的正文）時逐塊比對，對得上的區塊**逐字**用上一版的原始片段，不重新整理——
+ * 整理規則再怎麼小心，也不該改寫使用者沒碰過的內容（審查 F3／F5／#5）。沒給就整份整理。
+ * 頂層的裸文字與行內標籤在這裡就包成段落（`<br>` 當作分段），不留給 render 的 `wrapBareTopLevelText`：
+ * 結構驗證跑在它之前，驗的是這裡的輸出。
  *
- * **這不是安全關卡**：整理完照樣走 schema、sanitize、結構驗證。這裡不擋標籤（sanitize 擋）；
- * 給了 `allowedSchemes` 時，不合的連結拆成純文字（不然 sanitize 只拿掉 href，留下一個空殼 `<a>`）。
+ * **這不是安全關卡**：整理完（含原樣保留的區塊）照樣走 schema、sanitize、結構驗證。這裡不擋標籤
+ * （sanitize 擋）；給了 `allowedSchemes` 時，不收的連結（`safeHref`）拆成純文字。
  */
-export function normalizeEditedBody(html: string, options: { allowedSchemes?: readonly string[] } = {}): string {
-  const { nodes } = cleanRich(htmlToRich(html), {
-    mode: 'edit',
-    ...(options.allowedSchemes === undefined ? {} : { allowedSchemes: options.allowedSchemes }),
-  });
-  return serializeRich(nodes, '\n');
+export function normalizeEditedBody(
+  html: string,
+  options: { allowedSchemes?: readonly string[]; previousBody?: string | null } = {},
+): string {
+  const previous = typeof options.previousBody === 'string' ? htmlToRichUnits(options.previousBody) : null;
+  const result = cleanRichEdit(
+    htmlToRich(html),
+    previous,
+    options.allowedSchemes === undefined ? {} : { allowedSchemes: options.allowedSchemes },
+  );
+  return serializeRichEdit(result);
 }

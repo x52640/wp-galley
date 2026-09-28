@@ -60,6 +60,11 @@ D-028。「改原文」（`ProofView.tsx` 的 contenteditable，P5-T010）目前
 - Codex 審查（PR #2）6 條 medium 已修（未 commit）：沒實質改動就存檔時還原畫面並重量；繼承的粗斜體往下套到區塊內、不包住清單；
   清單項目攤平時區塊與後面的字分段、穿過包裝取出子清單；子清單後面還有字的項目照原樣留著（發布走 wp:html 保底），
   補「沒改過的合法正文逐字不變」不變式測試；連結輸入框每次打開以 session 為 key 重建。verify 65 檔 / 1241 測試
+- Codex 第二輪（6 條 medium）已修（未 commit）：存檔改成「沒改的頂層區塊原樣保留、只整理改過的」（LCS 序列比對，
+  前後端共用 `cleanRichEdit`，後端用上一版 templateData 正文並逐字沿用原始片段）；F1 只在分段邊界修空白；F2 連結包區塊時拆到各段；
+  F3 改過的區塊裡攤平標題／引用／分隔線要進 dropped；F4 `font-weight/font-style: normal` 把外層 strong／em 切開；
+  F5 連結網址規則統一成 `safeHref`（使用者 2026-09-28 裁定：`#` 與單一 `/` 站內路徑收，其他相對路徑拒絕並提醒），sanitize 也用它；
+  F6 游標在 li 裡就是清單情境。verify 65 檔 / 1271 測試
 - 下一步：主 session 驗收 → 另派審查 → commit；commit 後跑 Codex review 讀 diff（使用者要求）；使用者手動驗證（只存草稿）
 - Blocker：無
 

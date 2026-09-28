@@ -123,14 +123,24 @@ function isEditorAttribute(name: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * 連結網址能不能收：一定要是絕對網址，scheme 在允許清單裡。相對網址不收（貼上來的相對網址
- * 指的是別人的網站）。判斷前先拿掉控制字元與空白——`java\tscript:` 在瀏覽器眼中就是 `javascript:`。
- * 回傳去掉前後空白的網址；不收就回 null。
+ * 連結網址收不收——**前後端、渲染與編輯都用這一個函式**（`templates/sanitize.ts` 也呼叫它，審查 F5）。
+ *
+ * - 絕對網址：scheme 要在允許清單裡（`javascript:`、`data:` 等一律不收）。
+ * - `#錨點`：收。文章內跳段落，沒有離站的風險。
+ * - `/` 開頭的站內路徑（`/about`）：收。文章就發在這個站上，指的是站內的頁面。
+ * - 其他相對路徑（`../post`、`post.html`、`?q=1`）：不收。它的意思取決於文章最後的網址，發布後很可能是壞連結。
+ * - `//host`（協定相對）：不收，那其實是外站。
+ *
+ * 判斷前先拿掉控制字元與空白——瀏覽器會忽略網址裡的 tab／換行，`java\tscript:`、`/\t/evil.com` 在它眼中
+ * 就是 `javascript:`、`//evil.com`。回傳去掉前後空白的網址；不收就回 null。
  */
 export function safeHref(raw: string, schemes: readonly string[]): string | null {
   const value = raw.trim();
   // eslint-disable-next-line no-control-regex
   const probe = value.replace(/[\u0000- \u007f-\u009f]/g, '');
+  if (probe.length === 0) return null;
+  if (probe.startsWith('#')) return value;
+  if (probe.startsWith('/')) return /^\/[/\\]/.test(probe) ? null : value;
   const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(probe);
   if (!match) return null;
   const scheme = match[1]!.toLowerCase();
@@ -150,6 +160,14 @@ interface Context {
   readonly dropped: string[];
 }
 
+/**
+ * 「這裡明講不粗／不斜」的暫時標記（`<span style="font-weight:normal">`）。整理的第一步裡，外層的
+ * strong／em 遇到它要把自己拆開包，標記最後一律拆掉（審查 F4：`<strong>A<span normal>B</span></strong>`
+ * 不能被整理回 `<strong>AB</strong>`）。
+ */
+const NO_BOLD = '#no-bold';
+const NO_ITALIC = '#no-italic';
+
 function text(value: string): RichText {
   return { type: 'text', text: value };
 }
@@ -166,12 +184,16 @@ function hasText(nodes: readonly RichNode[]): boolean {
   return nodes.some((node) => (node.type === 'text' ? node.text.trim().length > 0 : hasText(node.children)));
 }
 
+function addLabel(sink: string[], label: string): void {
+  if (!sink.includes(label)) sink.push(label);
+}
+
 function reportDropped(ctx: Context, tag: string, children: readonly RichNode[]): void {
   if (ctx.options.mode !== 'edit' || ctx.allowed === null) return;
   const label = DROPPED_LABELS[tag];
   if (label === undefined) return;
   if (tag !== 'hr' && tag !== 'img' && !hasText(children)) return;
-  if (!ctx.dropped.includes(label)) ctx.dropped.push(label);
+  addLabel(ctx.dropped, label);
 }
 
 function styleOf(attrs: readonly RichAttr[]): string {
@@ -205,31 +227,79 @@ function keepAttrs(ctx: Context, attrs: readonly RichAttr[]): RichAttr[] {
   return attrs.filter((attr) => !isEditorAttribute(attr.name));
 }
 
+function containsTag(nodes: readonly RichNode[], tag: string): boolean {
+  return nodes.some((node) => node.type === 'element' && (node.tag === tag || containsTag(node.children, tag)));
+}
+
 /**
- * 用 strong／em 包起來（樣式說它是粗／斜體時）。模板不允許就不包。
- *
- * 裡面有區塊（`<ul style="font-weight:bold"><li>…`、`<b><p>…</p></b>`）時**不能包住整個區塊**：
- * 包住的話之後行內位置會把區塊攤平，清單邊界就被吃掉（`<li><strong>A<br>B</strong></li>`，審查 #2）。
- * 改成把粗／斜體往下套到每個區塊裡的行內內容；區塊之間的空白不包。
+ * 用一個行內標籤（strong／em）包住一串行內節點，但裡面「明講不是這個格式」的部分（標記 `marker`）要留在外面：
+ * `<strong>A<#no-bold>B</#no-bold>C</strong>` → `<strong>A</strong>B<strong>C</strong>`。標記藏在更深的
+ * 元素裡（`<strong><a>A<#no-bold>B</#no-bold></a></strong>`）時，那個元素跟著切開。
  */
-function wrapStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: boolean): RichNode[] {
-  if (nodes.length === 0 || (!bold && !italic)) return nodes;
-  if (!nodes.some((node) => isBlockish(node))) return wrapInlineStyled(ctx, nodes, bold, italic);
+function wrapExcept(nodes: readonly RichNode[], marker: string, wrap: (inner: RichNode[]) => RichNode[]): RichNode[] {
+  if (!containsTag(nodes, marker)) return wrap([...nodes]);
+  const out: RichNode[] = [];
+  for (const piece of liftMarker(nodes, marker)) {
+    if (piece.outside) out.push(...piece.nodes);
+    else if (piece.nodes.some((node) => !isWhitespace(node))) out.push(...wrap(piece.nodes));
+    else out.push(...piece.nodes);
+  }
+  return out;
+}
+
+interface Piece {
+  readonly outside: boolean;
+  readonly nodes: RichNode[];
+}
+
+function liftMarker(nodes: readonly RichNode[], marker: string): Piece[] {
+  const pieces: Piece[] = [];
+  const push = (outside: boolean, node: RichNode): void => {
+    const last = pieces[pieces.length - 1];
+    if (last !== undefined && last.outside === outside) last.nodes.push(node);
+    else pieces.push({ outside, nodes: [node] });
+  };
+  for (const node of nodes) {
+    if (node.type === 'element' && node.tag === marker) {
+      for (const child of node.children) push(true, child);
+    } else if (node.type === 'element' && containsTag(node.children, marker)) {
+      for (const piece of liftMarker(node.children, marker)) push(piece.outside, element(node.tag, node.attrs, piece.nodes));
+    } else {
+      push(false, node);
+    }
+  }
+  return pieces;
+}
+
+/** 整理第一步做完之後拆掉所有暫時標記（沒被外層粗／斜體用到的，本來就只是「不粗」的普通字）。 */
+function stripMarkers(nodes: readonly RichNode[]): RichNode[] {
+  return nodes.flatMap((node) => {
+    if (node.type === 'text') return [node];
+    const children = stripMarkers(node.children);
+    if (node.tag === NO_BOLD || node.tag === NO_ITALIC) return children;
+    return [element(node.tag, node.attrs, children)];
+  });
+}
+
+/**
+ * 把「包住一串行內內容」的動作套到節點上。裡面有區塊時**不能包住整個區塊**——包住的話之後行內位置
+ * 會把區塊攤平、清單邊界被吃掉（審查 #2）——改成往下套到每個區塊裡的行內內容；區塊之間的空白不包。
+ * 粗體、斜體、連結（`<a>` 包住區塊，審查 F2）都走這裡。
+ */
+function distribute(nodes: readonly RichNode[], wrapRun: (run: RichNode[]) => RichNode[]): RichNode[] {
+  if (nodes.length === 0) return [];
+  if (!nodes.some((node) => isBlockish(node))) return wrapRun([...nodes]);
   const out: RichNode[] = [];
   let run: RichNode[] = [];
   const flush = (): void => {
-    if (run.some((node) => !isWhitespace(node))) out.push(...wrapInlineStyled(ctx, run, bold, italic));
+    if (run.some((node) => !isWhitespace(node))) out.push(...wrapRun(run));
     else out.push(...run);
     run = [];
   };
   for (const node of nodes) {
     if (node.type === 'element' && isBlockish(node)) {
       flush();
-      out.push(
-        node.tag === 'hr' || node.tag === 'figure'
-          ? node
-          : element(node.tag, node.attrs, wrapStyled(ctx, [...node.children], bold, italic)),
-      );
+      out.push(node.tag === 'hr' || node.tag === 'figure' ? node : element(node.tag, node.attrs, distribute(node.children, wrapRun)));
       continue;
     }
     run.push(node);
@@ -238,10 +308,25 @@ function wrapStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: bool
   return out;
 }
 
+/** 用 strong／em 包起來（樣式說它是粗／斜體時）。模板不允許就不包。 */
+function wrapStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: boolean): RichNode[] {
+  if (nodes.length === 0 || (!bold && !italic)) return nodes;
+  return distribute(nodes, (run) => wrapInlineStyled(ctx, run, bold, italic));
+}
+
 function wrapInlineStyled(ctx: Context, nodes: RichNode[], bold: boolean, italic: boolean): RichNode[] {
   let out = nodes;
-  if (italic && isAllowed(ctx, 'em')) out = [element('em', [], out)];
-  if (bold && isAllowed(ctx, 'strong')) out = [element('strong', [], out)];
+  if (italic && isAllowed(ctx, 'em')) out = wrapExcept(out, NO_ITALIC, (inner) => [element('em', [], inner)]);
+  if (bold && isAllowed(ctx, 'strong')) out = wrapExcept(out, NO_BOLD, (inner) => [element('strong', [], inner)]);
+  return out;
+}
+
+/** 樣式明講「不粗／不斜」的行內包裝：留一個標記，讓外層的 strong／em 知道要在這裡斷開。 */
+function markNormal(nodes: RichNode[], normalWeight: boolean, normalStyle: boolean): RichNode[] {
+  if (nodes.length === 0 || nodes.some((node) => isBlockish(node))) return nodes;
+  let out = nodes;
+  if (normalStyle) out = [element(NO_ITALIC, [], out)];
+  if (normalWeight) out = [element(NO_BOLD, [], out)];
   return out;
 }
 
@@ -265,11 +350,12 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
   const children = cleanNodes(ctx, node.children);
   const style = styleOf(node.attrs);
   const bold = styleBold(style);
-  const italic = styleItalic(style) === true;
+  const italicStyle = styleItalic(style);
+  const italic = italicStyle === true;
 
   // 粗體／斜體：瀏覽器的 b／i 換成模板認得的 strong／em。
   if (tag === 'b' || tag === 'strong') {
-    if (bold === false) return wrapStyled(ctx, children, false, italic);
+    if (bold === false) return markNormal(wrapStyled(ctx, children, false, italic), true, italicStyle === false);
     if (!isAllowed(ctx, 'strong')) {
       reportDropped(ctx, 'strong', children);
       return children;
@@ -277,16 +363,19 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
     if (children.length === 0) return [];
     // 粗體包著區塊（`<b><p>…</p><p>…</p></b>`）：粗體套進每個區塊，不包住區塊。
     if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, true, italic);
-    return wrapStyled(ctx, [element('strong', keepAttrs(ctx, node.attrs), children)], false, italic);
+    const attrs = keepAttrs(ctx, node.attrs);
+    return wrapStyled(ctx, wrapExcept(children, NO_BOLD, (inner) => [element('strong', attrs, inner)]), false, italic);
   }
   if (tag === 'i' || tag === 'em') {
+    if (italicStyle === false) return markNormal(wrapStyled(ctx, children, bold === true, false), false, true);
     if (!isAllowed(ctx, 'em')) {
       reportDropped(ctx, 'em', children);
       return children;
     }
     if (children.length === 0) return [];
     if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, bold === true, true);
-    return wrapStyled(ctx, [element('em', keepAttrs(ctx, node.attrs), children)], bold === true, false);
+    const attrs = keepAttrs(ctx, node.attrs);
+    return wrapStyled(ctx, wrapExcept(children, NO_ITALIC, (inner) => [element('em', attrs, inner)]), bold === true, false);
   }
 
   const headingMatch = /^h([1-6])$/.exec(tag);
@@ -303,17 +392,19 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
   if (tag === 'a') {
     const href = node.attrs.find((attr) => attr.name === 'href')?.value;
     const schemes = ctx.options.allowedSchemes;
-    const ok = href !== undefined && (schemes === undefined ? true : safeHref(href, schemes) !== null);
-    if (!ok || !isAllowed(ctx, 'a')) {
-      if (ok) reportDropped(ctx, 'a', children);
-      return wrapStyled(ctx, children, bold === true, italic);
+    const accepted = href === undefined ? null : schemes === undefined ? href.trim() : safeHref(href, schemes);
+    if (accepted === null || !isAllowed(ctx, 'a')) {
+      // 有網址卻不收（不允許的 scheme、`../` 相對路徑）或模板不允許連結：字留著，講出來。
+      if (href !== undefined) reportDropped(ctx, 'a', children);
+      return markNormal(wrapStyled(ctx, children, bold === true, italic), bold === false, italicStyle === false);
     }
     if (children.length === 0) return [];
     const attrs =
       ctx.options.mode === 'paste'
-        ? [{ name: 'href', value: href.trim() }]
-        : keepAttrs(ctx, node.attrs).map((attr) => (attr.name === 'href' ? { name: 'href', value: href.trim() } : attr));
-    return wrapStyled(ctx, [element('a', attrs, children)], bold === true, italic);
+        ? [{ name: 'href', value: accepted }]
+        : keepAttrs(ctx, node.attrs).map((attr) => (attr.name === 'href' ? { name: 'href', value: accepted } : attr));
+    // 連結包著區塊（`<a>A<ul>…</ul></a>`、`<a><div>…</div>字</a>`）：連結拆到各段的字上，區塊邊界留著（審查 F2）。
+    return wrapStyled(ctx, distribute(children, (run) => [element('a', attrs, run)]), bold === true, italic);
   }
 
   if (tag === 'p' || tag === 'blockquote' || tag === 'ul' || tag === 'ol' || tag === 'li' || tag === 'figure' || tag === 'figcaption') {
@@ -341,13 +432,14 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
     return [element('div', attrs, wrapStyled(ctx, children, bold === true, italic))];
   }
 
-  // 沒給 allowedTags（後端）：認不得的標籤留給 sanitize 決定，這裡不擋。
+  // 沒給 allowedTags（後端）：認不得的標籤留給 sanitize 決定，這裡不擋；包著區塊的話拆到各段上。
   if (ctx.allowed === null && !STYLE_WRAPPERS.has(tag)) {
-    return [element(tag, keepAttrs(ctx, node.attrs), wrapStyled(ctx, children, bold === true, italic))];
+    const attrs = keepAttrs(ctx, node.attrs);
+    return wrapStyled(ctx, distribute(children, (run) => [element(tag, attrs, run)]), bold === true, italic);
   }
-  // 其他（span、font、mark、u…）：拆掉包裝，字留著。樣式裡的粗斜體轉成 strong／em。
+  // 其他（span、font、mark、u…）：拆掉包裝，字留著。樣式裡的粗斜體轉成 strong／em，明講「不粗／不斜」的留標記。
   reportDropped(ctx, tag, children);
-  return wrapStyled(ctx, children, bold === true, italic);
+  return markNormal(wrapStyled(ctx, children, bold === true, italic), bold === false, italicStyle === false);
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +447,25 @@ function cleanNode(ctx: Context, node: RichNode): RichNode[] {
 // ---------------------------------------------------------------------------
 
 type Flow = 'root' | 'quote';
+
+/** 結構整理時不得不丟的格式（清單項目裡的標題、引用、分隔線…）記在這裡，跟第一步的 dropped 合併（審查 F3）。 */
+type Sink = string[];
+
+/** 區塊被攤平成字時，哪些算「格式消失」（段落、div 只是分段，不算）。 */
+const FLATTEN_LABELS: Readonly<Record<string, string>> = {
+  h2: '標題',
+  h3: '標題',
+  blockquote: '引用',
+  ul: '清單',
+  ol: '清單',
+  hr: '分隔線',
+  figure: '圖片',
+};
+
+function reportFlatten(sink: Sink, tag: string): void {
+  const label = FLATTEN_LABELS[tag];
+  if (label !== undefined) addLabel(sink, label);
+}
 
 function isBlockish(node: RichNode): boolean {
   return node.type === 'element' && BLOCKISH.has(node.tag);
@@ -369,8 +480,8 @@ function isEmptyInline(nodes: readonly RichNode[]): boolean {
   return nodes.every((node) => isWhitespace(node) || (node.type === 'element' && node.tag === 'br'));
 }
 
-/** 去掉一串行內節點頭尾的空白（不動 &nbsp;）。 */
-function trimInline(nodes: readonly RichNode[]): RichNode[] {
+/** 去掉一串行內節點**開頭**的空白（不動 &nbsp;）。只看整串的邊界，不動中間的字（審查 F1）。 */
+function trimStart(nodes: readonly RichNode[]): RichNode[] {
   const out = [...nodes];
   while (out.length > 0) {
     const first = out[0]!;
@@ -382,6 +493,11 @@ function trimInline(nodes: readonly RichNode[]): RichNode[] {
     }
     out.shift();
   }
+  return out;
+}
+
+function trimEnd(nodes: readonly RichNode[]): RichNode[] {
+  const out = [...nodes];
   while (out.length > 0) {
     const last = out[out.length - 1]!;
     if (last.type !== 'text') break;
@@ -395,29 +511,47 @@ function trimInline(nodes: readonly RichNode[]): RichNode[] {
   return out;
 }
 
+function trimInline(nodes: readonly RichNode[]): RichNode[] {
+  return trimEnd(trimStart(nodes));
+}
+
 /**
- * 行內位置（段落、標題、清單項目的字、粗體裡…）：裡面冒出區塊就攤平成字，前後用 `<br>` 隔開。
- * 分隔線在行內沒有意義，丟掉。
+ * 行內位置（段落、標題、清單項目的字、粗體裡…）：裡面冒出區塊就攤平成字，前後用 `<br>` 隔開；
+ * 分隔線當作分段。標題、引用、清單、分隔線在這裡消失要記下來（審查 F3）。
  */
-function inlineFlow(nodes: readonly RichNode[]): RichNode[] {
+function inlineFlow(nodes: readonly RichNode[], sink: Sink): RichNode[] {
   const out: RichNode[] = [];
+  let pendingBreak = false;
+  const pushContent = (pieces: RichNode[]): void => {
+    if (pieces.length === 0) return;
+    if (pendingBreak && hasContentBefore(out)) out.push(element('br', [], []));
+    pendingBreak = false;
+    out.push(...pieces);
+  };
   for (const node of nodes) {
     if (node.type === 'text') {
-      out.push(node);
+      if (pendingBreak && isWhitespace(node)) continue;
+      pushContent([node]);
       continue;
     }
-    if (node.tag === 'hr') continue;
+    if (node.tag === 'hr') {
+      reportFlatten(sink, 'hr');
+      pendingBreak = true;
+      continue;
+    }
     if (isBlockish(node)) {
-      const inner = trimInline(inlineFlow(node.children));
+      reportFlatten(sink, node.tag);
+      const inner = trimInline(inlineFlow(node.children, sink));
       if (inner.length === 0) continue;
-      if (hasContentBefore(out)) out.push(element('br', [], []));
-      out.push(...inner);
+      pendingBreak = true;
+      pushContent(inner);
+      pendingBreak = true;
       continue;
     }
     if (node.children.length === 0 && node.tag !== 'br' && node.tag !== 'img') {
       if (EMPTYABLE_INLINE.has(node.tag)) continue;
     }
-    out.push(node.children.length === 0 ? node : element(node.tag, node.attrs, inlineFlow(node.children)));
+    pushContent([node.children.length === 0 ? node : element(node.tag, node.attrs, inlineFlow(node.children, sink))]);
   }
   return out;
 }
@@ -431,12 +565,12 @@ function hasContentBefore(nodes: readonly RichNode[]): boolean {
  * 段落／標題（以及當段落用的 div）：裡面有區塊（Chrome 的 `<p><ul>`、`<h2><ul>`）就拆開，
  * 行內的部分用同一個標籤包，區塊拉出來。空的段落與標題拿掉。
  */
-function textBlock(node: RichElement, flow: Flow, rootClass: boolean): RichNode[] {
+function textBlock(node: RichElement, flow: Flow, rootClass: boolean, sink: Sink): RichNode[] {
   const tag = node.tag === 'div' ? 'p' : node.tag;
   const out: RichNode[] = [];
   let run: RichNode[] = [];
   const flush = (): void => {
-    const inline = inlineFlow(run);
+    const inline = inlineFlow(run, sink);
     run = [];
     if (isEmptyInline(inline)) return;
     out.push(element(tag, node.attrs, inline));
@@ -450,7 +584,7 @@ function textBlock(node: RichElement, flow: Flow, rootClass: boolean): RichNode[
   for (const child of node.children) {
     if (child.type === 'element' && isBlockish(child) && child.tag !== 'li') {
       flush();
-      out.push(...blockFlow([child], flow, rootClass));
+      out.push(...blockFlow([child], flow, rootClass, sink));
       continue;
     }
     run.push(child);
@@ -463,11 +597,11 @@ function textBlock(node: RichElement, flow: Flow, rootClass: boolean): RichNode[
  * 區塊位置（正文最外層、引用裡）。行內內容包成段落；最外層的 `<br>` 當作分段（全選刪光重打之後常見）。
  * 最外層的段落 class 用 `wp-block-paragraph`，跟渲染端補段落的做法一致。
  */
-function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean): RichNode[] {
+function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean, sink: Sink): RichNode[] {
   const out: RichNode[] = [];
   let run: RichNode[] = [];
   const flush = (): void => {
-    const inline = trimInline(inlineFlow(run));
+    const inline = trimInline(inlineFlow(run, sink));
     run = [];
     if (inline.length === 0 || isEmptyInline(inline)) return;
     const attrs = flow === 'root' && rootClass ? [{ name: 'class', value: 'wp-block-paragraph' }] : [];
@@ -476,7 +610,7 @@ function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean): 
 
   for (const node of nodes) {
     if (node.type === 'text') {
-      // 區塊之間的空白：最外層是排版（丟掉，輸出時另外換行）；引用裡原樣留著，沒改的引用才會逐字不變。
+      // 區塊之間的空白：最外層是排版（丟掉，輸出時另外換行）；引用裡原樣留著。
       if (isWhitespace(node) && run.length === 0) {
         if (flow === 'quote') out.push(node);
         continue;
@@ -499,16 +633,16 @@ function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean): 
       case 'h3':
       case 'div':
       case 'li':
-        out.push(...textBlock(node.tag === 'li' ? element('div', [], node.children) : node, flow, rootClass));
+        out.push(...textBlock(node.tag === 'li' ? element('div', [], node.children) : node, flow, rootClass, sink));
         break;
       case 'ul':
       case 'ol': {
-        const list = listBlock(node);
+        const list = listBlock(node, sink);
         if (list !== null) out.push(list);
         break;
       }
       case 'blockquote': {
-        const children = blockFlow(node.children, 'quote', rootClass);
+        const children = blockFlow(node.children, 'quote', rootClass, sink);
         if (children.some((child) => !isWhitespace(child))) out.push(element('blockquote', node.attrs, children));
         break;
       }
@@ -528,7 +662,7 @@ function blockFlow(nodes: readonly RichNode[], flow: Flow, rootClass: boolean): 
  * - 項目的內容見 `listItems`（子清單後面的字留在原項目，不拆）；
  * - 沒有字也沒有子清單的項目（`<li><br></li>`）拿掉；一個項目都沒有的清單整個拿掉。
  */
-function listBlock(list: RichElement): RichElement | null {
+function listBlock(list: RichElement, sink: Sink): RichElement | null {
   const items: RichNode[] = [];
   const lastItem = (): number => {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -544,11 +678,11 @@ function listBlock(list: RichElement): RichElement | null {
       continue;
     }
     if (child.type === 'element' && child.tag === 'li') {
-      items.push(...listItems(child));
+      items.push(...listItems(child, sink));
       continue;
     }
     if (child.type === 'element' && (child.tag === 'ul' || child.tag === 'ol')) {
-      const nested = listBlock(child);
+      const nested = listBlock(child, sink);
       if (nested === null) continue;
       const at = lastItem();
       if (at < 0) {
@@ -559,7 +693,7 @@ function listBlock(list: RichElement): RichElement | null {
       }
       continue;
     }
-    items.push(...listItems(element('li', [], [child])));
+    items.push(...listItems(element('li', [], [child]), sink));
   }
 
   if (!items.some((item) => item.type === 'element')) return null;
@@ -570,17 +704,21 @@ type ItemToken = { readonly kind: 'inline'; readonly node: RichNode } | { readon
 
 /**
  * 把清單項目的內容攤成一串：行內節點、分段、子清單。項目裡的段落、div、標題、引用是「包裝」：
- * 穿過它往下找，裡面的字前後要分段（`<div>First</div>Second` 不能黏成 `FirstSecond`，審查 #3），
- * 裡面的子清單照樣是子清單（`<div>A<ul>…</ul></div>` 不能被攤成字，審查 #4）。
+ * 穿過它往下找，裡面的字前後要分段（審查 #3），裡面的子清單照樣是子清單（審查 #4）。
+ * 標題、引用、分隔線在清單項目裡存不了，攤平時記下來（審查 F3）；分隔線當作分段。
  */
-function itemTokens(nodes: readonly RichNode[]): ItemToken[] {
+function itemTokens(nodes: readonly RichNode[], sink: Sink): ItemToken[] {
   const out: ItemToken[] = [];
   for (const node of nodes) {
     if (node.type === 'element' && (node.tag === 'ul' || node.tag === 'ol')) {
       out.push({ kind: 'list', node });
     } else if (node.type === 'element' && isBlockish(node)) {
-      if (node.tag === 'hr') continue;
-      out.push({ kind: 'break' }, ...itemTokens(node.children), { kind: 'break' });
+      reportFlatten(sink, node.tag);
+      if (node.tag === 'hr') {
+        out.push({ kind: 'break' });
+        continue;
+      }
+      out.push({ kind: 'break' }, ...itemTokens(node.children, sink), { kind: 'break' });
     } else {
       out.push({ kind: 'inline', node });
     }
@@ -590,43 +728,48 @@ function itemTokens(nodes: readonly RichNode[]): ItemToken[] {
 
 /**
  * 一個清單項目。內容**照原本的順序**留著，不拆成新項目：子清單後面還有字（`<li>A<ul>…</ul>結論</li>`）
- * 是合法的 HTML，古騰堡的清單項目存不了這個順序，發布時整個清單走 wp:html 保底（block-parse 的規則）；
- * 這裡自己拆成新項目會把後面的項目編號往後推，沒改過的正文也會變（審查 #5）。
+ * 是合法的 HTML，古騰堡的清單項目存不了這個順序，發布時整個清單走 wp:html 保底（block-parse 的規則；審查 #5）。
+ * 分段之間用 `<br>`；只在分段的邊界修掉空白，字與字之間的空白不動（審查 F1）。
  * 沒有字也沒有子清單的項目（`<li><br></li>`）拿掉。
  */
-function listItems(li: RichElement): RichElement[] {
+function listItems(li: RichElement, sink: Sink): RichElement[] {
   const children: RichNode[] = [];
-  let pendingBreak = false;
+  let segment: RichNode[] = [];
+  let breakBefore = false;
   let hasList = false;
-  for (const token of itemTokens(li.children)) {
+
+  const flushSegment = (breakAfter: boolean): void => {
+    let pieces = inlineFlow(segment, sink);
+    segment = [];
+    if (breakBefore) pieces = trimStart(pieces);
+    if (breakAfter) pieces = trimEnd(pieces);
+    if (pieces.length === 0 || (breakBefore && pieces.every((node) => isWhitespace(node)))) return;
+    if (breakBefore && hasContentBefore(children) && !endsWithList(children)) children.push(element('br', [], []));
+    children.push(...pieces);
+    breakBefore = false;
+  };
+
+  for (const token of itemTokens(li.children, sink)) {
     if (token.kind === 'break') {
-      pendingBreak = true;
+      flushSegment(true);
+      breakBefore = true;
       continue;
     }
     if (token.kind === 'list') {
-      const sub = listBlock(token.node);
+      flushSegment(false);
+      const sub = listBlock(token.node, sink);
       if (sub !== null) {
         children.push(sub);
         hasList = true;
       }
-      pendingBreak = false;
+      breakBefore = false;
       continue;
     }
-    const pieces = inlineFlow([token.node]);
-    if (pieces.length === 0) continue;
-    if (pendingBreak) {
-      // 包裝裡的字頭尾的空白是排版，不是內容。
-      const trimmed = trimInline(pieces);
-      if (trimmed.length === 0) continue;
-      if (hasContentBefore(children) && !endsWithList(children)) children.push(element('br', [], []));
-      children.push(...trimmed);
-      pendingBreak = false;
-      continue;
-    }
-    children.push(...pieces);
+    segment.push(token.node);
   }
-  const text = children.filter((node) => !(node.type === 'element' && (node.tag === 'ul' || node.tag === 'ol')));
-  if (!hasList && isEmptyInline(text)) return [];
+  flushSegment(false);
+  const words = children.filter((node) => !(node.type === 'element' && (node.tag === 'ul' || node.tag === 'ol')));
+  if (!hasList && isEmptyInline(words)) return [];
   return [element('li', li.attrs, children)];
 }
 
@@ -636,23 +779,182 @@ function endsWithList(nodes: readonly RichNode[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// 對外
+// 對外：整份整理
 // ---------------------------------------------------------------------------
 
-export function cleanRich(nodes: readonly RichNode[], options: RichCleanOptions): RichCleanResult {
-  const ctx: Context = {
+function makeContext(options: RichCleanOptions): Context {
+  return {
     options,
     allowed: options.allowedTags === undefined ? null : new Set(options.allowedTags.map((tag) => tag.toLowerCase())),
     dropped: [],
   };
-  const cleaned = cleanNodes(ctx, nodes);
+}
+
+/**
+ * 整份整理。貼上用這個；編輯存檔用 `cleanRichEdit`（沒改的頂層區塊原樣保留）。
+ */
+export function cleanRich(nodes: readonly RichNode[], options: RichCleanOptions): RichCleanResult {
+  const ctx = makeContext(options);
+  const cleaned = stripMarkers(cleanNodes(ctx, nodes));
+  // 貼上時不提醒（貼上來的東西本來就要整理）；編輯時結構整理丟掉的格式也要講。
+  const sink: Sink = options.mode === 'edit' ? ctx.dropped : [];
 
   // 貼上的只有行內內容（例如複製網頁上的一句話）：插在游標處，不包成段落。
   if (options.mode === 'paste' && !cleaned.some((node) => isBlockish(node))) {
-    return { nodes: trimInline(inlineFlow(cleaned)), dropped: ctx.dropped };
+    return { nodes: trimInline(inlineFlow(cleaned, sink)), dropped: ctx.dropped };
   }
-  return { nodes: blockFlow(cleaned, 'root', options.mode === 'edit'), dropped: ctx.dropped };
+  return { nodes: blockFlow(cleaned, 'root', options.mode === 'edit', sink), dropped: ctx.dropped };
 }
+
+// ---------------------------------------------------------------------------
+// 對外：編輯存檔（沒改的頂層區塊原樣保留）
+// ---------------------------------------------------------------------------
+
+/** 出現在最外層時跟前後的字併成同一段的行內標籤（跟 core/html-blocks 的 INLINE_TAGS 同一份清單，外加 font）。 */
+const ROOT_INLINE = new Set([
+  'a', 'strong', 'em', 'b', 'i', 'u', 's', 'code', 'span', 'br', 'sub', 'sup', 'small', 'mark', 'abbr',
+  'cite', 'q', 'time', 'del', 'ins', 'font',
+]);
+
+/** 一個頂層區塊：一個最外層元素，或一串連在一起的最外層行內內容。`key` 是它的正規化 HTML，用來比對有沒有改。 */
+export interface RichUnit {
+  readonly key: string;
+  readonly nodes: readonly RichNode[];
+  /** 原始 HTML 片段（後端從字串切出來的）；有的話保留時逐字輸出它。 */
+  readonly source?: string;
+}
+
+/**
+ * 切成頂層區塊。最外層的空白（區塊之間的排版）不屬於任何區塊。
+ * `sources`：跟 `nodes` 一一對應的原始片段（後端用 parse5 的位置資訊切），給了就記在區塊上。
+ */
+export function richUnits(nodes: readonly RichNode[], sources?: readonly string[]): RichUnit[] {
+  const units: RichUnit[] = [];
+  let run: { node: RichNode; source: string | undefined }[] = [];
+  const make = (items: { node: RichNode; source: string | undefined }[]): RichUnit => {
+    const unitNodes = items.map((item) => item.node);
+    const unit: RichUnit = { key: serializeRich(unitNodes), nodes: unitNodes };
+    return sources === undefined ? unit : { ...unit, source: items.map((item) => item.source ?? '').join('') };
+  };
+  const flush = (): void => {
+    while (run.length > 0 && isWhitespace(run[run.length - 1]!.node)) run.pop();
+    if (run.length > 0) units.push(make(run));
+    run = [];
+  };
+  nodes.forEach((node, index) => {
+    const source = sources?.[index];
+    if (node.type === 'text') {
+      if (isWhitespace(node) && run.length === 0) return;
+      run.push({ node, source });
+      return;
+    }
+    if (ROOT_INLINE.has(node.tag)) {
+      run.push({ node, source });
+      return;
+    }
+    flush();
+    units.push(make([{ node, source }]));
+  });
+  flush();
+  return units;
+}
+
+/** 最長共同子序列：回傳每個 edited 區塊對上的 original 索引（對不上是 -1）。插入、刪除段落不會讓後面全部對不上。 */
+function matchUnits(original: readonly string[], edited: readonly string[]): number[] {
+  const n = original.length;
+  const m = edited.length;
+  const table: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      table[i]![j] = original[i] === edited[j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+    }
+  }
+  const match = new Array<number>(m).fill(-1);
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (original[i] === edited[j]) {
+      match[j] = i;
+      i += 1;
+      j += 1;
+    } else if (table[i + 1]![j]! >= table[i]![j + 1]!) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  return match;
+}
+
+export type RichEditPiece =
+  | { readonly kept: true; readonly unit: RichUnit }
+  | { readonly kept: false; readonly nodes: readonly RichNode[] };
+
+export interface RichEditResult {
+  readonly pieces: readonly RichEditPiece[];
+  /** 有改動的區塊裡因為模板不支援或結構存不了而拿掉的格式。沒改的區塊不算。 */
+  readonly dropped: string[];
+}
+
+/**
+ * 編輯存檔的整理（前後端共用，審查 F3／F5／#5 的根本修法）：
+ * 編輯後的正文跟進入編輯時的正文逐個**頂層區塊**比對（最長共同子序列，不是位置對齊），
+ * 對得上的＝使用者沒碰過，**原樣保留**；只有改過或新增的區塊跑整理規則。連在一起的改動區塊一起整理。
+ * `original` 為 null（拿不到上一版）就整份整理。
+ *
+ * 保留不等於免檢：後端仍會對整份正文跑 sanitize 與結構驗證。
+ */
+export function cleanRichEdit(
+  edited: readonly RichNode[],
+  original: readonly RichUnit[] | null,
+  options: Omit<RichCleanOptions, 'mode'>,
+): RichEditResult {
+  const editOptions: RichCleanOptions = { ...options, mode: 'edit' };
+  if (original === null) {
+    const whole = cleanRich(edited, editOptions);
+    return { pieces: [{ kept: false, nodes: whole.nodes }], dropped: whole.dropped };
+  }
+  const units = richUnits(edited);
+  const match = matchUnits(
+    original.map((unit) => unit.key),
+    units.map((unit) => unit.key),
+  );
+  const pieces: RichEditPiece[] = [];
+  const dropped: string[] = [];
+  let pending: RichNode[] = [];
+  const flush = (): void => {
+    if (pending.length === 0) return;
+    const cleaned = cleanRich(pending, editOptions);
+    pending = [];
+    for (const label of cleaned.dropped) addLabel(dropped, label);
+    if (cleaned.nodes.length > 0) pieces.push({ kept: false, nodes: cleaned.nodes });
+  };
+  units.forEach((unit, index) => {
+    const at = match[index]!;
+    if (at < 0) {
+      // 區塊之間補一個換行：最外層的行內內容才不會跟上一塊黏在一起。
+      if (pending.length > 0) pending.push(text('\n'));
+      pending.push(...unit.nodes);
+      return;
+    }
+    flush();
+    pieces.push({ kept: true, unit: original[at]! });
+  });
+  flush();
+  return { pieces, dropped };
+}
+
+/** 把 `cleanRichEdit` 的結果接回 HTML：保留的區塊有原始片段就逐字用它，頂層區塊之間用換行（後端的正文慣例）。 */
+export function serializeRichEdit(result: RichEditResult): string {
+  return result.pieces
+    .map((piece) => (piece.kept ? (piece.unit.source ?? serializeRich(piece.unit.nodes)) : serializeRich(piece.nodes, '\n')))
+    .filter((part) => part.length > 0)
+    .join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 序列化
+// ---------------------------------------------------------------------------
 
 const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
 
@@ -673,7 +975,7 @@ function serializeNode(node: RichNode): string {
 
 /**
  * 樹 → HTML。跳脫規則跟 parse5 的序列化一致（文字：& nbsp < >；屬性：& nbsp "），
- * 所以沒改過的正文整理完逐字不變，後端不會為了空白或引號寫法建新版本。
+ * 所以同一份 HTML 從瀏覽器 DOM 或 parse5 轉出來的區塊 key 相同，比得出「沒改過」。
  * `separator`：最外層節點之間放什麼（後端的正文慣例是換行）。
  */
 export function serializeRich(nodes: readonly RichNode[], separator = ''): string {

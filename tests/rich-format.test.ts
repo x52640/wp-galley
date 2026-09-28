@@ -115,6 +115,11 @@ describe('快捷鍵', () => {
 describe('連結網址輸入', () => {
   const schemes = ['https', 'http', 'mailto'];
 
+  it('站內路徑與錨點照收（F5）', () => {
+    expect(parseLinkInput('/about', schemes)).toEqual({ ok: true, href: '/about' });
+    expect(parseLinkInput('#section-2', schemes)).toEqual({ ok: true, href: '#section-2' });
+  });
+
   it('完整網址原樣收', () => {
     expect(parseLinkInput('https://example.com/a?b=1', schemes)).toEqual({ ok: true, href: 'https://example.com/a?b=1' });
     expect(parseLinkInput('  mailto:me@example.com ', schemes)).toEqual({ ok: true, href: 'mailto:me@example.com' });
@@ -135,7 +140,8 @@ describe('連結網址輸入', () => {
   it('空的、有空白、看不出是網址的都不收', () => {
     expect(parseLinkInput('   ', schemes).ok).toBe(false);
     expect(parseLinkInput('hello world', schemes).ok).toBe(false);
-    expect(parseLinkInput('/relative', schemes).ok).toBe(false);
+    expect(parseLinkInput('../relative', schemes).ok).toBe(false);
+    expect(parseLinkInput('//evil.test', schemes).ok).toBe(false);
   });
 });
 
@@ -169,5 +175,26 @@ describe('審查 #6：開著連結 A 的輸入框時改開連結 B', () => {
   it('計數器落後也不會撞到上一次的 session', () => {
     const first = nextLinkEditor(null, null, 5);
     expect(nextLinkEditor(first, null, 3).session).toBeGreaterThan(first.session);
+  });
+});
+
+describe('F6：清單項目裡還包著段落（Google 文件貼上）', () => {
+  it('祖先是 p、li、ul 時仍是清單情境', () => {
+    const state = formatStateFrom(['p', 'li', 'ul']);
+    expect(state).toMatchObject({ block: 'list', list: 'ul' });
+    expect(isCommandActive('ul', state)).toBe(true);
+    expect(isCommandActive('paragraph', state)).toBe(false);
+    expect(isCommandEnabled('h2', state)).toBe(false);
+    expect(isCommandEnabled('h3', state)).toBe(false);
+  });
+
+  it('div、標題、粗體夾在中間也一樣', () => {
+    expect(formatStateFrom(['strong', 'div', 'li', 'ol']).block).toBe('list');
+    expect(formatStateFrom(['h2', 'li', 'ul']).block).toBe('list');
+    expect(isCommandEnabled('h2', formatStateFrom(['h2', 'li', 'ul']))).toBe(false);
+  });
+
+  it('清單外面的引用段落不受影響', () => {
+    expect(formatStateFrom(['p', 'blockquote']).block).toBe('paragraph');
   });
 });

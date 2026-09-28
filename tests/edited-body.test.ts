@@ -232,6 +232,21 @@ describe('P5-T028：格式存檔後渲染與區塊正確', () => {
     expect(result.blocks[0]).toMatchObject({ type: 'list', items: [{ html: '<strong>A</strong>' }, { html: '<strong>B</strong>' }] });
   });
 
+  it('第二輪審查：改一段存檔，上一版裡整理規則會動的區塊（清單裡的標題與引用、../ 連結）原樣保留', async () => {
+    fixture = await createCoreFixture();
+    const { core } = fixture;
+    const touchy = '<ul><li><h2>Heading</h2><blockquote><p>Quote</p></blockquote></li></ul>';
+    const uuid = core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      title: '20260928',
+      templateData: { title: '20260928', body: `<p>一</p>\n${touchy}\n<p>三</p>` },
+    }).uuid;
+    core.createRevision(uuid, { editedBody: `<p>一</p>\n${touchy}\n<p>三改過</p>` });
+    const body = core.getJob(uuid).currentRevision?.templateData['body'];
+    expect(body).toBe(`<p>一</p>\n${touchy}\n<p>三改過</p>`);
+  });
+
   it('日記（flexible）同樣存得起來', async () => {
     fixture = await createCoreFixture();
     const { core } = fixture;

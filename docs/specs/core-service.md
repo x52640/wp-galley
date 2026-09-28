@@ -30,7 +30,8 @@ interface CoreService {
   /** 建立新 revision。任何內容改動都走這裡，因此核准失效也只在這裡處理。 */
   /**
    * `editedBody`：直接在文章上改，只換正文，先經 normalizeEditedBody 整理（P5-T010）。
-   * 整理規則跟前端存檔前同一份（`contract/rich-text.ts`，P5-T028），並帶模板的 allowedSchemes：不合的連結拆成純文字。
+   * 整理規則跟前端存檔前同一份（`contract/rich-text.ts`，P5-T028），並帶模板的 allowedSchemes：不收的連結拆成純文字。
+   * 帶上一版的正文（base.templateData 的 publishSlot）：沒改的頂層區塊逐字保留，只整理改過的。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;
   listRevisions(uuid: string): Revision[];

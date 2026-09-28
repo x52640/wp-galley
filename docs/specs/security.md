@@ -22,11 +22,22 @@
 不能覆蓋系統規則或模板規則。
 
 **直接在文章上改時貼上的 HTML（P5-T028）**：剪貼簿的 `text/html` 在外層用 `DOMParser` 解析（惰性文件，
-script 不跑、圖片不載），只保留模板 `allowedTags` 內的標籤、連結只留 `href` 且 scheme 必須在
-`allowedSchemes`（判斷前去掉控制字元與空白，`java\tscript:` 也擋），其餘屬性、`style`、`class`、`script`
+script 不跑、圖片不載），只保留模板 `allowedTags` 內的標籤、連結只留 `href` 且要通過下面的連結網址規則，其餘屬性、`style`、`class`、`script`
 （連內容）、圖片一律丟掉。這一步**不是安全關卡**：存檔送出的正文後端照樣用同一套規則整理
 （`normalizeEditedBody`），再過 schema、`sanitize.ts`（manifest 原始 allowlist）與結構驗證。
 校樣 iframe 仍是 `sandbox="allow-same-origin"`、不給 scripts；格式指令一律由外層對 iframe 文件下。
+
+**連結網址規則（2026-09-28 使用者裁定，P5-T028 審查 F5）**：渲染（`sanitize.ts`）、編輯整理、貼上、連結輸入框
+都呼叫同一個函式 `safeHref`（`src/contract/rich-text.ts`）：
+- 收：scheme 在模板 `allowedSchemes` 內的絕對網址；`#` 開頭的頁內錨點；以**單一** `/` 開頭的站內路徑（`/about`；
+  `/%2F%2Fx` 仍是站內路徑，瀏覽器不把 `%2F` 當成分隔）。
+- 不收：其他相對路徑（`../post`、`post`、`./x`、`?q=1`）、協定相對 `//host`、`/\host`。判斷前先去掉控制字元與空白
+  （瀏覽器會忽略網址裡的 tab／換行，`java\tscript:`、`/\t/evil.test` 在它眼中就是 `javascript:`、`//evil.test`）。
+- 不收的連結整個拆掉、字留著（不留沒有 href 的空殼 `<a>`）；sanitize 回報 `a.href`，編輯整理時進 dropped 提醒。
+
+**存檔時沒改的頂層區塊原樣保留**（P5-T028 審查）：前後端都把編輯後的正文跟進入編輯時（後端：上一版 templateData 的正文）
+逐個頂層區塊做序列比對，對得上的逐字保留、不跑整理規則。保留**不是**免檢：整份正文（含保留的區塊）照樣過
+sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML），前端無法宣稱「沒改」來讓別的內容跳過整理。
 
 **MCP Server 與 Web UI 必須呼叫同一個 `CoreService`，不能各寫一套發布邏輯。**
 這是整個安全模型的基礎——所有核准、驗證與稽核只實作一次。

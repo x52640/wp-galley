@@ -18,6 +18,7 @@ import {
 import {
   applyLink,
   cleanEditedBody,
+  snapshotBody,
   cleanPastedHtml,
   currentLink,
   removeLink,
@@ -26,6 +27,7 @@ import {
   selectionAncestors,
   type RichAllow,
 } from '../lib/rich-commands.js';
+import type { RichUnit } from '../../contract/rich-text.js';
 
 /**
  * 中央校樣。
@@ -246,6 +248,8 @@ export function ProofView({
   const [saveError, setSaveError] = useState<string | null>(null);
   /** 進入編輯那一刻、整理過的正文：存檔時比對「有沒有改」要用同一套整理規則，不然沒改也會算改。 */
   const originalClean = useRef<string | null>(null);
+  /** 進入編輯那一刻的頂層區塊：存檔時沒動過的區塊原樣保留，只整理改過的（P5-T028 審查）。 */
+  const originalUnits = useRef<RichUnit[] | null>(null);
 
   // --- 格式（P5-T028） ---
   const allow: RichAllow = { tags: job.template.allowedTags, schemes: job.template.allowedSchemes };
@@ -588,6 +592,7 @@ export function ProofView({
       body.removeAttribute('contenteditable');
       originalBody.current = null;
       originalClean.current = null;
+      originalUnits.current = null;
       setFormatState(null);
       setLinkEditor(null);
       setDropWarning(null);
@@ -600,7 +605,8 @@ export function ProofView({
     body.normalize();
     if (originalBody.current === null) {
       originalBody.current = body.innerHTML;
-      originalClean.current = cleanEditedBody(body, allowRef.current).html;
+      originalUnits.current = snapshotBody(body);
+      originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
     }
     body.setAttribute('contenteditable', 'true');
     // 按 Enter 開新段落用 <p>，不要 Chrome 預設的 <div>。
@@ -642,7 +648,7 @@ export function ProofView({
     if (!body) return;
     // 存檔前整理一次（P5-T028）：b／i 轉 strong／em、瀏覽器的 div／<p><ul> 整理好、模板不支援的格式拿掉。
     // 後端照同一套規則再整理一次，再走 sanitize。
-    const { html, dropped } = cleanEditedBody(body, allow);
+    const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
     // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
     const original = originalBody.current;
     const decision = decideEditSave({

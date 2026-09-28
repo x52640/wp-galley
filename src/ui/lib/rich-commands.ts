@@ -1,4 +1,12 @@
-import { cleanRich, serializeRich, type RichNode } from '../../contract/rich-text.js';
+import {
+  cleanRich,
+  cleanRichEdit,
+  richUnits,
+  serializeRich,
+  serializeRichEdit,
+  type RichNode,
+  type RichUnit,
+} from '../../contract/rich-text.js';
 import type { FormatCommand, FormatState } from './rich-format.js';
 
 /**
@@ -47,14 +55,21 @@ export interface RichAllow {
   readonly schemes: readonly string[];
 }
 
-/** 存檔前整理編輯區（`edit` 模式）。`dropped`：因為模板不支援而會被拿掉的格式。 */
-export function cleanEditedBody(body: Element, allow: RichAllow): { html: string; dropped: string[] } {
-  const result = cleanRich(domToRich(body.childNodes as unknown as ArrayLike<DomLike>), {
-    mode: 'edit',
+/** 進入編輯那一刻的正文，切成頂層區塊。存檔時拿來比對哪些區塊沒動過。 */
+export function snapshotBody(body: Element): RichUnit[] {
+  return richUnits(domToRich(body.childNodes as unknown as ArrayLike<DomLike>));
+}
+
+/**
+ * 存檔前整理編輯區。**只整理改過或新增的頂層區塊**，沒動過的（跟 `original` 對得上的）原樣保留
+ * （`cleanRichEdit`，後端同一套）。`dropped`：改過的區塊裡因為模板不支援或結構存不了而會被拿掉的格式。
+ */
+export function cleanEditedBody(body: Element, allow: RichAllow, original: readonly RichUnit[] | null): { html: string; dropped: string[] } {
+  const result = cleanRichEdit(domToRich(body.childNodes as unknown as ArrayLike<DomLike>), original, {
     allowedTags: allow.tags,
     allowedSchemes: allow.schemes,
   });
-  return { html: serializeRich(result.nodes, '\n'), dropped: result.dropped };
+  return { html: serializeRichEdit(result), dropped: result.dropped };
 }
 
 /** 貼上的外來 HTML → 要插進去的 HTML（`paste` 模式）。空字串＝整理完什麼都不剩。 */

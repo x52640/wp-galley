@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import type { TemplateManifest } from './types.js';
+import { safeHref } from '../contract/rich-text.js';
 
 /**
  * 正文 HTML 清理。
@@ -26,7 +27,7 @@ function toClassMatcher(pattern: string): string | RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function buildOptions(manifest: TemplateManifest): sanitizeHtml.IOptions {
+function buildOptions(manifest: TemplateManifest, onRejectedLink: () => void = () => undefined): sanitizeHtml.IOptions {
   const allowedClasses: Record<string, (string | RegExp)[]> = {};
   for (const [tag, patterns] of Object.entries(manifest.allowedClasses)) {
     allowedClasses[tag] = patterns.map(toClassMatcher);
@@ -43,8 +44,20 @@ function buildOptions(manifest: TemplateManifest): sanitizeHtml.IOptions {
     // script / style 的**內容**也要丟掉，不能只拿掉標籤留下程式碼。
     nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript'],
     disallowedTagsMode: 'discard',
-    // 瀏覽器編輯器與外來內容常用 b／i；模板認得的是 strong／em。拆掉的話粗體會靜靜消失（P5-T028）。
-    transformTags: renameTags(manifest),
+    transformTags: {
+      // 瀏覽器編輯器與外來內容常用 b／i；模板認得的是 strong／em。拆掉的話粗體會靜靜消失（P5-T028）。
+      ...renameTags(manifest),
+      // 連結網址跟編輯整理用同一個規則（contract/rich-text.ts 的 safeHref，審查 F5）：不收的整個連結拆掉、字留著，
+      // 不留一個沒有 href 的空殼 <a>。站內路徑 `/about` 與錨點 `#x` 收，`../post` 之類的相對路徑不收。
+      a: (tagName: string, attribs: sanitizeHtml.Attributes) => {
+        const href = attribs['href'];
+        if (href !== undefined && safeHref(href, manifest.allowedSchemes) === null) {
+          onRejectedLink();
+          return { tagName: REJECTED_LINK, attribs: {} };
+        }
+        return { tagName, attribs };
+      },
+    },
   };
 }
 
@@ -58,6 +71,9 @@ function renameTags(manifest: TemplateManifest): Record<string, string> {
   return renames;
 }
 
+/** 不在任何 allowlist 裡的標籤名：transformTags 換成它，sanitize 就會拆掉它、留下字。 */
+const REJECTED_LINK = 'publisher-rejected-link';
+
 const SEMANTIC_RENAMES: Readonly<Record<string, string>> = { b: 'strong', i: 'em' };
 
 export function sanitizeBody(html: string, manifest: TemplateManifest): SanitizeReport {
@@ -65,7 +81,7 @@ export function sanitizeBody(html: string, manifest: TemplateManifest): Sanitize
   const removedAttributes = new Set<string>();
 
   const options: sanitizeHtml.IOptions = {
-    ...buildOptions(manifest),
+    ...buildOptions(manifest, () => removedAttributes.add('a.href')),
     exclusiveFilter: undefined,
   };
 
