@@ -1,4 +1,6 @@
-# 本機 AI WordPress 發布台
+# Galley
+
+**Local AI copy desk for WordPress** — 本機 AI WordPress 發布台。
 
 只在你自己電腦上執行的 WordPress 發布台：**本機 AI 當編輯，你當總編。**
 
@@ -19,8 +21,8 @@ AI 碰不到你的 WordPress，也不需要任何 AI API Key。
 ## 安裝與啟動
 
 ```bash
-git clone <這個 repo 的網址> wordpress-publisher
-cd wordpress-publisher
+git clone https://github.com/x52640/wp-galley.git
+cd wp-galley
 npm install
 npm run build
 npm start                 # 打開 http://127.0.0.1:3000
@@ -134,3 +136,9 @@ UI 網址加上 `?fixtures=1` 是示範資料模式，不連後端；`?fixtures=
 ⚠️ 把文章改成公開，可能會觸發站上的電子報或自動分享外掛，**寄出去就收不回來**。第一次用建議先發成草稿。
 
 `.env`、`config/publish-targets.json`、`data/`、`drafts/`、`generated-images/`、`backups/` 都不進版控。
+
+## 授權
+
+[MIT](./LICENSE)。這是開源自架工具：自己架、自己修，不提供支援。
+
+WordPress 是 WordPress Foundation 的商標；本專案與 WordPress Foundation 無關。
