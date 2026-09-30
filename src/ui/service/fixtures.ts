@@ -1232,6 +1232,10 @@ export const fixtureApi: PublisherApi = {
   async createRevision(uuid: string, input: CreateRevisionInput) {
     await delay();
     const job = mustGet(uuid);
+    // 先驗完再動資料：跟後端一樣，錯的請求不能撤銷核准、不能換版本（P5-T031，Codex 審查）。
+    if (input.resolveItemId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
+      throw new Error('resolveItemId 只能跟 editedBody 或 editedTitle 一起用（從卡片進去直接改文章）');
+    }
     // 在文章上改的標題（P5-T029）：跟後端同一條規則。
     let editedTitle: string | undefined;
     if (input.editedTitle !== undefined) {
@@ -1271,9 +1275,6 @@ export const fixtureApi: PublisherApi = {
     job.currentRevision = next;
     if (input.sourceText !== undefined) job.sourceText = input.sourceText;
     // 從卡片進去改的：那一項跟著結案（後端 createRevision 的 resolveItemId）；只改標題也算（P5-T031）。
-    if (input.resolveItemId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
-      throw new Error('resolveItemId 只能跟 editedBody 或 editedTitle 一起用（從卡片進去直接改文章）');
-    }
     if (input.resolveItemId !== undefined && job.review) {
       job.review = {
         ...job.review,
