@@ -12,7 +12,8 @@
 
 ## 進行中
 
-- [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6（verify 67 檔／1398 測試綠、獨立審查與 Codex 審查皆無 high／medium），**待使用者合併與手動驗證**（只存草稿）。
+- [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題（D-030 延伸，使用者實測回報），分支 `fix/P5-T031-edit-jump-to-title`，實作中。
+- [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併（對抗性審查 4 條 low 已修；使用者決定不補 Codex），**待使用者手動驗證**。
   併入使用者回報的「文章上滾輪要滾兩次」修正。
 - [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），PR #2 已合併（五輪 Codex 審查），**待使用者手動驗證**（只存草稿）。
