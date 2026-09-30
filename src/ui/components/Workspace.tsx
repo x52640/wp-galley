@@ -433,7 +433,10 @@ export function Workspace({
                 origin: 'manual',
                 reason: '直接在文章上改',
                 // 從卡片進來改的：存成新版本時那張卡片一起結案，不用再按一次「不用改」。
-                ...(editing?.itemId == null || editedBody === undefined ? {} : { resolveItemId: editing.itemId }),
+                // 只改標題也算（講標題的建議，P5-T031）。
+                ...(editing?.itemId == null || (editedBody === undefined && editedTitle === undefined)
+                  ? {}
+                  : { resolveItemId: editing.itemId }),
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });

@@ -94,7 +94,7 @@ import { buildTemplateDataFromSource } from './source-text.js';
 import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from './slug-suggestion.js';
 import { pickSlugSuggestions } from '../contract/slug.js';
 import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../contract/empty-body.js';
-import { checkPlainTitle, titleMaxLengthFromSchema } from '../contract/plain-title.js';
+import { checkPlainTitle, sameTitle, titleMaxLengthFromSchema } from '../contract/plain-title.js';
 import {
   assertTransition,
   canTransition,
@@ -207,7 +207,7 @@ export interface CreateRevisionInput {
   readonly templateData?: Record<string, unknown> | undefined;
   /** 直接在文章上改：只換正文（publishSlot），其他欄位沿用上一版。見 normalizeEditedBody。 */
   readonly editedBody?: string | undefined;
-  /** 從哪張建議卡片進去改的：存成新版本時一起標成已處理。只能跟 editedBody 一起用。 */
+  /** 從哪張建議卡片進去改的：存成新版本時一起標成已處理。只能跟 editedBody／editedTitle 一起用（P5-T031）。 */
   readonly resolveItemId?: number | undefined;
   /** 在文章上直接改的標題（P5-T029）：只換 title。純文字、一行、非空（contract/plain-title.ts）。 */
   readonly editedTitle?: string | undefined;
@@ -808,13 +808,17 @@ export class CoreService {
         maxLength: titleMaxLengthFromSchema(template.schema),
       });
       if (!checked.ok) throw new InvalidInputError(checked.message);
-      editedTitle = checked.title;
+      // 跟目前的標題只差在空白（連續空格、NBSP、全形空格）不算改（P5-T031，跟前端同一條 sameTitle）：
+      // 沿用舊標題，後面的「沒有實質改動」判斷才認得出來，卡片也不會因為空白被結案。
+      const current = base.templateData['title'];
+      editedTitle = typeof current === 'string' && sameTitle(checked.title, current) ? current : checked.title;
     }
     // 要一起結案的那張卡片，寫入任何東西之前先驗：驗不過就整個存檔拒絕，不留下半套。
     let resolveRow: ReviewItemRow | null = null;
     if (input.resolveItemId !== undefined) {
-      if (input.editedBody === undefined) {
-        throw new InvalidInputError('resolveItemId 只能跟 editedBody 一起用（從卡片進去直接改文章）');
+      // 講標題的建議只改標題也算（P5-T031）。
+      if (input.editedBody === undefined && input.editedTitle === undefined) {
+        throw new InvalidInputError('resolveItemId 只能跟 editedBody 或 editedTitle 一起用（從卡片進去直接改文章）');
       }
       const proposal = this.repo.openReviewProposal(job.id);
       resolveRow =

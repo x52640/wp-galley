@@ -48,6 +48,9 @@ interface CoreService {
    * 規則 `contract/plain-title.ts`：不能換行、不能有控制字元、修掉前後空白後不能是空的、長度不超過**該篇模板 schema 的 `title.maxLength`**
    * （日記、長文 120，通用文章 200；不寫死），不合就 InvalidInputError、什麼都不寫。中間的空白原樣保留。
    * 不能跟 `templateData` 同時給。標題跟正文整理後都跟目前這一版一樣就不建新版本、不撤銷核准。
+   * 標題跟目前的只差在空白（連續空格、NBSP、全形空格，`sameTitle`）算沒改，沿用目前的標題（P5-T031）。
+   * `resolveItemId`（P5-T012）：從哪張卡片進去改的，存成新版本時那一項一起結案；只能跟 `editedBody` 或 `editedTitle`
+   * 一起給（講標題的建議只改標題也算，P5-T031）。沒有實質改動（沒建新版本）就不結案。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;
   listRevisions(uuid: string): Revision[];
