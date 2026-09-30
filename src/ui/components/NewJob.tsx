@@ -5,6 +5,7 @@ import { Icon } from '../icons.js';
 import { NO_TARGETS_MESSAGE, typeLabel } from './JobList.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 import { newJobRequest } from '../lib/write-in-place.js';
+import { creatableTargets, resolveTargetKey } from '../lib/targets.js';
 
 /**
  * 新稿件：只問類型與標題，其他都等進了文章再說（D-030，P5-T029）。
@@ -16,6 +17,9 @@ import { newJobRequest } from '../lib/write-in-place.js';
  * 已經在了，只差一個類型——這條路帶著原稿建立，照舊轉成段落，不進打字模式。
  * **類型決定發到哪裡**，所以選完就寫出來，不讓人猜。
  */
+
+/** 設定檔裡有類型、但全部停用了（只有手改設定檔才會這樣：精靈至少留一個）。 */
+const ALL_DISABLED_MESSAGE = '所有類型都停用了：到設定精靈「發到哪裡」打開一個。';
 
 function today(): string {
   const now = new Date();
@@ -47,17 +51,21 @@ export function NewJob({
   const [targetKey, setTargetKey] = useState<string | null>(presetTarget ?? null);
   const [title, setTitle] = useState(() => firstLineTitle(initialText ?? ''));
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [allDisabled, setAllDisabled] = useState(false);
   const create = useAction();
 
   useEffect(() => {
     let cancelled = false;
     api
       .listTargets()
-      .then((list) => {
+      .then((all) => {
         if (cancelled) return;
+        // 停用的類型（D-032）不給選；後端 createJob 也會擋。
+        const list = creatableTargets(all);
         setTargets(list);
-        // 只有一種類型就不用問了。
-        if (list.length === 1) setTargetKey((current) => current ?? list[0]?.key ?? null);
+        setAllDisabled(all.length > 0 && list.length === 0);
+        // 書籤或上一頁帶來的類型已經停用：不留著選單裡看不到的選擇。只有一種類型就不用問了。
+        setTargetKey((current) => resolveTargetKey(current, list));
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(describeError(cause));
@@ -94,7 +102,7 @@ export function NewJob({
               {targets?.length === 0 && (
                 <p className="note note-warn" role="alert">
                   <Icon name="alert" size={14} />
-                  <span>{NO_TARGETS_MESSAGE}</span>
+                  <span>{allDisabled ? ALL_DISABLED_MESSAGE : NO_TARGETS_MESSAGE}</span>
                 </p>
               )}
               {targets?.map((item) => (
@@ -158,11 +166,11 @@ export function NewJob({
           <button
             type="button"
             className="btn btn-primary btn-big"
-            disabled={create.busy || targetKey === null}
+            disabled={create.busy || target === null}
             onClick={() =>
               void create.run(async () => {
-                if (targetKey === null) return;
-                const { request, editOnOpen } = newJobRequest({ targetKey, title, initialText });
+                if (target === null) return;
+                const { request, editOnOpen } = newJobRequest({ targetKey: target.key, title, initialText });
                 const result = await api.createJob(request);
                 onCreated(result.uuid, { edit: editOnOpen });
               })

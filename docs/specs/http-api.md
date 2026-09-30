@@ -71,8 +71,8 @@
 | `POST` | `/api/setup/wordpress/test` | 測試連線（只讀）；通過回 `testId` | `SetupConnectionRequest` → `SetupConnectionResult` |
 | `POST` | `/api/setup/wordpress` | 把通過測試的那組存進 `.env` 並當場套用 | `SetupSaveWordPressRequest` → `SetupSaveResponse` |
 | `POST` | `/api/setup/agents` | 重新偵測三個 CLI（會啟動子行程），附安裝／登入指令；body `{}` | → `SetupAgentsResponse` |
-| `POST` | `/api/setup/destinations/check` | 文章／頁面能不能選（會打真的站）、設定檔裡已有什麼；body `{}` | → `SetupDestinationsResponse` |
-| `POST` | `/api/setup/destinations` | 寫站台設定檔並當場套用 | `SetupDestinationsRequest` → `SetupSaveResponse` |
+| `POST` | `/api/setup/destinations/check` | 文章／頁面能不能選（會打真的站）、設定檔裡已有什麼（含停用的）、每個類型進行中的稿件數（`openJobs`）；body `{}` | → `SetupDestinationsResponse` |
+| `POST` | `/api/setup/destinations` | 寫站台設定檔並當場套用：加文章／頁面、停用／打開既有類型（`disabled`） | `SetupDestinationsRequest` → `SetupSaveResponse` |
 
 `/api/health`、`/api/agents`、`/api/templates` 只給診斷頁用，形狀尚未納入契約。
 `GET /api/agents` 只回快取（30 秒內不重跑偵測）；原本的 `?refresh=1` 拿掉了（P8-T002：會啟動 CLI 的讀取
@@ -172,7 +172,13 @@
     （from／to／publishedJobs／uploadedMedia）；這時 `POST /api/setup/wordpress` 要帶 `confirmSiteChange: true`，
     否則 409、`.env` 不動。
   - 後端沒拿到檔案路徑（`buildApp` 沒給 `setupFiles`）時兩個寫入路由回 503；`SetupStatus.canWrite` 是 false。
-  - `destinations`：`include` 至少一個；已存在的 key 要列在 `replace` 才取代，否則 409 且檔案不動；
-    選了站上沒有或帳號不能發的類型回 400。覆寫既有檔時 `backupFile` 是備份路徑。
+  - `destinations`：`include` 與 `disabled` 至少要有一個（`include` 可以是空陣列，這時一定要給 `disabled`，否則 400）；
+    已存在的 key 要列在 `replace` 才取代，否則 409 且檔案不動；選了站上沒有或帳號不能發的類型回 400。
+    覆寫既有檔時 `backupFile` 是備份路徑；什麼都沒變時不寫檔，`backupFile` 是 null。
+  - 停用類型（P5-T032，D-032，新增欄位、向後相容）：請求的 `disabled` 是存完之後停用的完整 key 清單，不給＝不動；
+    全部停用或有設定檔裡沒有的 key 回 400、檔案不動。`replace` 一個停用的 target 時保留停用。只改停用（`include` 空）時不需要 WordPress 連線。
+    `PublishTargetSummary.disabled` 標出停用的（`publishTargets`、`SetupStatus`、`existing` 都照樣列出停用的）；
+    `SetupDestinationsResponse.openJobs` 是每個類型進行中（沒發布、沒取消）的稿件數，沒有稿件的 key 不列。
+    `POST /api/jobs` 用停用的類型回 400。規則見 [wordpress-site.md](wordpress-site.md)「停用類型」。
   - 有發布或上傳正在進行（或另一個儲存還沒完成）時兩個寫入路由回 409；儲存期間發布、上傳、換圖、放圖、
     設封面回 503「設定精靈正在儲存…」。沒連上 WordPress 時 `destinations/check` 回 503。

@@ -188,5 +188,6 @@ export function summarize(targets: readonly PublishTarget[]): PublishTargetSumma
     taxonomy: target.taxonomy,
     requireFeaturedImage: target.requireFeaturedImage,
     allowCreateTerms: target.allowCreateTerms,
+    disabled: target.disabled,
   }));
 }

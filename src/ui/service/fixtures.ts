@@ -79,6 +79,7 @@ const DIARY_TARGET: PublishTargetSummary = {
   taxonomy: 'diary-category',
   requireFeaturedImage: false,
   allowCreateTerms: false,
+  disabled: false,
 };
 
 const LONGFORM_TARGET: PublishTargetSummary = {
@@ -90,6 +91,7 @@ const LONGFORM_TARGET: PublishTargetSummary = {
   taxonomy: 'read-think-tag',
   requireFeaturedImage: true,
   allowCreateTerms: false,
+  disabled: false,
 };
 
 /** 通用站台（D-016）：同一個 article-v1 模板發文章與頁面。示範資料裡跟作者站台並列，只是為了兩種都看得到。 */
@@ -102,6 +104,7 @@ const POST_TARGET: PublishTargetSummary = {
   taxonomy: 'category',
   requireFeaturedImage: false,
   allowCreateTerms: false,
+  disabled: false,
 };
 
 const PAGE_TARGET: PublishTargetSummary = {
@@ -113,6 +116,7 @@ const PAGE_TARGET: PublishTargetSummary = {
   taxonomy: null,
   requireFeaturedImage: false,
   allowCreateTerms: false,
+  disabled: false,
 };
 
 /** 模板允許的正文標籤（照 templates 底下各模板的 manifest.json 抄；示範資料沒有後端可以問）。 */
@@ -1162,6 +1166,10 @@ export const fixtureApi: PublisherApi = {
     const target =
       [DIARY_TARGET, LONGFORM_TARGET, POST_TARGET, PAGE_TARGET].find((item) => item.key === input.targetKey) ??
       LONGFORM_TARGET;
+    // 跟後端一樣擋停用的類型（P5-T032）：畫面不給選，但示範資料也不該默默建出來。
+    if (fixtureTargets().some((item) => item.key === target.key && item.disabled)) {
+      throw new Error(`「${target.displayName}」已經停用，不能建新稿。要用的話到設定精靈「發到哪裡」把它打開；已經有的稿件不受影響。`);
+    }
     const base =
       target.contentType === 'diary' ? baseDiary : target.contentType === 'article' ? baseArticle : baseLongform;
     const job = base(uuid, {
@@ -1874,7 +1882,7 @@ export const fixtureApi: PublisherApi = {
 
   async listTargets() {
     await delay(80);
-    return [LONGFORM_TARGET, DIARY_TARGET, POST_TARGET, PAGE_TARGET];
+    return clone(fixtureTargets());
   },
 
   async getSetupStatus() {
@@ -1907,8 +1915,14 @@ export const fixtureApi: PublisherApi = {
   async getSetupDestinations() {
     await delay(400);
     const existing = setupState().siteConfig.targets;
+    const openJobs: Record<string, number> = {};
+    for (const job of store.values()) {
+      if (job.state === 'PUBLISHED' || job.state === 'CANCELLED' || job.state === 'SUPERSEDED') continue;
+      openJobs[job.target.key] = (openJobs[job.target.key] ?? 0) + 1;
+    }
     return {
       existing: clone(existing),
+      openJobs,
       options: [
         {
           key: 'post' as const,
@@ -1944,8 +1958,17 @@ export const fixtureApi: PublisherApi = {
       const target = key === 'post' ? POST_TARGET : PAGE_TARGET;
       const index = state.siteConfig.targets.findIndex((item) => item.key === key);
       if (index === -1) state.siteConfig.targets.push(target);
-      else if (input.replace.includes(key)) state.siteConfig.targets[index] = target;
+      // 取代時保留原本的停用狀態，跟後端 mergeSiteTargets 一樣（P5-T032）。
+      else if (input.replace.includes(key)) state.siteConfig.targets[index] = { ...target, disabled: state.siteConfig.targets[index]!.disabled };
       else throw new Error(`設定檔裡已經有「${target.displayName}」（key: ${key}）。要換成精靈產生的設定，請勾選「取代」。`);
+    }
+    // 停用清單（P5-T032）：規則跟後端 applyDisabledTargets 一樣。
+    if (input.disabled !== undefined) {
+      const wanted = new Set(input.disabled);
+      if (state.siteConfig.targets.every((item) => wanted.has(item.key))) {
+        throw new Error('至少要留一個類型不停用，不然沒有地方可以建新稿。');
+      }
+      state.siteConfig.targets = state.siteConfig.targets.map((item) => ({ ...item, disabled: wanted.has(item.key) }));
     }
     state.siteConfig.exists = true;
     state.needsSetup = state.wordpress === null;
@@ -1985,6 +2008,12 @@ function setupState(): FixtureSetupState {
         canWrite: true,
       };
   return fixtureSetup;
+}
+
+/** 新稿件選單、總覽看到的類型：有設定檔就跟精靈改過的一致（含停用狀態），還沒設定就用預設四個。 */
+function fixtureTargets(): PublishTargetSummary[] {
+  const state = setupState();
+  return state.siteConfig.exists ? state.siteConfig.targets : [LONGFORM_TARGET, DIARY_TARGET, POST_TARGET, PAGE_TARGET];
 }
 
 const FIXTURE_TEST_ID = 'fixture-test-id';

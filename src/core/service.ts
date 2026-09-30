@@ -101,6 +101,7 @@ import {
   InvalidTransitionError,
   isContentMutable,
   isJobState,
+  JOB_STATES,
   type JobState,
 } from './state-machine.js';
 
@@ -465,6 +466,20 @@ export class CoreService {
   /** 目前連的站上發過幾篇、傳過幾張圖。還沒連站是 null。 */
   currentSiteUsage(): { publishedJobs: number; uploadedMedia: number } | null {
     return this.siteId === null ? null : this.repo.siteUsage(this.siteId);
+  }
+
+  /**
+   * 每個類型還有幾篇進行中的稿件（沒發布、沒取消、沒被取代；FAILED 還能重試，算）。
+   * 設定精靈停用類型時講一句「還有 N 篇，停用後照常可以編輯」（D-032）；沒有稿件的類型不列。
+   */
+  openJobCountsByTarget(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    const open = JOB_STATES.filter((state) => state !== 'PUBLISHED' && state !== 'CANCELLED' && state !== 'SUPERSEDED');
+    for (const job of this.repo.listJobs(open)) {
+      const key = this.repo.targetKeyOf(job.target_id);
+      if (key !== null) counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
   }
 
   /** 會碰 WordPress 的動作都包在這裡：設定精靈換設定時擋掉；跑的期間設定精靈也不能換。 */
@@ -3782,15 +3797,22 @@ export class CoreService {
     return asset;
   }
 
+  /** 建新稿用：停用的類型（D-032）在這裡擋。舊稿件走 targetOf，不受停用影響。 */
   private requireTarget(key: string): PublishTarget {
     // 根本還沒設定站台（本機設定檔不存在）：講下一步，不要列一串空的「可用的是」。
     if (this.targets.setupRequired !== undefined) throw new InvalidInputError(this.targets.setupRequired);
+    const usable = this.targets.list().filter((t) => !t.disabled);
     if (!this.targets.has(key)) {
+      throw new InvalidInputError(`找不到發布目標 ${key}；可用的是 ${usable.map((t) => t.key).join('、')}`);
+    }
+    const target = this.targets.get(key);
+    // 不信任前端：畫面上已經不給選，MCP 或舊分頁送來的一樣擋。
+    if (target.disabled) {
       throw new InvalidInputError(
-        `找不到發布目標 ${key}；可用的是 ${this.targets.list().map((t) => t.key).join('、')}`,
+        `「${target.displayName}」已經停用，不能建新稿。要用的話到設定精靈「發到哪裡」把它打開；已經有的稿件不受影響。`,
       );
     }
-    return this.targets.get(key);
+    return target;
   }
 
   private targetOf(job: JobRow): PublishTarget | null {

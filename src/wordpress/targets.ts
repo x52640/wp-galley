@@ -21,6 +21,8 @@ const TAXONOMY_NAME_PATTERN = /^[a-z0-9_]+(?:-[a-z0-9_]+)*$/;
  * - allowCreate      能不能建立新內容
  * - allowUpdate      能不能覆寫既有內容
  * - allowCreateTerms 能不能建立新的分類項目（預設 false，見 terms.ts 的說明）
+ *
+ * 另有 `disabled`（預設 false）：使用者在精靈裡關掉不用的類型，只影響「能不能建新稿」。
  */
 
 export const PublishTargetSchema = z
@@ -63,6 +65,11 @@ export const PublishTargetSchema = z
     requireFeaturedImage: z.boolean().default(false),
     /** 發布前是否需要第二次確認（首頁用）。 */
     requireSecondConfirmation: z.boolean().default(false),
+    /**
+     * 停用（D-032，P5-T032）：不出現在新稿件的類型選單，建稿拒絕；已經用它的舊稿件照常編輯、發布。
+     * 不是刪除——設定精靈「發到哪裡」隨時可以再打開。**不寫＝啟用**，舊檔不用改。
+     */
+    disabled: z.boolean().default(false),
   })
   .strict()
   .superRefine((target, ctx) => {

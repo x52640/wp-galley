@@ -4,6 +4,7 @@ import type { JobSummary, PublishTargetSummary } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { formatRelative } from '../lib/format.js';
 import { isFinished, isTerminal } from '../lib/steps.js';
+import { creatableTargets, shownTypeFilters } from '../lib/targets.js';
 
 /**
  * 稿件總覽（B0，決策 D-013）。
@@ -134,7 +135,10 @@ export function JobList({
     const target = targets.find((item) => item.key === key);
     return typeLabel(target?.contentType, target?.postType);
   };
-  const typeNames = targets.map((target) => typeLabel(target.contentType, target.postType));
+  // 停用的類型（D-032）：舊稿件照樣靠 targets 顯示類型名稱，但建新稿的入口（新 X、拖放、⌘V 之後的選單）不給它。
+  const creatable = creatableTargets(targets);
+  const typeNames = creatable.map((target) => typeLabel(target.contentType, target.postType));
+  const filters = shownTypeFilters(targets, (jobs ?? []).map((job) => job.targetKey));
 
   return (
     <div className="b0">
@@ -158,7 +162,7 @@ export function JobList({
               長文放最後、用主色：寫長文才需要走完整套流程，日記多半貼了就發。
               通用站台同理：文章（post）是主要的，頁面（page）偶爾才開。
             */}
-            {[...targets]
+            {[...creatable]
               .sort((a, b) => primaryRank(a) - primaryRank(b))
               .map((target, index, list) => (
                 <button
@@ -171,7 +175,7 @@ export function JobList({
                   新{typeLabel(target.contentType, target.postType)}
                 </button>
               ))}
-            {targets.length === 0 && (
+            {creatable.length === 0 && (
               <button type="button" className="btn btn-big btn-primary" onClick={() => onNew()}>
                 <Icon name="plus" size={16} />
                 新稿件
@@ -214,7 +218,7 @@ export function JobList({
 
         <div className="inbox-tools">
           <div className="pills" role="tablist" aria-label="依類型篩選">
-            {(['all', ...targets.map((target) => target.key)] as TypeFilter[]).map((type) => (
+            {(['all', ...filters.map((target) => target.key)] as TypeFilter[]).map((type) => (
               <button
                 key={type}
                 type="button"

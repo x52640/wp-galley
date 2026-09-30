@@ -1,7 +1,7 @@
 ---
 id: P5-T032
 phase: 5
-status: ready
+status: done
 depends_on: [P8-T002]
 specs: [wordpress-site.md, http-api.md, design-system.md, core-service.md]
 write_paths: ["src/wordpress/targets.ts", "src/wordpress/setup.ts", "src/core/", "src/contract/", "src/server/routes/", "src/ui/", "config/publish-targets.example.json", "config/examples/", "tests/", "docs/specs/", "docs/tasks/P5-T032-disable-targets.md", "docs/CURRENT_TASK.md"]
@@ -49,14 +49,25 @@ D-032。設定精靈「發到哪裡」那一步，既有的類型（read-think�
 使用者：精靈 →「發到哪裡」停用一個類型 → 新稿件選單看不到它 → 用那個類型的舊稿件照常打開 → 再啟用回來。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-09-30）
-- 已通過驗證：—
-- 下一步：派 subagent 實作
+- 最後完成：實作＋測試＋spec（2026-09-30）。設定檔欄位 `disabled`（選填布林，不寫＝啟用）；精靈「發到哪裡」既有類型改成開關；
+  `POST /api/setup/destinations` 多 `disabled`（完整清單）、`destinations/check` 多 `openJobs`；createJob 拒絕停用的類型。
+- 已通過驗證：`npm run verify` 綠（70 檔 / 1431 測試）；`?fixtures=1` 用 ui-drive 實際點過：停用日記 → 新稿件選單、總覽「新 X」、
+  拖放提示都沒有日記，舊日記稿件照常列出可打開 → 再啟用回來選單恢復；最後一個使用中的開關按不下去。
+- 審查修正（2026-09-30，獨立審查 2 條 low）：① 書籤／上一頁進 `#/new/<停用的 key>` 時重設選擇（只剩一個能建的就選它），
+  沒選到能建的類型前按鈕停用（`resolveTargetKey`）；② 停用清單只在動過開關時才送（`destinationsRequest`），
+  取代停用的 target 時後端保留 `disabled`（`mergeSiteTargets`，選後端是因為任何呼叫端都不會默默打開）。
+  第 3 條（畫面要連得上 WordPress 才改得了停用）不修，已寫進 wordpress-site.md。verify 綠（70 檔 / 1438 測試）；
+  fixtures 點過：停用日記後進 `#/new/diary` → 標題「新稿件」、沒有選中、按鈕停用；沒動開關時按鈕是「不改，下一步」。
+- 下一步：主 session 審查 → commit → PR；使用者手動驗證（真實設定檔，只存草稿）
 - Blocker：無
 
 ## 完成結果
+
+- 獨立審查（2026-09-30）：無 high／medium。low 兩條已修：網址帶著停用類型進新稿件（重設選擇、按鈕停用）；
+  兩個精靈分頁互蓋停用狀態（後端取代時保留 disabled，畫面只在動過開關時送清單）。
+  low 一條不修、寫進 spec：畫面要連得上 WordPress 才改得了停用。

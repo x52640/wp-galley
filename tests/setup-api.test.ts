@@ -481,3 +481,157 @@ describe('換站', () => {
     expect(readdirSync(files.backupsDir)).toHaveLength(2);
   });
 });
+
+describe('停用不要的類型（P5-T032，D-032）', () => {
+  const REMUS = () => readFileSync(join(paths.config, 'examples', 'remusplus.json'), 'utf8');
+
+  async function withRemus(): Promise<{ app: FastifyInstance; files: SetupFiles }> {
+    const files = tempFiles();
+    writeFileSync(files.siteConfigFile, REMUS());
+    const built = await build({ files });
+    return { app: built.app, files };
+  }
+
+  function saveDisabled(instance: FastifyInstance, disabled: string[], include: string[] = []) {
+    return instance.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include, replace: [], disabled } });
+  }
+
+  it('舊檔沒有停用標記：全部視為啟用', async () => {
+    const { app } = await withRemus();
+    const status = (await app.inject({ method: 'GET', url: '/api/setup', headers })).json();
+    expect(status.siteConfig.targets.map((target: { key: string; disabled: boolean }) => [target.key, target.disabled])).toEqual([
+      ['read-think', false],
+      ['diary', false],
+    ]);
+  });
+
+  it('停用：只加那一個標記、其他原樣，先備份，當場生效（不用連 WordPress）', async () => {
+    const { app, files } = await withRemus();
+    const res = await saveDisabled(app, ['diary']);
+    expect(res.statusCode).toBe(200);
+    expect(mock!.requests).toHaveLength(0);
+
+    const original = JSON.parse(REMUS());
+    const written = JSON.parse(readFileSync(files.siteConfigFile, 'utf8'));
+    expect(written.targets[0]).toEqual(original.targets[0]);
+    // 欄位順序也不動：停用標記接在最後。
+    expect(Object.keys(written.targets[1])).toEqual([...Object.keys(original.targets[1]), 'disabled']);
+    expect(written.targets[1]).toEqual({ ...original.targets[1], disabled: true });
+
+    const backupFile = res.json().backupFile as string;
+    expect(readFileSync(join(files.rootDir, backupFile), 'utf8')).toBe(REMUS());
+
+    // 回應與 listTargets 都帶停用狀態；停用的照樣列出來（舊稿件要靠它顯示類型名稱）。
+    expect(res.json().status.siteConfig.targets.map((target: { key: string; disabled: boolean }) => [target.key, target.disabled])).toEqual([
+      ['read-think', false],
+      ['diary', true],
+    ]);
+    const probe = (await app.inject({ method: 'GET', url: '/api/wordpress', headers })).json();
+    expect(probe.publishTargets.find((target: { key: string }) => target.key === 'diary')).toMatchObject({ disabled: true });
+
+    // 建稿當場就擋；沒停用的照常。
+    const refused = await app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { targetKey: 'diary', sourceText: '一段。' } });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.message).toContain('停用');
+    const created = await app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { targetKey: 'read-think', sourceText: '一段。' } });
+    expect(created.statusCode).toBe(201);
+  });
+
+  it('再啟用：拿掉標記，檔案回到一字不差的原樣；再備份一次', async () => {
+    const { app, files } = await withRemus();
+    expect((await saveDisabled(app, ['diary'])).statusCode).toBe(200);
+    const res = await saveDisabled(app, []);
+    expect(res.statusCode).toBe(200);
+    expect(readFileSync(files.siteConfigFile, 'utf8')).toBe(REMUS());
+    expect(readdirSync(files.backupsDir)).toHaveLength(2);
+    const created = await app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { targetKey: 'diary', sourceText: '一段。' } });
+    expect(created.statusCode).toBe(201);
+  });
+
+  it('全部停用：400，檔案不動、沒有備份', async () => {
+    const { app, files } = await withRemus();
+    const res = await saveDisabled(app, ['read-think', 'diary']);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('至少');
+    expect(readFileSync(files.siteConfigFile, 'utf8')).toBe(REMUS());
+    expect(existsSync(files.backupsDir)).toBe(false);
+  });
+
+  it('設定檔裡沒有的 key：400，檔案不動', async () => {
+    const { app, files } = await withRemus();
+    const res = await saveDisabled(app, ['nope']);
+    expect(res.statusCode).toBe(400);
+    expect(readFileSync(files.siteConfigFile, 'utf8')).toBe(REMUS());
+  });
+
+  it('什麼都沒變：不寫檔、不備份', async () => {
+    const { app, files } = await withRemus();
+    const res = await saveDisabled(app, []);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().backupFile).toBeNull();
+    expect(existsSync(files.backupsDir)).toBe(false);
+  });
+
+  it('include 與 disabled 都沒給：400', async () => {
+    const { app } = await withRemus();
+    const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: [], replace: [] } });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('加文章＋停用日記同一次存：一份備份，兩件事都做', async () => {
+    const { app, files } = await withRemus();
+    await connect(app);
+    const res = await saveDisabled(app, ['diary'], ['post']);
+    expect(res.statusCode).toBe(200);
+    const written = JSON.parse(readFileSync(files.siteConfigFile, 'utf8'));
+    expect(written.targets.map((target: { key: string; disabled?: boolean }) => [target.key, target.disabled])).toEqual([
+      ['read-think', undefined],
+      ['diary', true],
+      ['post', undefined],
+    ]);
+    expect(readdirSync(files.backupsDir)).toHaveLength(1);
+  });
+
+  it('檢查回應帶每個類型進行中的稿件數（已發布、已取消的不算）', async () => {
+    const { app } = await withRemus();
+    await connect(app);
+    const make = async (targetKey: string) =>
+      (await app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { targetKey, sourceText: '一段。' } })).json().job.uuid as string;
+    await make('diary');
+    await make('diary');
+    const cancelled = await make('diary');
+    app.ctx.core.cancelJob(cancelled);
+    const options = (await check(app)).json();
+    expect(options.openJobs).toEqual({ diary: 2 });
+  });
+});
+
+describe('停用狀態不被別的操作默默打開（P5-T032 審查 low #2）', () => {
+  it('取代一個停用的 target：換成精靈的設定，但仍然停用', async () => {
+    const files = tempFiles();
+    const mine = { targets: [
+      { key: 'read-think', displayName: '長文', contentType: 'longform', postType: 'read-think', restBase: 'read-think', templateId: 'longform-v1', taxonomy: null, allowCreate: true },
+      { key: 'post', displayName: '我的文章', contentType: 'article', postType: 'post', restBase: 'posts', templateId: 'article-v1', taxonomy: null, allowCreate: true, disabled: true },
+    ] };
+    writeFileSync(files.siteConfigFile, JSON.stringify(mine));
+    const { app } = await build({ files });
+    await connect(app);
+    const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: ['post'], replace: ['post'] } });
+    expect(res.statusCode).toBe(200);
+    const written = JSON.parse(readFileSync(files.siteConfigFile, 'utf8'));
+    expect(written.targets[1]).toMatchObject({ displayName: '文章', taxonomyRestBase: 'categories', disabled: true });
+  });
+
+  it('沒帶 disabled 只加文章：別處剛停用的類型維持停用', async () => {
+    const files = tempFiles();
+    writeFileSync(files.siteConfigFile, readFileSync(join(paths.config, 'examples', 'remusplus.json'), 'utf8'));
+    const { app } = await build({ files });
+    await connect(app);
+    // 另一個分頁先停用日記。
+    expect((await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: [], replace: [], disabled: ['diary'] } })).statusCode).toBe(200);
+    // 舊分頁（沒動開關）只加文章。
+    expect((await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: ['post'], replace: [] } })).statusCode).toBe(200);
+    const written = JSON.parse(readFileSync(files.siteConfigFile, 'utf8'));
+    expect(written.targets.find((target: { key: string }) => target.key === 'diary').disabled).toBe(true);
+  });
+});

@@ -1066,8 +1066,53 @@ h1, h2, h3 { font-weight: 600; }
 }
 
 .setup-existing { display: flex; flex-direction: column; gap: .4rem; }
-.setup-existing .chips { margin: 0; padding: 0; list-style: none; }
-.setup-existing .chip { cursor: default; }
+/* 既有類型的開關（P5-T032）：停用的不只靠顏色——文字寫「不用這個類型」、外框改虛線、開關推到左邊。 */
+.setup-existing > p { margin: 0; }
+.setup-toggles { display: flex; flex-direction: column; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.setup-toggle { display: flex; flex-direction: column; gap: .25rem; }
+.setup-switch {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  width: 100%;
+  padding: .6rem .8rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--shell-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--fast), background var(--fast);
+}
+.setup-switch:hover:not(:disabled) { border-color: var(--shell-text-dim); }
+.setup-switch:disabled { cursor: not-allowed; }
+.setup-switch-track {
+  position: relative;
+  flex: none;
+  width: 2.1rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: background var(--fast);
+}
+.setup-switch-knob {
+  position: absolute;
+  top: .15rem;
+  left: 1.05rem;
+  width: .9rem;
+  height: .9rem;
+  border-radius: 50%;
+  background: var(--on-accent);
+  transition: left var(--fast);
+}
+.setup-toggle-name { display: inline-flex; align-items: baseline; gap: .45rem; flex: 1; font-weight: 600; }
+.setup-toggle-state { font-size: .82rem; color: var(--shell-text-dim); }
+.setup-toggle[data-off='yes'] .setup-switch { border-style: dashed; background: var(--shell-sunken); }
+.setup-toggle[data-off='yes'] .setup-switch-track { background: var(--shell-line); }
+.setup-toggle[data-off='yes'] .setup-switch-knob { left: .15rem; background: var(--shell-text-dim); }
+.setup-toggle[data-off='yes'] .setup-toggle-name { color: var(--shell-text-dim); font-weight: 400; }
+.setup-toggle-note { font-size: .82rem; color: var(--warn-on-shell); padding: 0 .2rem; }
 .setup-dest { display: flex; flex-direction: column; gap: .5rem; }
 .setup-dest .type-card:disabled { cursor: not-allowed; color: var(--shell-text-dim); background: var(--shell-sunken); }
 .setup-dest .type-card-name { display: inline-flex; align-items: center; gap: .5rem; }

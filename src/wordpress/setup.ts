@@ -751,7 +751,7 @@ export async function readSiteConfig(file: string): Promise<ExistingSiteConfig> 
 
 /**
  * 合併：既有的 target 原樣保留（順序不變）；精靈要加的 key 已經存在時，必須在 replace 裡
- * 才取代，否則整個拒絕——不默默覆蓋使用者自己寫的設定。
+ * 才取代，否則整個拒絕——不默默覆蓋使用者自己寫的設定。取代時保留原本的停用標記（P5-T032）。
  */
 export function mergeSiteTargets(
   existing: readonly Record<string, unknown>[],
@@ -770,9 +770,47 @@ export function mergeSiteTargets(
         `設定檔裡已經有「${String(out[index]!['displayName'] ?? addition['key'])}」（key: ${String(addition['key'])}）。要換成精靈產生的設定，請勾選「取代」。`,
       );
     }
-    out[index] = addition;
+    // 取代不等於打開：原本停用的（D-032）換成精靈的設定之後仍然停用。放在後端而不是靠畫面帶停用清單，
+    // 任何呼叫端（舊分頁、沒帶 disabled 的請求）都不會默默把它打開。
+    out[index] = out[index]!['disabled'] === true ? { ...addition, disabled: true } : addition;
   }
   return out;
+}
+
+/**
+ * 停用／打開既有的類型（D-032，P5-T032）。`disabledKeys` 是存完之後**停用的完整清單**。
+ *
+ * 只動 `disabled` 這一個欄位，狀態沒變的 target 一個字都不碰（連手寫的 `"disabled": false` 都留著）：
+ * - 啟用 → 停用：已經有這個欄位就原地改成 true，沒有就接在最後。
+ * - 停用 → 啟用：拿掉欄位（不寫＝啟用），檔案回到停用前的樣子。
+ *
+ * 至少要留一個啟用的，否則沒有地方可以建稿；設定檔裡沒有的 key 也拒絕（多半是畫面跟檔案不同步）。
+ */
+export function applyDisabledTargets(
+  targets: readonly Record<string, unknown>[],
+  disabledKeys: readonly string[],
+): { targets: Record<string, unknown>[]; changed: boolean } {
+  const keys = new Set(targets.map((target) => String(target['key'])));
+  const unknown = disabledKeys.filter((key) => !keys.has(key));
+  if (unknown.length > 0) {
+    throw new PublishTargetError(`設定檔裡沒有「${unknown.join('、')}」這個類型，沒有改動。重新整理畫面再試一次。`);
+  }
+  const wanted = new Set(disabledKeys);
+  if (targets.every((target) => wanted.has(String(target['key'])))) {
+    throw new PublishTargetError('至少要留一個類型不停用，不然沒有地方可以建新稿。');
+  }
+
+  let changed = false;
+  const out = targets.map((target) => {
+    const isDisabled = target['disabled'] === true;
+    const shouldDisable = wanted.has(String(target['key']));
+    if (isDisabled === shouldDisable) return target;
+    changed = true;
+    if (shouldDisable) return { ...target, disabled: true }; // 有欄位就原地改值（物件展開保留原位置），沒有就加在最後
+    const { disabled: _drop, ...rest } = target;
+    return rest;
+  });
+  return { targets: out, changed };
 }
 
 /**
