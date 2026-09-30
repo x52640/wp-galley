@@ -12,8 +12,7 @@
 
 ## 進行中
 
-- [P5-T032](tasks/P5-T032-disable-targets.md)：設定精靈可以停用不要的文章類型（D-032），PR #9。獨立審查 2 條 low、Codex 審查 3 條都已修，
-  verify 70 檔／1441 測試綠，**Codex 修正待 commit**，之後待使用者合併與手動驗證。
+- [P5-T032](tasks/P5-T032-disable-targets.md)：設定精靈可以停用不要的文章類型（D-032），PR #9 已合併（獨立審查 2 條 low、Codex 3 條都已修），**待使用者手動驗證**。
 - [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題，PR #7＋#8 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併（對抗性審查 4 條 low 已修；使用者決定不補 Codex），**待使用者手動驗證**。
@@ -24,26 +23,23 @@
 - [P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），已 commit（審查後修 3 條），**待使用者手動驗證**（真實 CLI 是否接受新 schema、是否用官方英文片名；只存草稿）。
 - P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。
 
-## 上次停在哪（2026-09-28 收官）
+## 上次停在哪（2026-09-30 收官）
 
-- **已開源**：https://github.com/x52640/wp-galley （MIT，名稱 Galley，D-029）。main 有分支保護：只能走 PR、不能 force push／刪除。
-  commit 作者信箱是 GitHub noreply。新功能一律開分支 → PR → 審查（Codex，或額度不足時用 workflow 對抗性審查）→ 審查結果貼在 PR → 使用者合併。
-- 本日合併：#1 改名、#2 P5-T028 格式工具列（五輪 Codex）、#3 README 英文＋繁中、#4 P5-T029 新稿件直接在文章上寫。
-- **待使用者手動驗證（只存草稿）**：P5-T024～P5-T029。建議一次跑完：新日記 → 標題 → 建立並打開 → 打字、工具列、改標題 →
-  建議網址 → 一鍵配圖、改描述、生圖 → 發布面板看作者 → 存草稿到後台看區塊。
-- 已知殘餘：帶連結的圖片發布走 wp:html（要改 block-parse／block-types，未開 Task）；Safari／Firefox 未測；
-  按過「不要了」的配圖需求會被 Agent 再提時復活（使用者未裁定）。
-- 開源前未完成：D-016 各家 CLI 條款未查證（README 已公開聲明）。可考慮加 CI 後把「測試通過才能合併」打開。
+- 本日合併：#6 P5-T030 恢復已取消的稿件、#7＋#8 P5-T031 講標題的建議跳到標題（#7 在 GitHub 同步前被合併、漏掉 Codex 修正，#8 補上）、
+  #9 P5-T032 設定精靈停用類型。每個都走：subagent 實作 → 獨立審查 → PR → Codex 審查 → 修正與意見貼 PR。
+- 流程補充：開完 PR 主動跑 Codex、有問題直接修；叫使用者合併前先確認 PR head 等於本機 HEAD。
+- **待使用者手動驗證（只存草稿）**：P5-T024～P5-T032。P5-T030～T032 的步驟寫在各 Task 的「手動驗證」。
+- 已知殘餘（新增）：P5-T030 取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）；
+  P5-T032 畫面要連得上 WordPress 才改得了停用；精靈寫檔一律兩格縮排 JSON（原有行為）。
+- 背景跑的 dev server 最多 2 小時會被 Claude Code 關掉；要長開請使用者自己在終端機跑 `npm run dev`。
 
-## 更早（2026-09-24 收官）
+## 更早
 
-- 5.5 實測已結案（P5-T001），實測中當場修 P5-T008～P5-T018，都已 commit。
-- **使用者 2026-09-24 已真實驗證**：Codex 生圖（帶 `--ephemeral`／`--ignore-user-config`）→「用這張」上傳
-  → 自動放進正文 → 存成草稿，全程正常。
-- 第 8 階段：P8-T001（通用文章類型、本機站台設定檔）、P8-T002（首次設定精靈）已完成並 commit。
-  精靈是否已用作者本人的站完整跑過（含故意填錯密碼、填 http），使用者沒有明確回報——下次開工先問。
-- 工作方式：使用者要求實作派 subagent、主 session 監工（驗證 → 另派 subagent 審查 → 修 → commit）。
-- dev server（`npm run dev`）可能還在背景跑；資料庫 migration head 008。
+- 2026-09-28：開源到 https://github.com/x52640/wp-galley （MIT，D-029），main 有分支保護（只能 PR）；commit 用 noreply 信箱。
+  殘餘：帶連結的圖片發布走 wp:html（未開 Task）；Safari／Firefox 未測；「不要了」的配圖需求被 Agent 再提會復活（未裁定）；
+  D-016 各家 CLI 條款未查證；可考慮加 CI 後開「測試通過才能合併」。
+- 2026-09-24：使用者已真實驗證 Codex 生圖 → 上傳 → 放進正文 → 存草稿。精靈是否用作者本人的站完整跑過（含填錯密碼、填 http）
+  使用者沒明確回報——下次開工先問。工作方式：實作派 subagent、主 session 監工。
 
 ## Ready
 
