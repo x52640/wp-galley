@@ -20,6 +20,7 @@ import type {
   CreateJobInput,
   CreateRevisionInput,
   JobDetail,
+  JobState,
   JobSummary,
   ImageCandidate,
   ImageGenerationStatus,
@@ -55,6 +56,8 @@ interface FixtureJob extends Writable<Omit<JobDetail, 'target' | 'review'>> {
   review: Writable<ReviewProposal> | null;
   createdAt: string;
   updatedAt: string;
+  /** 取消前的狀態與 blocker（D-031）。後端記在 job_cancelled 事件裡，這裡直接掛在稿件上。 */
+  cancelledFrom?: { state: JobState; blockers: string[] } | undefined;
 }
 
 /**
@@ -804,6 +807,13 @@ function buildStore(): Map<string, FixtureJob> {
       blockers: ['遠端文章在本次載入之後被改過。請重新載入內容並重新核准，再發布一次。'],
     }),
     baseArticle('f-article', {}),
+    // 已取消（D-031）：打開看得到「恢復這篇」。取消前是已核准，恢復後回到「還沒核准」。
+    baseLongform('f-cancelled', {
+      state: 'CANCELLED',
+      approval: { id: 11, contentHash: 'b7e4290ac1f6d835'.padEnd(64, '0'), createdAt: '2026-08-28T10:20:00Z', valid: false },
+      blockers: ['工作項目已經是 CANCELLED，不能再發布'],
+      cancelledFrom: { state: 'APPROVED', blockers: [] },
+    }),
   ];
   return new Map(jobs.map((job) => [job.uuid, job]));
 }
@@ -1177,7 +1187,32 @@ export const fixtureApi: PublisherApi = {
 
   async cancelJob(uuid: string) {
     await delay();
-    mustGet(uuid).state = 'CANCELLED';
+    const job = mustGet(uuid);
+    if (job.state === 'CANCELLED') throw new Error('這篇已經取消了');
+    job.cancelledFrom = { state: job.state, blockers: job.blockers };
+    job.state = 'CANCELLED';
+    // 跟後端一樣：取消就撤銷核准。
+    if (job.approval) job.approval = { ...job.approval, valid: false };
+    job.blockers = ['工作項目已經是 CANCELLED，不能再發布'];
+  },
+
+  async restoreJob(uuid: string) {
+    await delay();
+    const job = mustGet(uuid);
+    if (job.state !== 'CANCELLED') throw new Error(`只有已取消的稿件能恢復，這篇目前是 ${job.state}`);
+    // 規則同後端（state-machine.md「恢復已取消的稿件」）：APPROVED 回 RENDERED、核准不復活；記不到回 SOURCE。
+    const from = job.cancelledFrom;
+    if (!from) {
+      job.state = 'SOURCE';
+      job.blockers = ['還沒渲染，先按「渲染」產生校樣'];
+    } else if (from.state === 'APPROVED') {
+      job.state = 'RENDERED';
+      job.blockers = ['還沒核准'];
+    } else {
+      job.state = from.state;
+      job.blockers = from.blockers;
+    }
+    job.cancelledFrom = undefined;
   },
 
   async createRevision(uuid: string, input: CreateRevisionInput) {

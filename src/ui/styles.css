@@ -1615,6 +1615,9 @@ h1, h2, h3 { font-weight: 600; }
   font-size: .86rem;
 }
 
+/* 已取消（D-031）：說明在左、「恢復這篇」靠右。按鈕用一般樣式——恢復不是危險動作。 */
+.restore-bar .btn { margin-left: auto; }
+
 /* 中間是文章，右邊是建議。 */
 .desk {
   flex: 1;

@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **63 檔 / 1153 測試**全綠（2026-09-27，P5-T027 commit；
+- `npm run verify`：typecheck 通過；Vitest **67 檔 / 1398 測試**全綠（2026-09-30，P5-T030；P5-T027 時 63 檔 / 1153，
   P5-T026 commit 時是 62 檔 / 1141）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,6 +12,7 @@
 
 ## 進行中
 
+- [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6（verify 67 檔／1398 測試綠、獨立審查與 Codex 審查皆無 high／medium），**待使用者合併與手動驗證**（只存草稿）。
 - [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併（對抗性審查 4 條 low 已修；使用者決定不補 Codex），**待使用者手動驗證**。
   併入使用者回報的「文章上滾輪要滾兩次」修正。
 - [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），PR #2 已合併（五輪 Codex 審查），**待使用者手動驗證**（只存草稿）。

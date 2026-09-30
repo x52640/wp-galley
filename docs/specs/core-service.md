@@ -28,7 +28,14 @@ interface CoreService {
   createJob(input: CreateJobInput): Job;
   getJob(uuid: string): JobDetail;
   listJobs(filter?: { state?: JobState[] }): JobSummary[];
+  /** 撤銷核准、改成 CANCELLED；`job_cancelled` 事件記下取消前的狀態（`fromState`，D-031）。 */
   cancelJob(uuid: string): Job;
+  /**
+   * 恢復已取消的稿件（D-031，P5-T030）：回到取消前的狀態，APPROVED 回 RENDERED，記不到回 SOURCE；
+   * 不建立、不恢復核准。只接受 CANCELLED，其他丟 InvalidTransitionError。只給本機 UI，MCP 不開。
+   * 規則見 state-machine.md「恢復已取消的稿件」。
+   */
+  restoreJob(uuid: string): Job;
 
   // --- 內容 ---
   /** 建立新 revision。任何內容改動都走這裡，因此核准失效也只在這裡處理。 */

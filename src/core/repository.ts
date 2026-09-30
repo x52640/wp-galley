@@ -1088,6 +1088,18 @@ export class Repository {
       .get(rowId(result)) as unknown as PublishEventRow;
   }
 
+  /** 這個 job 最近一筆成功的某種事件（例如恢復時找最近一次取消，D-031）。沒有就是 null。 */
+  latestSucceededEvent(jobId: number, eventType: string): PublishEventRow | null {
+    const row = this.db
+      .prepare(`
+        SELECT * FROM publish_events
+        WHERE job_id = ? AND event_type = ? AND status = 'succeeded'
+        ORDER BY id DESC LIMIT 1
+      `)
+      .get(jobId, eventType) as unknown as PublishEventRow | undefined;
+    return row ?? null;
+  }
+
   listEvents(jobId: number, limit = 50): PublishEventRow[] {
     return this.db
       .prepare('SELECT * FROM publish_events WHERE job_id = ? ORDER BY id DESC LIMIT ?')

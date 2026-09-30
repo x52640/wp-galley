@@ -14,12 +14,18 @@ import { JOB_STATES, type JobState } from '../contract/api.js';
  *                                        內容一改，核准失效，退回 RENDERED
  *
  * `SOURCE → RENDERED` 是刻意留的：使用者可以完全不用 Agent，貼完稿直接渲染發布。
+ *
+ * `CANCELLED` 回得去（D-031，P5-T030）：「恢復」回到取消前的編輯狀態，只有 CoreService.restoreJob 走這幾條邊。
+ * 回不到 `APPROVED`——取消時核准已經撤銷，恢復不讓它復活。
  */
 
 // 狀態清單屬於線上契約（前端也要用），定義在 src/contract/api.ts。
 export { JOB_STATES, type JobState };
 
-/** 走到這些狀態就結束了，不再往下轉。 */
+/**
+ * 走到這些狀態就結束了，不再往下轉。`CANCELLED` 雖然可以恢復，恢復之前仍然算結束：
+ * 不能改內容、不能發布、總覽放在「已結束」。
+ */
 export const TERMINAL_STATES: readonly JobState[] = ['FAILED', 'CANCELLED', 'SUPERSEDED'];
 
 /**
@@ -38,7 +44,8 @@ export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
   PUBLISHING: ['PUBLISHED', 'FAILED'],
   PUBLISHED: ['SUPERSEDED'],
   FAILED: [],
-  CANCELLED: [],
+  // 恢復（D-031）：回到取消前的狀態；取消前是 APPROVED 的回 RENDERED，所以表裡沒有 APPROVED。
+  CANCELLED: ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED'],
   SUPERSEDED: [],
 };
 
@@ -47,12 +54,15 @@ export class InvalidTransitionError extends CoreError {
   constructor(
     readonly from: JobState,
     readonly to: JobState,
+    /** 呼叫端有更貼切的說法時用（例如「只有已取消的稿件能恢復」）；不給就照轉移表組。 */
+    message?: string,
   ) {
     super(
       coreErrorCodes.INVALID_TRANSITION,
-      TRANSITIONS[from].length === 0
-        ? `工作項目已經是 ${from}，不能再變成 ${to}`
-        : `不能從 ${from} 變成 ${to}；${from} 只能變成 ${TRANSITIONS[from].join('、')}`,
+      message ??
+        (TRANSITIONS[from].length === 0
+          ? `工作項目已經是 ${from}，不能再變成 ${to}`
+          : `不能從 ${from} 變成 ${to}；${from} 只能變成 ${TRANSITIONS[from].join('、')}`),
       { from, to, allowed: TRANSITIONS[from] },
     );
   }
@@ -70,9 +80,12 @@ export function isTerminal(state: JobState): boolean {
  * 內容還能不能改。
  *
  * 從上面那張轉移表讀出來的，不是另訂一套規則：`PUBLISHED` 只能轉到 `SUPERSEDED`，
- * `PUBLISHING` 只能轉到 `PUBLISHED`／`FAILED`，終止狀態哪裡都去不了——這三類都**沒有
+ * `PUBLISHING` 只能轉到 `PUBLISHED`／`FAILED`，`FAILED`／`SUPERSEDED` 哪裡都去不了——這幾類都**沒有
  * 回到 `RENDERED` 的路**。而「改內容就撤銷核准並退回 RENDERED」是核准失效機制的
  * 全部內容，退不回去就等於改了內容卻留著一個仍然有效的核准。
+ *
+ * `CANCELLED` 是例外：它有回 `RENDERED` 的邊，但那是「恢復」專用的（D-031），恢復之前一樣不能改。
+ * 不會留下有效核准，因為取消時就撤銷了、恢復也不建核准。
  *
  * 已發布的內容要再改，正確的做法是另開一個 job（`PUBLISHED → SUPERSEDED`），
  * 而不是就地改掉一份已經在線上的東西。

@@ -377,6 +377,12 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     return guard(() => ({ job: core().cancelJob(uuid) }));
   });
 
+  // 恢復已取消的稿件（D-031）。只給本機 UI；MCP 不開這個動作。
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/restore', async (request): Promise<JobResponse> => {
+    const { uuid } = parse(UuidParams, request.params);
+    return guard(() => ({ job: core().restoreJob(uuid) }));
+  });
+
   // --- 內容 -----------------------------------------------------------------
 
   app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/revisions', async (request): Promise<RevisionsResponse> => {
