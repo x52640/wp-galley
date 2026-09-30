@@ -689,13 +689,46 @@ describe('從卡片進去直接改，存檔時一起標成已處理（P5-T012）
     expect(f.core.listRevisions(uuid)).toHaveLength(before);
   });
 
-  it('resolveItemId 只能跟 editedBody 一起用', async () => {
+  it('resolveItemId 只能跟 editedBody／editedTitle 一起用', async () => {
     const f = await setup();
     const uuid = await propose(f.core);
     const id = observationId(f.core, uuid);
     expect(() => f.core.createRevision(uuid, { templateData: { title: 'x', body: P('x') }, resolveItemId: id })).toThrow(
       InvalidInputError,
     );
+    expect(() => f.core.createRevision(uuid, { resolveItemId: id })).toThrow(InvalidInputError);
+  });
+
+  // P5-T031：講標題的建議，從卡片進去只改標題就儲存，那張卡片也要結案。
+  it('只改標題：存成新版本，卡片結案（自己改了）', async () => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    const body = f.core.getJob(uuid).currentRevision!.publishHtml;
+
+    const revision = f.core.createRevision(uuid, { editedTitle: '20260829', resolveItemId: id });
+
+    const item = f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!;
+    expect(item.state).toBe('skipped');
+    expect(item.resolvedByEdit).toBe(true);
+    expect(f.core.getJob(uuid).title).toBe('20260829');
+    expect(f.core.getJob(uuid).currentRevision!.id).toBe(revision.id);
+    expect(f.core.getJob(uuid).currentRevision!.publishHtml).toBe(body);
+  });
+
+  it.each([
+    ['一模一樣', '讀完 這本書'],
+    ['只差在空白', ' 讀完\u00a0\u3000這本書 '],
+  ])('標題沒有實質改動（%s）：不建版本，卡片也不動', async (_label, title) => {
+    const f = await setup();
+    const uuid = await propose(f.core);
+    const id = observationId(f.core, uuid);
+    f.core.createRevision(uuid, { editedTitle: '讀完 這本書' });
+    const before = f.core.listRevisions(uuid).length;
+    f.core.createRevision(uuid, { editedTitle: title, resolveItemId: id });
+    expect(f.core.listRevisions(uuid)).toHaveLength(before);
+    expect(f.core.getJob(uuid).title).toBe('讀完 這本書');
+    expect(f.core.getReview(uuid)!.items.find((candidate) => candidate.id === id)!.state).toBe('pending');
   });
 });
 

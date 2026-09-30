@@ -573,7 +573,7 @@ export interface CreateRevisionRequest {
   readonly editedBody?: string;
   /**
    * 從哪張建議卡片進去改的（P5-T012）。存成新版本時那一項一起標成已處理（`resolvedByEdit`）；
-   * 沒有實質改動就不動它。只能跟 `editedBody` 一起用。
+   * 沒有實質改動就不動它。只能跟 `editedBody` 或 `editedTitle` 一起用（講標題的建議只改標題也算，P5-T031）。
    */
   readonly resolveItemId?: number;
   /**

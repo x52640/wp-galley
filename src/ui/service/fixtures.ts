@@ -1,5 +1,5 @@
 import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../../contract/empty-body.js';
-import { checkPlainTitle } from '../../contract/plain-title.js';
+import { checkPlainTitle, sameTitle } from '../../contract/plain-title.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { hasWpImageClass } from '../../contract/media-marker.js';
 import { normalizeUserNote, USER_NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
@@ -315,7 +315,7 @@ function diaryReview(): ReviewProposal {
     createdAt: '2026-08-28T09:39:10Z',
     baseContentHash: '5c02f7ab91de4460'.padEnd(64, '0'),
     stale: false,
-    pendingCount: 5,
+    pendingCount: 6,
     items: [
       reviewItem(9001, 0, {
         type: 'change',
@@ -403,6 +403,20 @@ function diaryReview(): ReviewProposal {
         'skipped',
         true,
       ),
+      // 講標題的觀察（P5-T031）：沒有段落、字在標題裡；按「去原文改」游標要跳到標題。
+      reviewItem(9007, 6, {
+        type: 'observation',
+        blockIndex: null,
+        change: null,
+        observation: {
+          kind: 'gap',
+          // Agent 自己填的段落；後端在正文裡找不到「20260828」，讀取時重算成 null。
+          blockIndex: 0,
+          excerpt: '20260828',
+          detail: '標題是日期「20260828」，正文說「今天讀完這本書」，沒辦法確認這是不是寫這篇的那一天。',
+          suggestion: '日期不對就直接改標題。',
+        },
+      }),
     ],
   };
 }
@@ -745,7 +759,7 @@ function buildStore(): Map<string, FixtureJob> {
       },
       review: diaryReview(),
       imageBriefs: diaryBriefs(),
-      blockers: ['還有 5 項校稿建議沒處理', '還沒渲染，先按「渲染」產生校樣'],
+      blockers: ['還有 6 項校稿建議沒處理', '還沒渲染，先按「渲染」產生校樣'],
     }),
     baseLongform('f-media', {
       state: 'MEDIA_READY',
@@ -1227,10 +1241,19 @@ export const fixtureApi: PublisherApi = {
       });
       if (!checked.ok) throw new Error(checked.message);
       editedTitle = checked.title;
-      job.title = checked.title;
     }
-    invalidateApproval(job, '內容有新的修改');
     const current = job.currentRevision;
+    // 沒有實質改動（標題只差在空白、正文沒送）：跟後端一樣不建版本、卡片不動（P5-T031）。
+    const currentTitle = current?.templateData['title'];
+    if (editedTitle !== undefined && typeof currentTitle === 'string' && sameTitle(editedTitle, currentTitle)) {
+      editedTitle = undefined;
+    }
+    const onlyTitle = Object.keys(input).every((key) => ['editedTitle', 'resolveItemId', 'origin', 'reason', 'expectedContentHash'].includes(key));
+    if (current && input.editedTitle !== undefined && editedTitle === undefined && onlyTitle) {
+      return clone(current);
+    }
+    if (editedTitle !== undefined) job.title = editedTitle;
+    invalidateApproval(job, '內容有新的修改');
     const next = revision(
       (current?.number ?? 0) + 1,
       input.origin ?? 'manual',
@@ -1247,7 +1270,10 @@ export const fixtureApi: PublisherApi = {
     );
     job.currentRevision = next;
     if (input.sourceText !== undefined) job.sourceText = input.sourceText;
-    // 從卡片進去改的：那一項跟著結案（後端 createRevision 的 resolveItemId）。
+    // 從卡片進去改的：那一項跟著結案（後端 createRevision 的 resolveItemId）；只改標題也算（P5-T031）。
+    if (input.resolveItemId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
+      throw new Error('resolveItemId 只能跟 editedBody 或 editedTitle 一起用（從卡片進去直接改文章）');
+    }
     if (input.resolveItemId !== undefined && job.review) {
       job.review = {
         ...job.review,
@@ -1257,6 +1283,11 @@ export const fixtureApi: PublisherApi = {
             : item,
         ),
       };
+      job.review.pendingCount = job.review.items.filter(
+        (item) => item.state === 'pending' || item.state === 'unappliable',
+      ).length;
+      job.blockers = job.blockers.filter((line) => !line.includes('項校稿建議沒處理'));
+      if (job.review.pendingCount > 0) job.blockers.unshift(`還有 ${job.review.pendingCount} 項校稿建議沒處理`);
     }
     return clone(next);
   },

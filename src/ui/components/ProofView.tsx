@@ -4,6 +4,7 @@ import type { LoadedJob, ProofMark } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
+import { locateEditCaret } from '../lib/edit-target.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
 import { FormatBar, type LinkEditorState } from './FormatBar.js';
 import {
@@ -734,10 +735,11 @@ export function ProofView({
     doc.execCommand('defaultParagraphSeparator', false, 'p');
     setSaveError(null);
 
-    const { caret: range, target } = editTarget(doc, body, editing);
+    const { caret: range, target, inTitle } = editTarget(doc, body, title, editing);
     showEditTarget(frame, target);
     frame.contentWindow?.focus();
-    body.focus();
+    // 講標題的建議（P5-T031）：焦點給標題，不然游標會被拉回正文。
+    (inTitle && title ? title : body).focus();
     const selection = doc.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -1066,37 +1068,52 @@ function isShortcutEnabled(command: 'bold' | 'italic' | 'link', state: FormatSta
 /**
  * 游標要放哪裡、要標出哪一段。
  *
- * - 游標：那一項引用的字前面（忽略空白，跟定位同一套規則）；找不到就放那一段的開頭，
- *   再不行就放文章開頭。
+ * - 游標：那一項引用的字前面（忽略空白，跟定位同一套規則）；沒有段落、正文找不到的，到標題裡找
+ *   （講標題的建議，P5-T031，規則見 `lib/edit-target.ts`）；都找不到就放那一段的開頭，再不行就放文章開頭。
  * - 標色：找得到字就標那段字；找不到但知道是第幾段，就標整段（至少是「大概在這裡」）；
  *   從上方「改原文」進來的沒有目標，不標。
+ * - `inTitle`：游標在標題裡，焦點要給標題（不然 `body.focus()` 會把游標拉回正文）。
  */
-function editTarget(doc: Document, body: Element, request: ProofEditRequest): { caret: Range; target: Range | null } {
+function editTarget(
+  doc: Document,
+  body: Element,
+  title: Element | null,
+  request: ProofEditRequest,
+): { caret: Range; target: Range | null; inTitle: boolean } {
   const caret = doc.createRange();
   const block = request.blockIndex === null ? null : (body.children[request.blockIndex] ?? null);
-  const scope = block ?? body;
-  if (request.caret !== null) {
-    const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-      const hit = findIgnoringSpaces((node as Text).data, request.caret, request.caretSkipInside);
-      if (hit === null) continue;
-      caret.setStart(node, hit.start);
-      caret.collapse(true);
-      const target = doc.createRange();
-      target.setStart(node, hit.start);
-      target.setEnd(node, hit.end);
-      return { caret, target };
-    }
+  const scopeNodes = textNodes(doc, block ?? body);
+  const titleNodes = title === null ? [] : textNodes(doc, title);
+  const spot = locateEditCaret(
+    request,
+    scopeNodes.map((node) => node.data),
+    titleNodes.map((node) => node.data),
+  );
+  if (spot.in !== 'fallback') {
+    const node = (spot.in === 'title' ? titleNodes : scopeNodes)[spot.node]!;
+    caret.setStart(node, spot.start);
+    caret.collapse(true);
+    const target = doc.createRange();
+    target.setStart(node, spot.start);
+    target.setEnd(node, spot.end);
+    return { caret, target, inTitle: spot.in === 'title' };
   }
   // 沒有指定段落：游標放第一段裡面（第一段是文字段落時），不要停在段落外面——
   // 停在外面打的字會變成頂層裸文字（新稿件剛建好的空段落就是這種情況，P5-T029）。
   const first = body.firstElementChild;
   caret.selectNodeContents(block ?? (first !== null && first.tagName === 'P' ? first : body));
   caret.collapse(true);
-  if (block === null) return { caret, target: null };
+  if (block === null) return { caret, target: null, inTitle: false };
   const target = doc.createRange();
   target.selectNodeContents(block);
-  return { caret, target };
+  return { caret, target, inTitle: false };
+}
+
+function textNodes(doc: Document, scope: Element): Text[] {
+  const nodes: Text[] = [];
+  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text);
+  return nodes;
 }
 
 /**

@@ -101,8 +101,9 @@
   沒改的區塊輸出基準裡的 HTML（序列比對，P5-T028 審查）。
   它不是信任來源。沒改內容時前端不送；整理後跟目前這一版相同（例如只多按一個 Enter）時後端不建新版本、
   不撤銷核准，回傳目前那一版。
-  `resolveItemId`（只能配 `editedBody`）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下
-  `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。項目不屬於目前提案就整個拒絕。
+  `resolveItemId`（只能配 `editedBody` 或 `editedTitle`，只改標題也算，P5-T031）：從哪張建議卡片進去改的，存成新版本時那一項標成 `skipped` 並記下
+  `revision_id`，`ReviewItem.resolvedByEdit` 因此為真（P5-T012）。沒建新版本（沒有實質改動；標題只差在空白也算沒改）就不結案。
+  項目不屬於目前提案就整個拒絕。
   `expectedContentHash`（選填，64 位十六進位，格式不對 400）：這次編輯是根據哪一版算出來的。目前 revision 的
   `content_hash` 不是它就回 409 `CONTENT_CHANGED`，不建版本、不撤銷核准、不寫事件；訊息請使用者重新讀取再改。
   不給就不檢查（照舊）。前端送整份 `templateData` 或 `editedBody` 時都帶它，免得晚到的一份把先到的修改蓋掉
