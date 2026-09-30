@@ -160,6 +160,8 @@ export interface PublisherApi {
   createJob(input: CreateJobInput): Promise<{ uuid: string }>;
   getJob(uuid: string): Promise<JobDetail>;
   cancelJob(uuid: string): Promise<void>;
+  /** 恢復已取消的稿件（D-031）：回到取消前的狀態，核准不復活。 */
+  restoreJob(uuid: string): Promise<void>;
 
   createRevision(uuid: string, input: CreateRevisionInput): Promise<Revision>;
   listRevisions(uuid: string): Promise<Revision[]>;

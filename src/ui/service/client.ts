@@ -192,6 +192,10 @@ const httpApi: PublisherApi = {
     await sendJson<unknown>(`/api/jobs/${uuid}`, 'DELETE');
   },
 
+  async restoreJob(uuid: string) {
+    await sendJson<JobResponse>(`/api/jobs/${uuid}/restore`, 'POST');
+  },
+
   async createRevision(uuid: string, input: CreateRevisionInput) {
     const body = await sendJson<RevisionResponse>(
       `/api/jobs/${uuid}/revisions`,

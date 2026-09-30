@@ -31,6 +31,7 @@
 | `POST` | `/api/jobs` | 建立 job（貼原稿＋選 target） | `CreateJobRequest` → `JobResponse`（201） |
 | `GET` | `/api/jobs/:uuid` | 工作區需要的一切 | → `JobDetail` |
 | `DELETE` | `/api/jobs/:uuid` | 取消 | → `JobResponse` |
+| `POST` | `/api/jobs/:uuid/restore` | 恢復已取消的稿件（D-031；規則見 [state-machine.md](state-machine.md)「恢復已取消的稿件」）；不是 `CANCELLED` → 409 `INVALID_TRANSITION` | → `JobResponse` |
 | `GET` | `/api/jobs/:uuid/revisions` | 版本列表 | → `RevisionsResponse` |
 | `POST` | `/api/jobs/:uuid/revisions` | 手動建立 revision | `CreateRevisionRequest` → `RevisionResponse`（201） |
 | `POST` | `/api/jobs/:uuid/render` | 重新渲染 | → `RenderOutcome` |

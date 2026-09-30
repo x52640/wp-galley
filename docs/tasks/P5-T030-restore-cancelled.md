@@ -1,7 +1,7 @@
 ---
 id: P5-T030
 phase: 5
-status: ready
+status: done
 depends_on: []
 specs: [state-machine.md, core-service.md, http-api.md, design-system.md, security.md]
 write_paths: ["src/core/", "src/contract/", "src/server/routes/", "src/ui/", "tests/", "docs/specs/", "docs/tasks/P5-T030-restore-cancelled.md", "docs/CURRENT_TASK.md"]
@@ -60,14 +60,21 @@ WordPress 連結都還在，所以開一條「恢復」的路。
 使用者在自己的發布台：打開一篇已取消的稿件 → 恢復 → 能繼續改 → 核准 → **只存草稿**。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-09-30）
-- 已通過驗證：—
-- 下一步：派 subagent 實作
+- 最後完成：實作完成（2026-09-30，subagent）：轉移表加 `CANCELLED →` 五條邊、`cancelJob` 記 `fromState`、`restoreJob`、
+  `POST /api/jobs/:uuid/restore`、工作區「恢復這篇」說明條（含 `?fixtures=1` 與示範稿 `f-cancelled`）、四份 spec。
+  `render` 加 `isContentMutable` 判斷，否則對已取消的稿件渲染一次會被轉移表的新邊帶回 RENDERED（有測試，拿掉判斷會紅）。
+- 已通過驗證：`npm run verify` 綠，67 檔 / 1398 測試（開工前 66 / 1363）；`?fixtures=1` 點過：已結束 → 已取消稿件 → 說明條＋恢復 → 可「改原文」、進編輯；
+  另從發布面板取消一篇已校稿的再恢復。
+- 下一步：開 PR；使用者合併與手動驗證（只存草稿）
 - Blocker：無
 
 ## 完成結果
+
+- 獨立審查（2026-09-30，subagent）：逐一查過所有用到轉移表的呼叫點，CANCELLED 除 `render`（已修）外行為不變；無 high／medium。
+- low、接受不修：Agent 跑到一半時取消再恢復，Agent 結果仍會被收下。取消本來就不停 Agent（舊有行為），收下前有 content hash 檢查，
+  不會拿舊稿蓋新稿；恢復的意思就是回到取消前。

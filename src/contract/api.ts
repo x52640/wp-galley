@@ -735,6 +735,7 @@ export interface CreateTermRequest {
 export interface ListJobsResponse {
   readonly jobs: JobSummary[];
 }
+/** `POST /api/jobs`、`DELETE /api/jobs/:uuid`（取消）、`POST /api/jobs/:uuid/restore`（恢復，D-031）。 */
 export interface JobResponse {
   readonly job: Job;
 }

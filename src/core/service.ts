@@ -95,7 +95,14 @@ import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from './slug-
 import { pickSlugSuggestions } from '../contract/slug.js';
 import { EMPTY_BODY_AGENT_MESSAGE, EMPTY_BODY_HTML, EMPTY_BODY_MESSAGE, isBlankBody } from '../contract/empty-body.js';
 import { checkPlainTitle, titleMaxLengthFromSchema } from '../contract/plain-title.js';
-import { assertTransition, canTransition, isContentMutable, type JobState } from './state-machine.js';
+import {
+  assertTransition,
+  canTransition,
+  InvalidTransitionError,
+  isContentMutable,
+  isJobState,
+  type JobState,
+} from './state-machine.js';
 
 import { containsSecret, createSecretScrubber, type Scrubber } from '../config/secrets.js';
 import { paths } from '../config/paths.js';
@@ -708,8 +715,53 @@ export class CoreService {
       actor: 'ui',
       eventType: 'job_cancelled',
       status: 'succeeded',
+      // 恢復時要知道回到哪裡（D-031）。只記在事件裡，不加欄位。
+      detail: { fromState: job.state },
     });
     return this.toJob(this.repo.jobById(job.id)!);
+  }
+
+  /**
+   * 恢復已取消的稿件（D-031，P5-T030）。只有本機 UI 會呼叫，MCP 不開。
+   *
+   * 回到最近一次取消前的狀態；取消前是 `APPROVED` 的回 `RENDERED`——取消時核准已經撤銷，
+   * 這裡**不建立、不恢復任何核准**，要重新核准。記不到（本 Task 之前取消的）、解析不了、
+   * 或轉移表不允許的值一律回 `SOURCE`。跟 WordPress 草稿的連結沒動過，照舊。
+   */
+  restoreJob(uuid: string): Job {
+    const job = this.requireJob(uuid);
+    if (job.state !== 'CANCELLED') {
+      // 跟轉移表同一種錯（HTTP 409）；SOURCE 只是代表「恢復」這個方向。
+      throw new InvalidTransitionError(job.state, 'SOURCE', `只有已取消的稿件能恢復，這篇目前是 ${job.state}`);
+    }
+    const target = this.restoreTargetOf(job);
+    assertTransition(job.state, target);
+    this.repo.updateJobState(job.id, target);
+    this.repo.insertEvent({
+      jobId: job.id,
+      revisionId: null,
+      approvalId: null,
+      actor: 'ui',
+      eventType: 'job_restored',
+      status: 'succeeded',
+      detail: { toState: target },
+    });
+    return this.toJob(this.repo.jobById(job.id)!);
+  }
+
+  /** 恢復要回到的狀態。能不能回去看轉移表，不在這裡另列一份清單。 */
+  private restoreTargetOf(job: JobRow): JobState {
+    const event = this.repo.latestSucceededEvent(job.id, 'job_cancelled');
+    let from: unknown = null;
+    try {
+      const detail: unknown = event?.detail_json ? JSON.parse(event.detail_json) : null;
+      if (detail !== null && typeof detail === 'object') from = (detail as { fromState?: unknown }).fromState;
+    } catch {
+      // 紀錄壞掉就當成沒記，回 SOURCE。
+    }
+    if (typeof from !== 'string' || !isJobState(from)) return 'SOURCE';
+    const target: JobState = from === 'APPROVED' ? 'RENDERED' : from;
+    return canTransition('CANCELLED', target) ? target : 'SOURCE';
   }
 
   // --- 內容 -----------------------------------------------------------------
@@ -874,7 +926,13 @@ export class CoreService {
 
     // 已核准就不動狀態——重新渲染是唯讀操作，不該把核准弄掉。
     const fresh = this.repo.jobById(job.id)!;
-    if (fresh.state !== 'RENDERED' && fresh.state !== 'APPROVED' && canTransition(fresh.state, 'RENDERED')) {
+    // 只在還能改的狀態推進：CANCELLED 在轉移表裡有回 RENDERED 的邊，但那是「恢復」專用的（D-031）。
+    if (
+      fresh.state !== 'RENDERED' &&
+      fresh.state !== 'APPROVED' &&
+      isContentMutable(fresh.state) &&
+      canTransition(fresh.state, 'RENDERED')
+    ) {
       this.repo.updateJobState(job.id, 'RENDERED');
     }
 

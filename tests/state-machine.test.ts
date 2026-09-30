@@ -30,10 +30,18 @@ describe('狀態機的表格', () => {
     expect(canPublish).toEqual(['APPROVED']);
   });
 
-  it('終止狀態沒有任何出口', () => {
-    for (const state of ['FAILED', 'CANCELLED', 'SUPERSEDED'] as JobState[]) {
+  it('FAILED 與 SUPERSEDED 沒有任何出口', () => {
+    for (const state of ['FAILED', 'SUPERSEDED'] as JobState[]) {
       expect(isTerminal(state)).toBe(true);
       expect(TRANSITIONS[state]).toEqual([]);
+    }
+  });
+
+  it('CANCELLED 仍是終止狀態，出口只有「恢復」回到核准之前的編輯狀態（D-031）', () => {
+    expect(isTerminal('CANCELLED')).toBe(true);
+    // 核准不復活：回不到 APPROVED，更不能直接去發布。
+    for (const state of ['APPROVED', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'SUPERSEDED', 'CANCELLED'] as JobState[]) {
+      expect(canTransition('CANCELLED', state), state).toBe(false);
     }
   });
 
@@ -50,7 +58,7 @@ describe('狀態機的表格', () => {
  * docs/specs/state-machine.md「狀態轉移」那張表，**抄死在這裡**（審查 #16）。
  * 不能從 TRANSITIONS 反推：實作表多加一條錯的邊，反推出來的「非法清單」就跟著少一條，測試永遠綠。
  * 規格改了，這裡要跟著手改——那正是要的：改狀態機必須同時改規格與這張表。
- * 表裡沒列的 FAILED／CANCELLED／SUPERSEDED 是終止狀態（「另外三個終止狀態」），沒有出口。
+ * FAILED／SUPERSEDED 是終止狀態，沒有出口；CANCELLED 也算終止狀態，但可以「恢復」（D-031）。
  */
 const SPEC_TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
   SOURCE: ['REVIEWED', 'RENDERED', 'CANCELLED', 'FAILED'],
@@ -62,7 +70,8 @@ const SPEC_TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
   PUBLISHING: ['PUBLISHED', 'FAILED'],
   PUBLISHED: ['SUPERSEDED'],
   FAILED: [],
-  CANCELLED: [],
+  // 恢復（D-031，P5-T030）：只有 CoreService.restoreJob 走這幾條邊。
+  CANCELLED: ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED'],
   SUPERSEDED: [],
 };
 
@@ -120,7 +129,8 @@ describe('非法轉移一律丟 InvalidTransitionError', () => {
     ['APPROVED', 'PUBLISHED'],
     ['PUBLISHING', 'APPROVED'],
     ['PUBLISHED', 'PUBLISHING'],
-    ['CANCELLED', 'SOURCE'],
+    ['CANCELLED', 'APPROVED'],
+    ['CANCELLED', 'PUBLISHING'],
     ['FAILED', 'PUBLISHING'],
     ['SUPERSEDED', 'RENDERED'],
   ] as [JobState, JobState][])('%s → %s 被拒絕', (from, to) => {
@@ -157,14 +167,17 @@ describe('內容還能不能改', () => {
     }
   });
 
-  it('不可改的狀態都沒有回到 RENDERED 的路，可改的都還在流程裡', () => {
+  it('不可改的狀態都沒有回到 RENDERED 的路（CANCELLED 例外，見下），可改的都還在流程裡', () => {
     // 這條測試綁的是「規則從轉移表推出來」，而不是某一份寫死的清單。
+    // CANCELLED 回得去是「恢復」那條路（D-031）：取消時已經撤銷所有核准，恢復也不建核准，
+    // 所以不會出現「內容改了、核准還有效」的情況；恢復之前照樣不能改。
     for (const state of JOB_STATES) {
       if (isContentMutable(state)) {
         expect(TRANSITIONS[state].length).toBeGreaterThan(0);
-      } else {
+      } else if (state !== 'CANCELLED') {
         expect(canTransition(state, 'RENDERED')).toBe(false);
       }
     }
+    expect(isContentMutable('CANCELLED')).toBe(false);
   });
 });

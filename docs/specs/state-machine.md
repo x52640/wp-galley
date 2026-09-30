@@ -28,7 +28,9 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
                                      內容一改，核准失效，退回 RENDERED
 ```
 
-另外三個終止狀態：`FAILED`、`CANCELLED`、`SUPERSEDED`。
+另外三個終止狀態：`FAILED`、`CANCELLED`、`SUPERSEDED`。`CANCELLED` 可以「恢復」（D-031，見下方），
+但恢復之前仍算終止：不能改內容（`isContentMutable`）、不能發布（blocker「工作項目已經是 CANCELLED，不能再發布」）、
+總覽放在「已結束」。
 
 允許的轉移寫在 `src/core/state-machine.ts`，用表格定義，不要散在各處的 if。
 不在表格裡的轉移一律丟 `InvalidTransitionError`。
@@ -43,8 +45,25 @@ SOURCE → REVIEWED → MEDIA_READY → RENDERED → PREVIEWED → APPROVED → 
 | `APPROVED` | `PUBLISHING`、`RENDERED`（核准失效）、`CANCELLED` |
 | `PUBLISHING` | `PUBLISHED`、`FAILED` |
 | `PUBLISHED` | `SUPERSEDED` |
+| `CANCELLED` | `SOURCE`、`REVIEWED`、`MEDIA_READY`、`RENDERED`、`PREVIEWED`（只給恢復用） |
 
 **`SOURCE → RENDERED` 是刻意留的**：使用者可以完全不用 Agent，貼完稿直接渲染發布。
+
+## 恢復已取消的稿件（D-031，P5-T030）
+
+取消只改狀態，內容、版本、配圖、WordPress 連結都留著，所以可以恢復成同一篇（不是複製成新稿）。
+
+1. `cancelJob` 寫 `job_cancelled` 事件時把取消前的狀態記在 detail：`{ "fromState": "PREVIEWED" }`。不加欄位、不加 migration。
+2. `restoreJob` 只接受 `CANCELLED`，其他狀態丟 `InvalidTransitionError`（「只有已取消的稿件能恢復，這篇目前是 X」，HTTP 409）。
+3. 目標狀態：最近一筆成功的 `job_cancelled` 事件的 `fromState`；是 `APPROVED` 的改成 `RENDERED`。
+   沒有記錄（本 Task 之前取消的）、解析不了、或轉移表不允許 `CANCELLED →` 那個狀態 → `SOURCE`。
+4. **不建立、不恢復任何核准。** 取消時已經撤銷，維持撤銷；取消前已核准的，恢復後要重新預覽、核准。
+5. 寫一筆 `job_restored` 事件（`actor: 'ui'`，detail `{ "toState": ... }`）。
+6. 只有本機 UI 能恢復（`POST /api/jobs/:uuid/restore`），MCP 不開。`FAILED`、`SUPERSEDED` 不能恢復。
+
+轉移表裡 `CANCELLED` 的出口只給 `restoreJob` 走。其他會推進狀態的地方不能順路把它帶出來：
+`render` 只在 `isContentMutable` 的狀態才推到 `RENDERED`（否則對已取消的稿件渲染一次就等於恢復了）。
+`CANCELLED` 回不到 `APPROVED`，所以「只有 `APPROVED` 能進 `PUBLISHING`」不受影響。
 
 ## 核准失效的實作點
 
