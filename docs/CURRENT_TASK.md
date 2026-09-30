@@ -12,7 +12,8 @@
 
 ## 進行中
 
-- [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4（對抗性審查 4 條 low 已修，verify 66 檔／1363 測試），**待使用者合併與手動驗證**；
+- [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），分支 `feat/P5-T030-restore-cancelled`，實作中。
+- [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併，**待使用者手動驗證**；
   Codex 審查待額度重置後由使用者決定是否補跑。併入使用者回報的「文章上滾輪要滾兩次」修正。
 - [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），PR #2 已合併（五輪 Codex 審查），**待使用者手動驗證**（只存草稿）。
 - [P5-T027](tasks/P5-T027-keep-edited-brief.md)：使用者改過的配圖描述不被 AI 蓋掉（D-027），已 commit（審查 3 條低度，只改文件說法），**待使用者手動驗證**。
