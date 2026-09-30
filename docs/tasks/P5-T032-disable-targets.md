@@ -63,7 +63,10 @@ D-032。設定精靈「發到哪裡」那一步，既有的類型（read-think�
   取代停用的 target 時後端保留 `disabled`（`mergeSiteTargets`，選後端是因為任何呼叫端都不會默默打開）。
   第 3 條（畫面要連得上 WordPress 才改得了停用）不修，已寫進 wordpress-site.md。verify 綠（70 檔 / 1438 測試）；
   fixtures 點過：停用日記後進 `#/new/diary` → 標題「新稿件」、沒有選中、按鈕停用；沒動開關時按鈕是「不改，下一步」。
-- 下一步：主 session 審查 → commit → PR；使用者手動驗證（真實設定檔，只存草稿）
+- Codex 審查（PR #9）三條已修（2026-09-30）：① medium 沒有變更時仍重新載入磁碟設定進記憶體（只略過寫檔與備份）；
+  ② low「至少留一個啟用」移到 `writeSiteConfig` 對最終合併結果檢查，不帶 disabled 的取代也擋；
+  ③ low 停用清單改用設定檔共用的 `TargetKeySchema`（拿掉路由多加的 100 字元上限）。各補一條測試；verify 綠（70 檔 / 1441 測試）。
+- 下一步：主 session 審查修正 → commit 進 PR #9；使用者手動驗證（真實設定檔，只存草稿）
 - Blocker：無
 
 ## 完成結果

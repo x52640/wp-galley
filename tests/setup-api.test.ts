@@ -635,3 +635,51 @@ describe('停用狀態不被別的操作默默打開（P5-T032 審查 low #2）'
     expect(written.targets.find((target: { key: string }) => target.key === 'diary').disabled).toBe(true);
   });
 });
+
+describe('Codex 審查（PR #9）', () => {
+  const postTarget = (extra: Record<string, unknown> = {}) => ({
+    key: 'post', displayName: '我的文章', contentType: 'article', postType: 'post', restBase: 'posts', templateId: 'article-v1', taxonomy: null, allowCreate: true, ...extra,
+  });
+
+  it('#1 沒有變更也把磁碟上的設定同步進記憶體（啟動後手改過檔）', async () => {
+    const files = tempFiles();
+    const remus = readFileSync(join(paths.config, 'examples', 'remusplus.json'), 'utf8');
+    writeFileSync(files.siteConfigFile, remus);
+    const { app } = await build({ files });
+    // 啟動後有人手改：把日記停用。記憶體裡還是啟用的。
+    const edited = JSON.parse(remus);
+    edited.targets[1].disabled = true;
+    writeFileSync(files.siteConfigFile, JSON.stringify(edited, null, 2));
+
+    const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: [], replace: [], disabled: ['diary'] } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().backupFile).toBeNull();
+    expect(existsSync(files.backupsDir)).toBe(false);
+    expect(res.json().status.siteConfig.targets[1]).toMatchObject({ key: 'diary', disabled: true });
+    const refused = await app.inject({ method: 'POST', url: '/api/jobs', headers, payload: { targetKey: 'diary', sourceText: '一段。' } });
+    expect(refused.statusCode).toBe(400);
+  });
+
+  it('#2 沒帶 disabled 也不准寫出全部停用（取代唯一一個停用的 target）', async () => {
+    const files = tempFiles();
+    const mine = JSON.stringify({ targets: [postTarget({ disabled: true })] });
+    writeFileSync(files.siteConfigFile, mine);
+    const { app } = await build({ files });
+    await connect(app);
+    const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: ['post'], replace: ['post'] } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('至少');
+    expect(readFileSync(files.siteConfigFile, 'utf8')).toBe(mine);
+    expect(existsSync(files.backupsDir)).toBe(false);
+  });
+
+  it('#3 長 key（原設定 schema 合法）也能停用', async () => {
+    const files = tempFiles();
+    const longKey = `a${'-b'.repeat(80)}`; // 161 字元，設定檔 schema 沒有長度上限
+    writeFileSync(files.siteConfigFile, JSON.stringify({ targets: [postTarget(), postTarget({ key: longKey, displayName: '長' })] }));
+    const { app, } = await build({ files });
+    const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: [], replace: [], disabled: [longKey] } });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(readFileSync(files.siteConfigFile, 'utf8')).targets[1].disabled).toBe(true);
+  });
+});

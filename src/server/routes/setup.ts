@@ -36,6 +36,7 @@ import {
   loadPublishTargets,
   PublishTargetError,
   PublishTargetSchema,
+  TargetKeySchema,
   writeDefaultAuthor,
 } from '../../wordpress/targets.js';
 import type { WordPressClient } from '../../wordpress/client.js';
@@ -83,13 +84,12 @@ const EmptyBody = z.object({}).strict();
 const APP_PASSWORD_SHAPE = /^[A-Za-z0-9]{24}$/;
 
 const DestinationKey = z.enum(['post', 'page']);
-/** 停用清單裡的是設定檔的 target key（格式跟 PublishTargetSchema 的 key 一樣）。 */
-const TargetKey = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100);
 const DestinationsBody = z
   .object({
     include: z.array(DestinationKey).max(2),
     replace: z.array(DestinationKey).max(2),
-    disabled: z.array(TargetKey).max(100).optional(),
+    // 停用清單裡的是設定檔的 target key：直接用設定檔的 key schema，不另加限制。
+    disabled: z.array(TargetKeySchema).max(100).optional(),
   })
   .strict()
   // 只改停用時 include 可以是空的；兩個都沒有就是沒事可做。
@@ -343,8 +343,12 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
         merged = toggled.targets;
         changed = changed || toggled.changed;
       }
-      // 什麼都沒變（例如停用清單跟現在一樣）：不寫檔、不多留一份備份。
-      if (!changed) return null;
+      // 什麼都沒變（例如停用清單跟現在一樣）：不寫檔、不多留一份備份。但磁碟上的檔可能在啟動後被手改過，
+      // 已經驗過的內容還是同步進記憶體，免得畫面說成功、建稿卻照舊（Codex 審查 #1）。
+      if (!changed) {
+        applyTargets(app, await loadPublishTargets(files.siteConfigFile));
+        return null;
+      }
       const backup = await writeSiteConfig(files.siteConfigFile, merged, {
         backupsDir: files.backupsDir,
         rootDir: files.rootDir,

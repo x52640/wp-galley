@@ -777,6 +777,8 @@ export function mergeSiteTargets(
   return out;
 }
 
+const ALL_DISABLED_MESSAGE = '至少要留一個類型不停用，不然沒有地方可以建新稿。';
+
 /**
  * 停用／打開既有的類型（D-032，P5-T032）。`disabledKeys` 是存完之後**停用的完整清單**。
  *
@@ -797,7 +799,7 @@ export function applyDisabledTargets(
   }
   const wanted = new Set(disabledKeys);
   if (targets.every((target) => wanted.has(String(target['key'])))) {
-    throw new PublishTargetError('至少要留一個類型不停用，不然沒有地方可以建新稿。');
+    throw new PublishTargetError(ALL_DISABLED_MESSAGE);
   }
 
   let changed = false;
@@ -829,6 +831,10 @@ export async function writeSiteConfig(
     defaultAuthorId?: number | null;
   },
 ): Promise<string | null> {
+  // 最後一道：不管怎麼合併出來的（取代、手改過的檔、沒帶停用清單），都不准寫出全部停用（Codex 審查 #2）。
+  if (targets.length > 0 && targets.every((target) => target['disabled'] === true)) {
+    throw new PublishTargetError(ALL_DISABLED_MESSAGE);
+  }
   const defaultAuthorId = options.defaultAuthorId ?? null;
   const content = defaultAuthorId === null ? { targets } : { defaultAuthorId, targets };
   const check = PublishTargetsFileSchema.safeParse(content);

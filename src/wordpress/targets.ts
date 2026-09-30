@@ -25,9 +25,12 @@ const TAXONOMY_NAME_PATTERN = /^[a-z0-9_]+(?:-[a-z0-9_]+)*$/;
  * 另有 `disabled`（預設 false）：使用者在精靈裡關掉不用的類型，只影響「能不能建新稿」。
  */
 
+/** target key 的格式。設定檔與設定精靈的停用清單共用這一個，兩邊不會各自多一條限制（P5-T032 Codex 審查 #3）。 */
+export const TargetKeySchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'key 只能用小寫英數與連字號');
+
 export const PublishTargetSchema = z
   .object({
-    key: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'key 只能用小寫英數與連字號'),
+    key: TargetKeySchema,
     displayName: z.string().min(1),
     /** 對應 templates/<id>/manifest.json 的 contentType。 */
     contentType: ContentTypeSchema,
