@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **68 檔 / 1408 測試**全綠（2026-09-30，P5-T031；P5-T027 時 63 檔 / 1153，
+- `npm run verify`：typecheck 通過；Vitest **70 檔 / 1441 測試**全綠（2026-09-30，P5-T032；P5-T027 時 63 檔 / 1153，
   P5-T026 commit 時是 62 檔 / 1141）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,9 @@
 
 ## 進行中
 
-- [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題（D-030 延伸，使用者實測回報），分支 `fix/P5-T031-edit-jump-to-title`，含只改標題也結案；verify 68 檔／1408 測試綠、獨立審查 medium 已修，PR 審查中，**待使用者合併與手動驗證**（只存草稿）。
+- [P5-T032](tasks/P5-T032-disable-targets.md)：設定精靈可以停用不要的文章類型（D-032），PR #9。獨立審查 2 條 low、Codex 審查 3 條都已修，
+  verify 70 檔／1441 測試綠，**Codex 修正待 commit**，之後待使用者合併與手動驗證。
+- [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題，PR #7＋#8 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併（對抗性審查 4 條 low 已修；使用者決定不補 Codex），**待使用者手動驗證**。
   併入使用者回報的「文章上滾輪要滾兩次」修正。

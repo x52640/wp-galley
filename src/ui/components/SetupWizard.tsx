@@ -12,6 +12,7 @@ import type {
 import { Icon, type IconName } from '../icons.js';
 import { ErrorNote, Spinner, useAction } from './panels/shared.js';
 import { typeLabel } from './JobList.js';
+import { destinationsRequest, enabledCountAfter } from '../lib/targets.js';
 
 /**
  * 首次設定精靈（P8-T002，D-016）。
@@ -631,6 +632,9 @@ function DestinationStep({
   const [data, setData] = useState<SetupDestinationsResponse | null>(null);
   const [include, setInclude] = useState<SetupDestinationKey[]>([]);
   const [replace, setReplace] = useState<SetupDestinationKey[]>([]);
+  // 停用的既有類型（D-032）：載入時照設定檔，使用者切換後跟這份比，一樣就是「不改」。
+  const [disabled, setDisabled] = useState<string[]>([]);
+  const [initialDisabled, setInitialDisabled] = useState<string[]>([]);
   const load = useAction();
   const save = useAction();
 
@@ -638,6 +642,9 @@ function DestinationStep({
     void load.run(async () => {
       const response = await api.getSetupDestinations();
       setData(response);
+      const off = response.existing.filter((target) => target.disabled).map((target) => target.key);
+      setDisabled(off);
+      setInitialDisabled(off);
       // 沒有設定檔：能選的預設全勾（通常就是要文章＋頁面）。已經有設定檔：預設什麼都不動。
       if (response.existing.length === 0) {
         setInclude(response.options.filter((option) => option.available).map((option) => option.key));
@@ -650,6 +657,14 @@ function DestinationStep({
     (option) => include.includes(option.key) && option.existing !== null && !replace.includes(option.key),
   );
   const nothingChosen = include.length === 0;
+  const disabledChanged =
+    disabled.length !== initialDisabled.length || disabled.some((key) => !initialDisabled.includes(key));
+  const unchanged = nothingChosen && !disabledChanged;
+  const noneEnabled = data !== null && enabledCountAfter(data.existing, disabled, include) === 0;
+
+  const toggleDisabled = (key: string): void => {
+    setDisabled((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+  };
 
   const toggle = (key: SetupDestinationKey): void => {
     setInclude((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
@@ -679,14 +694,45 @@ function DestinationStep({
         <>
           {hasExisting && (
             <div className="setup-existing">
-              <p className="field-label">設定檔裡已經有這些，會原樣保留（精靈不會刪）：</p>
-              <ul className="chips">
-                {data.existing.map((target) => (
-                  <li key={target.key} className="chip">
-                    {target.displayName}
-                    <span className="mono dim">{target.key}</span>
-                  </li>
-                ))}
+              <p className="field-label">設定檔裡已經有的類型</p>
+              <p className="field-hint">
+                不用的可以關掉：只是不出現在「新稿件」，已經寫的稿件照常打開、編輯、發布，之後隨時可以再打開。精靈不會刪任何類型。
+              </p>
+              <ul className="setup-toggles">
+                {data.existing.map((target) => {
+                  const off = disabled.includes(target.key);
+                  // 關掉它就一個都不剩：不給關（後端也會拒絕）。
+                  const last = !off && enabledCountAfter(data.existing, [...disabled, target.key], include) === 0;
+                  const open = data.openJobs[target.key] ?? 0;
+                  return (
+                    <li key={target.key} className="setup-toggle" data-off={off ? 'yes' : 'no'}>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={!off}
+                        className="setup-switch"
+                        disabled={last}
+                        title={last ? '至少要留一個類型' : undefined}
+                        onClick={() => toggleDisabled(target.key)}
+                      >
+                        <span className="setup-switch-track" aria-hidden="true">
+                          <span className="setup-switch-knob" />
+                        </span>
+                        <span className="setup-toggle-name">
+                          {target.displayName}
+                          <span className="mono dim">{target.key}</span>
+                        </span>
+                        <span className="setup-toggle-state">{off ? '不用這個類型' : '使用中'}</span>
+                      </button>
+                      {last && <span className="field-hint">最後一個使用中的類型，不能關。</span>}
+                      {off && open > 0 && (
+                        <span className="setup-toggle-note">
+                          還有 {open} 篇用這個類型的稿件，停用後照常可以編輯、發布。
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -756,7 +802,7 @@ function DestinationStep({
 
           <div className="setup-actions">
             <span className="field-hint">存在這台電腦的 config/publish-targets.json，不用重新啟動。</span>
-            {nothingChosen && hasExisting ? (
+            {unchanged && hasExisting ? (
               <button type="button" className="btn btn-primary btn-big" onClick={() => onSaved(status, null)}>
                 不改，下一步
                 <Icon name="chevron-right" size={16} />
@@ -765,10 +811,13 @@ function DestinationStep({
               <button
                 type="button"
                 className="btn btn-primary btn-big"
-                disabled={save.busy || nothingChosen || conflicts.length > 0 || !status.canWrite}
+                disabled={save.busy || unchanged || noneEnabled || conflicts.length > 0 || !status.canWrite}
                 onClick={() =>
                   void save.run(async () => {
-                    const saved = await api.saveSetupDestinations({ include, replace });
+                    // 停用清單只在動過開關時帶（兩個分頁同開精靈時不互相打開）；取代時的停用狀態由後端保留。
+                    const saved = await api.saveSetupDestinations(
+                      destinationsRequest({ include, replace, disabled, initialDisabled }),
+                    );
                     onSaved(saved.status, saved.backupFile);
                   })
                 }
@@ -779,7 +828,9 @@ function DestinationStep({
               </button>
             )}
           </div>
-          {nothingChosen && !hasExisting && <p className="field-hint setup-why">至少選一個：不然沒有地方可以發。</p>}
+          {((nothingChosen && !hasExisting) || noneEnabled) && (
+            <p className="field-hint setup-why">至少留一個類型：不然沒有地方可以發。</p>
+          )}
         </>
       )}
     </section>
@@ -818,7 +869,8 @@ function DoneStep({
             ? status.siteConfig.targets
                 .map((target) => {
                   const kind = typeLabel(target.contentType, target.postType);
-                  return kind === target.displayName ? kind : `${kind}（${target.displayName}）`;
+                  const name = kind === target.displayName ? kind : `${kind}（${target.displayName}）`;
+                  return target.disabled ? `${name}［停用］` : name;
                 })
                 .join('、')
             : '還沒選'}

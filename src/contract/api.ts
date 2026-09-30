@@ -549,6 +549,11 @@ export interface Term {
 /** `GET /api/wordpress` 列出的發布目標。設定檔沒有秘密，但只給 UI 需要的欄位。 */
 export interface PublishTargetSummary extends JobTarget {
   readonly templateId: string;
+  /**
+   * 使用者在設定精靈停用了這個類型（D-032，P5-T032）：新稿件選單、拖放／貼上建稿不出現，建稿被拒；
+   * 已經用它的舊稿件照常。停用的**照樣列出來**，總覽靠它顯示舊稿件的類型名稱。
+   */
+  readonly disabled: boolean;
 }
 
 // --- 請求 --------------------------------------------------------------------
@@ -973,12 +978,23 @@ export interface SetupDestinationOption {
 
 export interface SetupDestinationsResponse {
   readonly options: SetupDestinationOption[];
-  /** 設定檔裡現有的全部目標（例如作者站台的長文與日記）。精靈不會刪它們。 */
+  /** 設定檔裡現有的全部目標（例如作者站台的長文與日記），含停用的。精靈不會刪它們，只能停用／打開。 */
   readonly existing: PublishTargetSummary[];
+  /**
+   * 每個類型還有幾篇進行中的稿件（沒發布、沒取消）。停用時畫面講「還有 N 篇，停用後照常可以編輯」。
+   * 沒有稿件的 key 不列（P5-T032）。
+   */
+  readonly openJobs: Record<string, number>;
 }
 
 export interface SetupDestinationsRequest {
+  /** 要加入的文章／頁面。可以是空的（只改停用），但這時一定要給 `disabled`。 */
   readonly include: SetupDestinationKey[];
   /** 已經存在、要被取代的 key。沒列在這裡又已經存在的，整個請求拒絕。 */
   readonly replace: SetupDestinationKey[];
+  /**
+   * 存完之後**停用的完整清單**（設定檔裡的 target key，P5-T032）。不在清單裡的一律啟用；
+   * 不給＝停用狀態不動。全部停用、或有設定檔裡沒有的 key，整個請求 400、檔案不動。
+   */
+  readonly disabled?: string[] | undefined;
 }

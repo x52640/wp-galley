@@ -18,6 +18,7 @@ import type {
 import { EnvFileError, mergeEnvFile } from '../../config/env-file.js';
 import { AGENT_SETUP_HINTS } from '../../agents/setup-hints.js';
 import {
+  applyDisabledTargets,
   DESTINATION_KEYS,
   destinationOptions,
   diagnoseConnection,
@@ -35,6 +36,7 @@ import {
   loadPublishTargets,
   PublishTargetError,
   PublishTargetSchema,
+  TargetKeySchema,
   writeDefaultAuthor,
 } from '../../wordpress/targets.js';
 import type { WordPressClient } from '../../wordpress/client.js';
@@ -84,10 +86,16 @@ const APP_PASSWORD_SHAPE = /^[A-Za-z0-9]{24}$/;
 const DestinationKey = z.enum(['post', 'page']);
 const DestinationsBody = z
   .object({
-    include: z.array(DestinationKey).min(1).max(2),
+    include: z.array(DestinationKey).max(2),
     replace: z.array(DestinationKey).max(2),
+    // 停用清單裡的是設定檔的 target key：直接用設定檔的 key schema，不另加限制。
+    disabled: z.array(TargetKeySchema).max(100).optional(),
   })
-  .strict() satisfies z.ZodType<SetupDestinationsRequest>;
+  .strict()
+  // 只改停用時 include 可以是空的；兩個都沒有就是沒事可做。
+  .refine((body) => body.include.length > 0 || body.disabled !== undefined, {
+    message: '至少要加一個目的地，或給停用清單',
+  }) satisfies z.ZodType<SetupDestinationsRequest>;
 
 function parseBody<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -294,7 +302,11 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
         fetchTaxonomies(client),
         existingTargets(app),
       ]);
-      return { options: destinationOptions(types, taxonomies, permissionsOf(identity), existing), existing };
+      return {
+        options: destinationOptions(types, taxonomies, permissionsOf(identity), existing),
+        existing,
+        openJobs: app.ctx.core.openJobCountsByTarget(),
+      };
     });
   });
 
@@ -302,25 +314,41 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
     requireSetupWrite(request);
     const body = parseBody(DestinationsBody, request.body);
     const files = requireFiles(app);
-    const client = requireClient(app);
     const include = DESTINATION_KEYS.filter((key) => body.include.includes(key));
+    // 只改停用（P5-T032）不需要問站台：沒連上 WordPress 也能關掉不用的類型。
+    const client = include.length > 0 ? requireClient(app) : null;
 
     const backupFile = await withReconfigure(app, () => translate(async () => {
-      // 站上實際有什麼，後端自己再問一次，不信任畫面送來的 restBase。
-      const [identity, types, taxonomies, current] = await Promise.all([
-        fetchIdentity(client),
-        fetchPostTypes(client),
-        fetchTaxonomies(client),
-        readSiteConfig(files.siteConfigFile),
-      ]);
-      const existingSummaries = summarize(current.rawTargets.map((raw) => PublishTargetSchema.parse(raw)));
-      const options = destinationOptions(types, taxonomies, permissionsOf(identity), existingSummaries);
-      const additions = include.map((key) => {
-        const option = options.find((item) => item.key === key)!;
-        if (!option.available) throw new AppError(errorCodes.VALIDATION_FAILED, option.reason ?? `${option.displayName}選不了`, 400);
-        return setupTargetJson(option);
-      });
-      const merged = mergeSiteTargets(current.rawTargets, additions, body.replace);
+      const current = await readSiteConfig(files.siteConfigFile);
+      let additions: Record<string, unknown>[] = [];
+      if (client !== null) {
+        // 站上實際有什麼，後端自己再問一次，不信任畫面送來的 restBase。
+        const [identity, types, taxonomies] = await Promise.all([
+          fetchIdentity(client),
+          fetchPostTypes(client),
+          fetchTaxonomies(client),
+        ]);
+        const existingSummaries = summarize(current.rawTargets.map((raw) => PublishTargetSchema.parse(raw)));
+        const options = destinationOptions(types, taxonomies, permissionsOf(identity), existingSummaries);
+        additions = include.map((key) => {
+          const option = options.find((item) => item.key === key)!;
+          if (!option.available) throw new AppError(errorCodes.VALIDATION_FAILED, option.reason ?? `${option.displayName}選不了`, 400);
+          return setupTargetJson(option);
+        });
+      }
+      let merged = mergeSiteTargets(current.rawTargets, additions, body.replace);
+      let changed = additions.length > 0;
+      if (body.disabled !== undefined) {
+        const toggled = applyDisabledTargets(merged, body.disabled);
+        merged = toggled.targets;
+        changed = changed || toggled.changed;
+      }
+      // 什麼都沒變（例如停用清單跟現在一樣）：不寫檔、不多留一份備份。但磁碟上的檔可能在啟動後被手改過，
+      // 已經驗過的內容還是同步進記憶體，免得畫面說成功、建稿卻照舊（Codex 審查 #1）。
+      if (!changed) {
+        applyTargets(app, await loadPublishTargets(files.siteConfigFile));
+        return null;
+      }
       const backup = await writeSiteConfig(files.siteConfigFile, merged, {
         backupsDir: files.backupsDir,
         rootDir: files.rootDir,
@@ -331,7 +359,10 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
       return backup;
     }));
 
-    request.log.info({ include, replace: body.replace, backupFile }, '設定精靈：已寫入站台設定檔並當場套用');
+    request.log.info(
+      { include, replace: body.replace, disabled: body.disabled, backupFile },
+      '設定精靈：已寫入站台設定檔並當場套用',
+    );
     return { saved: true, restartRequired: false, backupFile, status: status(app) };
   });
 

@@ -22,10 +22,14 @@ interface CoreService {
   // --- 建立與讀取 ---
   /**
    * 本機站台設定檔不存在（targets.setupRequired）時一律拒絕，訊息就是那句「還沒有站台設定…」。
+   * target 停用（`disabled: true`，D-032，P5-T032）時拒絕（InvalidInputError），講怎麼到精靈打開；
+   * 已經用它的舊稿件不受影響（其他方法都不看 disabled）。「可用的是…」只列啟用的。
    * 原稿可以是空的（D-030，P5-T029）：正文存成一個空段落 `<p class="wp-block-paragraph"></p>`（`contract/empty-body.ts`）。
    * 模板 schema 的 `body.minLength` 與渲染的「清理後不能是空字串」都不放寬；擋「不能發布空文章」的是 approve 與發布前置檢查。
    */
   createJob(input: CreateJobInput): Job;
+  /** 每個 target key 有幾篇進行中的稿件（不含 PUBLISHED、CANCELLED、SUPERSEDED）；設定精靈停用時提醒用（P5-T032）。 */
+  openJobCountsByTarget(): Record<string, number>;
   getJob(uuid: string): JobDetail;
   listJobs(filter?: { state?: JobState[] }): JobSummary[];
   /** 撤銷核准、改成 CANCELLED；`job_cancelled` 事件記下取消前的狀態（`fromState`，D-031）。 */

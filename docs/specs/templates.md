@@ -98,4 +98,9 @@ target 的 `postType` 叫「文章」（post）或「頁面」（page），同�
 不寫＝等於 `taxonomy`；核心 `category` 要寫 `categories`；兩者都只准小寫英數、底線、連字號，
 連線診斷會拿站上的 `rest_base` 比對）、`fixedObjectId`（首頁用，目前皆 null）、
 `allowCreate`、`allowUpdate`、`allowCreateTerms`（預設 false，見 D-004）、
-`requireFeaturedImage`、`requireSecondConfirmation`。
+`requireFeaturedImage`、`requireSecondConfirmation`、`disabled`（選填布林，P5-T032，D-032）。
+
+**`disabled`**：`true`＝使用者在設定精靈停用了這個類型——新稿件選單與拖放／貼上建稿不出現，`createJob` 拒絕；
+已經用它的舊稿件照常打開、編輯、發布。**不寫＝啟用**，舊檔不用改。通常不用手寫：精靈「發到哪裡」的開關會寫
+（規則見 [wordpress-site.md](wordpress-site.md)「設定精靈」）。精靈新加的 target 不寫這個欄位，所以
+「精靈寫出的檔跟 `config/publish-targets.example.json` 一字不差」照舊成立，範例檔不用改。
