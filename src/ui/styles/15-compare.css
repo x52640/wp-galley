@@ -1,0 +1,128 @@
+/* --- 對照（D-019，git diff 式） -----------------------------------------
+   單欄：最上面一句摘要，只列有改的段落，沒變的收成一行可以展開。
+   ------------------------------------------------------------------------ */
+
+.compare-scroll { flex: 1; overflow-y: auto; padding: 0 1.25rem 3rem; }
+
+/* 一樣是紙。逐字比對還是在讀文章，不是在讀儀表板。寬度跟校樣差不多，一行不要長到讀不完。 */
+.compare-sheet {
+  max-width: 48rem;
+  margin: 1.5rem auto 0;
+  overflow: hidden;
+  background: var(--proof-bg);
+  color: var(--proof-text);
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
+}
+
+.diff-summary {
+  padding: 1rem 1.75rem .9rem;
+  border-bottom: 1px solid var(--proof-rule);
+}
+.diff-summary-line { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.6; }
+
+.diff-fields { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .3rem; }
+.diff-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  font-size: .88rem;
+  line-height: 1.6;
+  color: var(--proof-dim);
+}
+.diff-field svg { flex: none; color: var(--proof-dim); }
+.diff-field-label { color: var(--proof-text); font-weight: 600; margin-right: .2rem; }
+.diff-field-none { color: var(--proof-dim); }
+.diff-field .seg { text-decoration-thickness: 1px; }
+
+.diff-row {
+  padding: .7rem 1.75rem .8rem 1.5rem;
+  border-bottom: 1px solid var(--proof-rule);
+  border-left: 3px solid transparent;
+}
+.diff-row[data-kind='replaced'] { border-left-color: var(--mark); }
+.diff-row[data-kind='inserted'] { border-left-color: var(--diff-add); }
+.diff-row[data-kind='deleted'] { border-left-color: var(--diff-del); }
+/* 展開來看的沒變段落安靜下去，眼睛才會停在真的動過的地方。 */
+.diff-row[data-kind='same'] { color: var(--proof-dim); }
+
+.diff-row[data-focused='yes'] {
+  background: color-mix(in srgb, var(--mark) 8%, transparent);
+  border-left-color: var(--mark);
+  outline: 1.5px solid color-mix(in srgb, var(--mark) 45%, transparent);
+  outline-offset: -1.5px;
+}
+
+.diff-row-head { display: flex; align-items: center; gap: .5rem; margin: 0 0 .25rem; font-size: .76rem; }
+.diff-pos { color: var(--proof-dim); letter-spacing: .04em; }
+.diff-kind {
+  padding: 0 .4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  color: var(--mark);
+  background: color-mix(in srgb, var(--mark) 10%, transparent);
+}
+.diff-kind[data-kind='inserted'] { color: var(--diff-add); background: var(--diff-add-bg); }
+.diff-kind[data-kind='deleted'] { color: var(--diff-del); background: var(--diff-del-bg); }
+
+.diff-fold { border-bottom: 1px solid var(--proof-rule); }
+.compare-sheet > :last-child { border-bottom: 0; }
+.diff-fold[data-open='yes'] > .diff-row:last-child { border-bottom: 0; }
+.diff-fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  width: 100%;
+  padding: .45rem 1.75rem .45rem 1.5rem;
+  border: 0;
+  background: var(--proof-sunken);
+  color: var(--proof-dim);
+  font: inherit;
+  font-size: .82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+.diff-fold-toggle:hover { background: color-mix(in srgb, var(--proof-dim) 12%, transparent); }
+.diff-fold-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.diff-fold[data-open='yes'] > .diff-fold-toggle { border-bottom: 1px solid var(--proof-rule); }
+.diff-fold-hint { margin-left: auto; font-size: .76rem; }
+
+.compare-text {
+  margin: 0;
+  font-size: .95rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.compare-text-empty { color: var(--proof-dim); font-style: normal; font-size: .85rem; }
+
+.compare-note {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: .4rem 0 0;
+  font-size: .8rem;
+  color: var(--mark);
+}
+.compare-note svg { flex: none; }
+
+/*
+  改動的標記：刪掉的紅色刪除線、加上的綠色底色加底線（D-019，跟 git diff 一樣的直覺）。
+  **不只靠顏色**：刪除線／底線本身就分得出來，另外還有給螢幕閱讀器的「刪除起／迄」。
+  紙永遠是淺色，所以這組顏色不跟著深色模式換。
+*/
+.seg { border-radius: 2px; padding: 0 .08em; background: none; color: inherit; text-decoration: none; }
+.seg[data-op='removed'] {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  color: var(--diff-del);
+  background: var(--diff-del-bg);
+}
+.seg[data-op='added'] {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: .2em;
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+}

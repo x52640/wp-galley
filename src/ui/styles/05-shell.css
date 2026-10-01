@@ -1,0 +1,11 @@
+/* --- 工作區骨架 --------------------------------------------------------- */
+
+.workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.topbar-error {
+  margin: 0;
+  padding: .4rem 1rem;
+  background: color-mix(in srgb, var(--danger-on-shell) 12%, transparent);
+  color: var(--danger-on-shell);
+  font-size: .82rem;
+}

@@ -113,7 +113,7 @@ export interface ProofHighlight {
   skipInside?: string | null;
 }
 
-/** 標記的顏色。跟 styles.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。 */
+/** 標記的顏色。跟 styles/01-tokens.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。 */
 const HIGHLIGHT_COLORS: Record<SuggestionKind, { bg: string; line: string }> = {
   typo: { bg: '#FCE3D6', line: '#C2410C' },
   style: { bg: '#E4EDE8', line: '#3F5B4F' },

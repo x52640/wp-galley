@@ -1,0 +1,134 @@
+/* --- 配圖需求 ------------------------------------------------------------ */
+
+.briefs { display: flex; flex-direction: column; gap: .5rem; }
+.briefs-head {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: 0;
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--shell-text-dim);
+}
+.briefs-head svg { flex: none; }
+
+.brief-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+
+.brief {
+  border: 1px solid var(--shell-line);
+  border-radius: var(--radius);
+  padding: .55rem .65rem;
+  background: var(--shell-bg);
+  font-size: .82rem;
+}
+/* 已經有圖的安靜下去，眼睛停在還沒做的那幾張上。剛上傳完的結果（放進正文了沒）不能跟著變淡。 */
+.brief[data-fulfilled='yes'] > :not(.note) { opacity: .6; }
+
+.brief-head { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .3rem; }
+.brief-key { font-size: .74rem; color: var(--shell-text); }
+.brief-ratio {
+  font-size: .72rem;
+  padding: .05rem .3rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 4px;
+  color: var(--shell-text-dim);
+}
+.brief-where { font-size: .74rem; color: var(--shell-text-dim); }
+.brief-done {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  margin-left: auto;
+  font-size: .74rem;
+  color: var(--seal-on-shell);
+}
+
+.brief-purpose { margin: 0 0 .3rem; color: var(--shell-text); }
+
+/* prompt 是要被整段複製走的東西，所以給它一塊自己的地方，不要跟說明混在一起。 */
+.brief-prompt {
+  margin: 0 0 .35rem;
+  padding: .4rem .5rem;
+  border-radius: 6px;
+  background: var(--shell-panel);
+  color: var(--shell-text-dim);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+/* AI 引用的錨點：圖要跟在哪段後面（P5-T016）。 */
+.brief-anchor { display: flex; gap: .35rem; margin: 0 0 .35rem; font-size: .76rem; color: var(--shell-text); }
+
+.brief-alt { display: flex; gap: .35rem; margin: 0; font-size: .76rem; color: var(--shell-text-dim); }
+.brief-alt-tag {
+  flex: none;
+  padding: 0 .25rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 3px;
+  font-family: var(--font-num);
+  font-size: .68rem;
+}
+
+.brief-actions { display: flex; align-items: center; gap: .35rem; margin-top: .45rem; flex-wrap: wrap; }
+.brief-drop { margin-left: auto; }
+
+/* 封面那條：上傳後會自動設精選，先講清楚。 */
+.brief-cover {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .35rem;
+  border: 1px solid color-mix(in srgb, var(--seal-on-shell) 45%, transparent);
+  border-radius: 999px;
+  color: var(--seal-on-shell);
+  font-size: .7rem;
+}
+
+/*
+ * Codex 生圖中（D-017）。不畫進度條：子行程只在結束時回話，我們不知道進度。
+ * 動的是計時器的數字，減少動態時轉圈會停，數字照跳。
+ */
+.brief-generating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .45rem;
+  padding: .45rem .55rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 6px;
+  background: var(--shell-panel);
+}
+.brief-generating-text { color: var(--shell-text); }
+.brief-generating-time { color: var(--mark-on-shell); font-variant-numeric: tabular-nums; }
+.brief-generating .btn { margin-left: auto; }
+.brief-generating-note { flex-basis: 100%; margin: 0; font-size: .74rem; color: var(--shell-text-dim); }
+
+/* 候選圖：還在本機、還沒上傳。用虛線框跟「已上傳的圖」分開。 */
+.brief-candidate {
+  margin: .45rem 0 0;
+  padding: .45rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 6px;
+  background: var(--shell-panel);
+}
+.brief-candidate-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: var(--shell-sunken);
+}
+.brief-candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin: .35rem 0 .15rem;
+  font-size: .74rem;
+  color: var(--shell-text-dim);
+}
+.brief-candidate .field-hint { margin: 0; }
+.brief-unavailable { display: flex; align-items: flex-start; gap: .3rem; margin: .4rem 0 0; }
+.brief-unavailable svg { flex: none; margin-top: .15rem; }

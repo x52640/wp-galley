@@ -1,0 +1,45 @@
+/* --- 媒體 --------------------------------------------------------------- */
+
+.media-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .6rem; }
+
+.media-row {
+  display: flex;
+  gap: .6rem;
+  padding: .5rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 6px;
+}
+.media-thumb {
+  flex: none;
+  width: 3.25rem; height: 3.25rem;
+  object-fit: cover;
+  border-radius: 4px;
+  background: color-mix(in srgb, #000 20%, var(--shell-panel));
+  border: 1px solid var(--shell-line);
+}
+.media-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: .3rem; }
+.media-name { margin: 0; font-size: .78rem; overflow-wrap: anywhere; }
+.media-meta { margin: 0; font-size: .74rem; color: var(--shell-text-dim); display: flex; gap: .4rem; align-items: center; }
+.media-badge {
+  padding: 0 .35rem;
+  border: 1px solid color-mix(in srgb, var(--seal-on-shell) 45%, transparent);
+  border-radius: 999px;
+  color: var(--seal-on-shell);
+  font-size: .68rem;
+}
+.media-badge-quiet { border-color: var(--shell-line); color: var(--shell-text-dim); }
+
+/* 還沒發布的圖片沒有公開網址，就給一個看得懂的占位格，不要破圖。 */
+.media-thumb-empty {
+  display: grid;
+  place-items: center;
+  color: var(--shell-text-dim);
+}
+.media-alt { margin: 0; font-size: .76rem; color: var(--shell-text-dim); }
+.media-place select { font-size: .78rem; }
+.media-actions { display: flex; flex-wrap: wrap; gap: .3rem; }
+
+.upload { border-top: 1px solid var(--shell-line); padding-top: .7rem; display: flex; flex-direction: column; gap: .5rem; }
+.upload-pending { display: flex; gap: .6rem; }
+.upload-pending-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .45rem; }
+.upload-filename { margin: 0; font-size: .78rem; overflow-wrap: anywhere; }

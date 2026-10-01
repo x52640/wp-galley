@@ -1,0 +1,22 @@
+/* 建議網址（D-026，P5-T026）：跟配圖卡片的「正在畫」同一種虛線框與計時器，不畫進度條。 */
+.slug-suggest { display: flex; flex-direction: column; gap: .5rem; margin-top: -.4rem; }
+.slug-suggest .row { align-items: flex-start; }
+.slug-suggest .row .btn { flex-shrink: 0; }
+.slug-suggest .row .field-hint { padding-top: .35rem; }
+.slug-thinking {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem .55rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 6px;
+  font-size: .82rem;
+}
+.slug-thinking-text { color: var(--shell-text); }
+.slug-thinking-time { color: var(--mark-on-shell); font-variant-numeric: tabular-nums; }
+.slug-thinking .btn { margin-left: auto; }
+.slug-thinking-note { flex-basis: 100%; margin: 0; font-size: .74rem; color: var(--shell-text-dim); }
+.slug-ideas { display: flex; flex-direction: column; gap: .4rem; }
+.slug-ideas .field-hint { margin: 0; }
+.slug-ideas .chip { font-family: var(--font-num); }

@@ -1,0 +1,68 @@
+/* --- 頁邊校對符號 ------------------------------------------------------- */
+
+.proof-gutter {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: var(--gutter);
+  z-index: 4;
+}
+
+.mark { position: absolute; left: 0; width: var(--gutter); }
+
+.mark-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mark);
+  font-family: var(--font-cjk);
+  font-size: 1.2rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: transform var(--fast);
+}
+.mark-pin:hover { transform: scale(1.15); }
+
+.mark-pop {
+  position: absolute;
+  left: calc(var(--gutter) - .5rem);
+  top: -.6rem;
+  width: 21rem;
+  max-width: 60vw;
+  padding: .6rem .75rem;
+  border: 1px solid var(--proof-rule);
+  border-left: 3px solid var(--mark);
+  border-radius: 4px;
+  background: var(--proof-bg);
+  color: var(--proof-text);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .3);
+  font-size: .82rem;
+  line-height: 1.65;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--fast);
+  z-index: 6;
+}
+.mark:hover .mark-pop,
+.mark:focus-within .mark-pop,
+.mark[data-pinned='yes'] .mark-pop { opacity: 1; visibility: visible; }
+
+.mark-pop-head { display: flex; gap: .5rem; align-items: baseline; margin: 0 0 .2rem; }
+.mark-pop-kind { font-weight: 700; color: var(--mark); font-size: .78rem; letter-spacing: .06em; }
+.mark-pop-where { font-size: .72rem; color: #6b7280; }
+.mark-pop-summary { margin: 0 0 .4rem; }
+.mark-pop-line { display: flex; gap: .45rem; margin: .2rem 0 0; align-items: baseline; }
+.mark-pop-tag {
+  flex: none;
+  width: 1.3rem;
+  font-size: .68rem;
+  color: #6b7280;
+  border: 1px solid var(--proof-rule);
+  border-radius: 3px;
+  text-align: center;
+}
+.mark-pop-before { color: #6b7280; text-decoration: line-through; text-decoration-thickness: 1px; }
+.mark-pop-after { color: var(--proof-text); }

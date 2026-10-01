@@ -1,0 +1,223 @@
+/* --- B0 稿件總覽與新稿件（class 名沿用 job，介面文案一律用「稿件」） -------- */
+
+.b0 { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.appbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 3.75rem;
+  padding: 0 1.5rem;
+  border-bottom: 1px solid var(--shell-line);
+  background: var(--shell-panel);
+}
+.brand { font-family: var(--font-serif); font-size: 1.3rem; font-weight: 700; letter-spacing: .02em; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--shell-text-dim);
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+.icon-btn:hover { background: var(--shell-sunken); color: var(--shell-text); }
+
+.inbox, .compose {
+  width: 100%;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 2.25rem 1.5rem 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.compose { max-width: 50rem; }
+
+.inbox-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.inbox-title, .compose-title { margin: 0; font-family: var(--font-serif); font-size: 2rem; font-weight: 700; }
+
+.dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  min-height: 4.25rem;
+  padding: .75rem 1rem;
+  border: 2px dashed var(--shell-line);
+  border-radius: 14px;
+  color: var(--shell-text-dim);
+  font-size: .95rem;
+  text-align: center;
+  transition: border-color var(--fast), background var(--fast), color var(--fast);
+}
+.dropzone[data-dragging='yes'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.inbox-tools { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+
+/* 篩選用的藥丸：選中的是實心墨色，一眼分得出現在在看哪一類。 */
+.pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pill {
+  height: 2.25rem;
+  padding: 0 .95rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font: inherit;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast), border-color var(--fast);
+}
+.pill:hover { border-color: var(--shell-text-dim); }
+.pill[data-active='yes'] { background: var(--shell-text); border-color: var(--shell-text); color: var(--shell-bg); font-weight: 700; }
+
+.inbox-section { display: flex; flex-direction: column; gap: .6rem; }
+.inbox-subhead { margin: .5rem 0 0; font-size: .9rem; color: var(--shell-text-dim); }
+
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .8rem;
+  padding: 3.5rem 1.5rem;
+  border: 1px dashed var(--shell-line);
+  border-radius: 14px;
+  color: var(--shell-text-dim);
+  text-align: center;
+}
+.inbox-empty p { max-width: 28rem; margin: 0; line-height: 1.8; }
+
+.job-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--shell-line);
+  border-radius: 14px;
+  background: var(--shell-panel);
+  overflow: hidden;
+}
+.job-cards li + li { border-top: 1px solid var(--shell-line); }
+
+.job-card {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr) 13rem 5.5rem;
+  align-items: center;
+  gap: 1.1rem;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+.job-card:hover { background: var(--shell-sunken); }
+.job-card-main { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.job-card-title { font-size: 1.05rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-card-meta { font-size: .8rem; color: var(--shell-text-dim); }
+.job-card-status { display: inline-flex; align-items: center; gap: .45rem; font-size: .9rem; color: var(--shell-text-dim); }
+.job-card-status[data-tone='todo'] { color: var(--kind-typo); }
+.job-card-status[data-tone='ready'] { color: var(--accent); font-weight: 700; }
+.job-card-status[data-tone='bad'] { color: var(--danger-on-shell); font-weight: 700; }
+.status-dot { width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; flex: none; }
+
+/* 「打開」是一個看起來像按鈕的標籤：整列本身才是按鈕，裡面不能再放按鈕。 */
+.job-card-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.5rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: .95rem;
+}
+.job-card-open[data-tone='ready'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.job-card-open[data-tone='todo'] { background: var(--shell-text); border-color: var(--shell-text); color: var(--shell-bg); }
+
+.type-tag {
+  justify-self: start;
+  padding: .15rem .6rem;
+  border-radius: 999px;
+  background: var(--shell-sunken);
+  color: var(--shell-text);
+  font-size: .8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.type-tag[data-type='longform'] { background: var(--accent-soft); color: var(--accent-strong); }
+.type-tag[data-type='diary'] { background: var(--kind-source-bg); color: var(--kind-source); }
+.type-tag[data-type='article'] { background: var(--kind-style-bg); color: var(--kind-style); }
+
+.sent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.sent-row {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.1rem;
+  width: 100%;
+  padding: .75rem 1.25rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--shell-sunken);
+  color: var(--shell-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sent-row:hover { background: color-mix(in srgb, var(--shell-text) 7%, var(--shell-sunken)); }
+.sent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sent-meta { font-size: .8rem; color: var(--shell-text-dim); }
+
+.inbox-closed summary { cursor: pointer; color: var(--shell-text-dim); font-size: .88rem; padding: .25rem 0 .6rem; }
+
+@media (max-width: 760px) {
+  .job-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .job-card .type-tag, .job-card-open { display: none; }
+}
+
+/* 新稿件 */
+.type-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
+.type-card {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 14px;
+  background: var(--shell-panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--fast), background var(--fast);
+}
+.type-card:hover { border-color: var(--shell-text-dim); }
+.type-card[data-active='yes'] { border: 2px solid var(--accent); background: var(--accent-soft); padding: calc(1.1rem - 1px) calc(1.2rem - 1px); }
+.type-card-name { font-size: 1.15rem; font-weight: 700; }
+.type-card-note { font-size: .85rem; color: var(--shell-text-dim); }
+
+.compose-dest {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  color: var(--accent-strong);
+  font-size: .9rem;
+}
+.input-title { font-family: var(--font-serif); font-size: 1.15rem; font-weight: 600; padding: .65rem .8rem; }
+.compose-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; }
+.compose-why { text-align: right; margin-top: -.5rem; }

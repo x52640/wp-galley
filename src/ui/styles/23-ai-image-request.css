@@ -1,0 +1,39 @@
+/* --- 請 AI 配一張（P5-T018） ---------------------------------------------- */
+
+.insert-ai-row { display: flex; align-items: center; gap: .4rem; }
+.insert-ai-note { flex: 1; min-width: 0; font-size: .8rem; padding-block: .3rem; }
+.insert-ai-blocked { display: flex; align-items: flex-start; gap: .3rem; margin: 0; }
+.insert-ai-blocked svg { flex: none; margin-top: .15rem; }
+
+/* 使用者在文章上請 AI 配的那條：沒有 key 可看，標「你請 AI 配的」。 */
+.brief-mine {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .35rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  color: var(--accent-strong);
+  font-size: .7rem;
+}
+/* Agent 那條的描述使用者改過（D-027，P5-T027）：之後的 Agent 不蓋掉。中性小標，不搶「封面」「已上傳」。 */
+.brief-edited {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .35rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  color: var(--shell-text-dim);
+  font-size: .7rem;
+}
+.brief[data-focused='yes'] { border-color: var(--accent); }
+.insert-ai-over { color: var(--danger-on-shell, var(--danger)); font-weight: 600; }
+
+/* 在卡片上改描述（D-025，P5-T025）：「改」貼在描述右邊，改的時候換成文字框＋「存」「取消」。 */
+.brief-editable { display: flex; align-items: flex-start; gap: .35rem; }
+.brief-editable > p { flex: 1; min-width: 0; }
+.brief-edit { flex: none; }
+.brief-editor { margin: 0 0 .35rem; }
+.brief-editor .brief-actions { margin-top: .3rem; }
+.brief-editor-text { width: 100%; min-height: 7rem; font-size: .85rem; line-height: 1.65; }

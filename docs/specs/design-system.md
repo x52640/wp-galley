@@ -1,7 +1,7 @@
 # 設計系統
 
 > 擁有範圍：顏色、字體、版面、品質底線、文案。
-> 程式：`src/ui/styles.css`（變數在最上面）、`src/ui/components/`。
+> 程式：`src/ui/styles/`（入口 `index.css` 照順序引入各區塊檔，變數在 `01-tokens.css`）、`src/ui/components/`。
 > 版面依 D-013 的 B 版（文件式），設計稿 https://claude.ai/artifact/1D5TrmCQESR3icmD6TVnC6 。
 
 ## 定位
@@ -12,7 +12,7 @@
 ## 顏色
 
 只有一個強調色（墨綠），只給「下一步該按的那一顆」。建議用四種分類色，底色標在字上、
-前景色寫在標籤上；決定與警示另有一組。所有色值都是 `styles.css` 最上面的變數，深色模式
+前景色寫在標籤上；決定與警示另有一組。所有色值都是 `src/ui/styles/01-tokens.css` 的變數，深色模式
 在 `prefers-color-scheme: dark` 裡換一組，變數名不變。
 
 | 變數 | 用途 |

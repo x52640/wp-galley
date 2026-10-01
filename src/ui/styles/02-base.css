@@ -1,0 +1,86 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--shell-bg);
+  color: var(--shell-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* 工作區釘在視窗高度：文章與建議欄各自捲動，點建議才捲得到那一段。
+   只用 min-height 的話整頁會跟著文章長高，捲的是整頁，兩欄裡的捲動區永遠沒東西可捲（P5-T009）。 */
+#root:has(.workspace) { height: 100vh; height: 100dvh; }
+
+.app {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3 { font-weight: 600; }
+
+.mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.dim { color: var(--shell-text-dim); }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.dot {
+  display: inline-block;
+  width: 2px; height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .5;
+  vertical-align: middle;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/*
+  校樣是紙。外殼那個淺藍焦點框印在白紙上只有 1.7:1，等於看不見，所以紙上的
+  焦點改用校對符號的橘紅（對紙 5.1:1）。
+*/
+.proof-sheet :focus-visible { outline-color: var(--mark); }
+
+/*
+  「選擇圖片／換圖」是用 label 蓋住一個透明的 file input。真正拿到焦點的是那個
+  透明的 input，outline 也就跟著透明——鍵盤使用者按 Tab 會完全看不出焦點在哪。
+  把焦點框畫在看得見的 label 上。
+*/
+.btn-file:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.spin { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
