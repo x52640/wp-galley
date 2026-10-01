@@ -2,6 +2,7 @@
 
 import { InvalidInputError } from '../errors.js';
 import { JOB_STATES } from '../state-machine.js';
+import { isOpenJobState } from '../../contract/job-states.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import type { PublishTargetRegistry } from '../../wordpress/targets.js';
 import type { CoreContext } from './context.js';
@@ -41,7 +42,7 @@ export class SetupModule {
    */
   openJobCountsByTarget(): Record<string, number> {
     const counts: Record<string, number> = {};
-    const open = JOB_STATES.filter((state) => state !== 'PUBLISHED' && state !== 'CANCELLED' && state !== 'SUPERSEDED');
+    const open = JOB_STATES.filter(isOpenJobState);
     for (const job of this.ctx.repo.listJobs(open)) {
       const key = this.ctx.repo.targetKeyOf(job.target_id);
       if (key !== null) counts[key] = (counts[key] ?? 0) + 1;

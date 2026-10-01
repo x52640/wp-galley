@@ -31,7 +31,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 
 | 目錄 | 負責 | 規格 |
 | --- | --- | --- |
-| `src/contract` | 前後端共用的 HTTP 型別（`api.ts` 轉出同資料夾的 `api-*.ts`），以及兩邊必須同一套規則的純函式（`text-match.ts`、`media-marker.ts`）；**只 import 同資料夾的檔** | [http-api.md](http-api.md) |
+| `src/contract` | 前後端共用的 HTTP 型別（`api.ts` 轉出同資料夾的 `api-*.ts`），以及兩邊必須同一套規則的純函式（`text-match.ts`、`media-marker.ts`、`position-anchor.ts`、`auto-place.ts`、`review-state.ts`、`job-states.ts`、`agent-run.ts`…；後端與示範資料都用，P5-T033）；**只 import 同資料夾的檔** | [http-api.md](http-api.md) |
 | `src/config` | 環境變數、路徑、秘密遮蔽、`.env` 改寫（設定精靈） | [security.md](security.md) |
 | `src/db` | SQLite 與 migration | 本檔 |
 | `src/core` | CoreService（`service.ts` 門面＋`service/` 各領域，見 core-service.md）、狀態機、revision、diff、提案套用 | [core-service.md](core-service.md)、[state-machine.md](state-machine.md)、[review-proposals.md](review-proposals.md) |
@@ -41,7 +41,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
 | `src/media` | 圖片驗證（`validate.ts`，上傳與生圖候選圖共用）與上傳 | [agent-tasks.md](agent-tasks.md) |
 | `src/server` | Fastify、路由、守門；設定換掉後就地生效（`reconfigure.ts`） | [http-api.md](http-api.md)、[security.md](security.md) |
-| `src/ui` | React 發布台 | [design-system.md](design-system.md) |
+| `src/ui` | React 發布台；示範資料（`?fixtures=1`）在 `service/fixtures/`，照後端 `service/` 的領域拆檔、同名對應，只放假資料、規則用 `src/contract`（D-033，P5-T033） | [design-system.md](design-system.md) |
 | `src/mcp` | 空（MCP 尚未實作） | [mcp.md](mcp.md) |
 
 ## 依賴方向
@@ -85,13 +85,14 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 一列一個使用者看得到的功能：從畫面一路查到測試。2026-10-01 對著程式查證（P0-T002）。
 畫面元件在 `src/ui/components/`；路由在 `src/server/routes/`，沒寫檔名的是 `jobs.ts`（前綴 `/api/jobs/:uuid`，表中寫成 `…`）；
 後端欄是 `src/core/service/` 底下的檔（P5-T004；`service.ts` 是門面，只轉呼叫）。
-測試在 `tests/`，省略 `.test.ts`。
+測試在 `tests/`，省略 `.test.ts`。示範資料（`?fixtures=1`）的對應實作在 `src/ui/service/fixtures/` 下跟後端欄同名的檔；
+前後端共用規則的單元測試在 `contract-rules`。
 
 | 功能 | 畫面 | API 路由 | 後端 | 規格 | 主要測試 |
 | --- | --- | --- | --- | --- | --- |
 | 稿件總覽、拖放／⌘V 貼上建稿 | `JobList` | `GET /api/jobs`、`POST /api/jobs`、`GET /api/wordpress`（`wordpress.ts`，類型清單） | `jobs.ts` | core-service、design-system | jobs-api、core-service |
 | 新稿件（只問類型與標題，直接進打字模式） | `NewJob`、`lib/write-in-place.ts` | `POST /api/jobs` | `jobs.ts`（`createJob`） | design-system、core-service | write-in-place、disable-targets |
-| 在文章上改（含標題、格式工具列、貼上整理） | `ProofView`、`FormatBar`、`Workspace`、`lib/rich-*.ts`、`lib/edit-target.ts` | `POST …/revisions`（`editedBody`／`editedTitle`、`expectedContentHash`） | `content.ts`（`createRevision`） | design-system、security（貼上、連結） | edited-body、rich-text、rich-format、edit-jump-to-title、expected-content-hash |
+| 在文章上改（含標題、格式工具列、貼上整理） | `ProofView`、`FormatBar`、`Workspace`、`lib/rich-*.ts`、`lib/edit-target.ts`、`lib/proof-edit.ts`、`lib/proof-edit-dom.ts` | `POST …/revisions`（`editedBody`／`editedTitle`、`expectedContentHash`） | `content.ts`（`createRevision`） | design-system、security（貼上、連結） | edited-body、rich-text、rich-format、edit-jump-to-title、expected-content-hash、proof-edit |
 | 校樣預覽 | `ProofView`（iframe） | `POST …/render`、`GET …/preview`、`GET …/diff`（標記） | `content.ts` | templates、review-proposals | preview、render |
 | 一鍵動作（校驗、只找錯字、一鍵配圖）、停止 | `AgentButton`、`AgentProgress`、`lib/agent-tasks.ts` | `POST …/agent`、`DELETE …/agent` | `agent.ts`（`runAgentReview`） | agent-tasks、agent-cli | agent-output、agent-run-lifecycle、review-schema |
 | 校稿提案／待處理（逐項接受、略過、整份採用、丟棄、已經改好了） | `SuggestionColumn` | `GET …/review`、`POST …/review/resolve`、`POST …/review/accept-all`、`DELETE …/review` | `review.ts` | review-proposals | review-proposal、review-apply、text-match |

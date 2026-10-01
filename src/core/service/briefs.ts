@@ -8,13 +8,11 @@ import {
   agentBriefKey,
   buildPositionImagePrompt,
   isFeaturedBrief,
-  normalizeUserNote,
   positionContext,
   replacePositionNote,
-  USER_NOTE_MAX,
 } from '../image-generation.js';
-import { userNoteLength } from '../../contract/user-note.js';
-import { BRIEF_PROMPT_MAX, briefPromptLength, normalizeBriefPrompt } from '../../contract/brief-prompt.js';
+import { checkUserNote } from '../../contract/user-note.js';
+import { briefEditFieldError, checkBriefPrompt } from '../../contract/brief-prompt.js';
 import type { ImageBrief } from '../../agents/output-contract.js';
 import { featuredInput, isCandidateCurrent } from './context.js';
 import type { CoreContext } from './context.js';
@@ -66,12 +64,8 @@ export class BriefsModule {
     this.ctx.assertMutable(job);
     const brief = this.requireOpenBrief(job, briefId);
     const mine = brief.origin === 'user';
-    if (mine && (input.prompt !== undefined || input.note === undefined)) {
-      throw new InvalidInputError('這條是你在文章上請 AI 配的：能改的是「想要什麼樣的圖」那句（note），整份生圖指令由系統組');
-    }
-    if (!mine && (input.note !== undefined || input.prompt === undefined)) {
-      throw new InvalidInputError('這條是 AI 建議的：能改的是畫面描述（prompt）');
-    }
+    const wrongField = briefEditFieldError(brief.origin, input);
+    if (wrongField !== null) throw new InvalidInputError(wrongField);
     this.ctx.assertNoAppPassword(input.prompt, input.note);
 
     const run = this.ctx.activeRuns.get(job.uuid);
@@ -83,16 +77,13 @@ export class BriefsModule {
     let userNote: string | null = brief.user_note;
     let notice: string | null = null;
     if (!mine) {
-      prompt = normalizeBriefPrompt(input.prompt);
-      if (prompt === '') throw new InvalidInputError('畫面描述不能是空的');
-      if (briefPromptLength(prompt) > BRIEF_PROMPT_MAX) {
-        throw new InvalidInputError(`畫面描述最多 ${BRIEF_PROMPT_MAX} 個字`);
-      }
+      const checked = checkBriefPrompt(input.prompt);
+      if (!checked.ok) throw new InvalidInputError(checked.message);
+      prompt = checked.prompt;
     } else {
-      userNote = normalizeUserNote(input.note);
-      if (userNoteLength(userNote) > USER_NOTE_MAX) {
-        throw new InvalidInputError(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
-      }
+      const checked = checkUserNote(input.note);
+      if (!checked.ok) throw new InvalidInputError(checked.message);
+      userNote = checked.note;
       const rebuilt = this.rebuildUserBriefPrompt(job, brief, userNote);
       prompt = rebuilt.prompt;
       notice = rebuilt.notice;

@@ -1,5 +1,6 @@
 import { CoreError, coreErrorCodes } from './errors.js';
 import { JOB_STATES, type JobState } from '../contract/api.js';
+import { RESTORABLE_STATES } from '../contract/job-states.js';
 
 /**
  * Job 狀態機（docs/specs/state-machine.md）。
@@ -45,7 +46,8 @@ export const TRANSITIONS: Readonly<Record<JobState, readonly JobState[]>> = {
   PUBLISHED: ['SUPERSEDED'],
   FAILED: [],
   // 恢復（D-031）：回到取消前的狀態；取消前是 APPROVED 的回 RENDERED，所以表裡沒有 APPROVED。
-  CANCELLED: ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED'],
+  // 清單在共用契約（示範資料的「恢復」也用它，P5-T033）。
+  CANCELLED: RESTORABLE_STATES,
   SUPERSEDED: [],
 };
 
