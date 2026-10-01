@@ -1,7 +1,7 @@
 ---
 id: P6-T003
 phase: 6
-status: ready
+status: blocked
 depends_on: [P6-T001, P5-T036]
 specs: [factcheck.md, agent-cli.md, security.md]
 write_paths: ["src/agents/output-contract.ts", "src/agents/types.ts", "src/agents/registry.ts", "src/agents/adapters/base.ts", "src/agents/adapters/codex.ts", "src/agents/adapters/claude.ts", "src/agents/adapters/google.ts", "src/core/factcheck-prompts.ts", "tests/factcheck-schema.test.ts", "tests/factcheck-prompts.test.ts", "tests/agent-hosted-search.test.ts", "tests/helpers/fake-adapter.ts", "docs/specs/agent-cli.md", "docs/specs/factcheck.md", "docs/tasks/P6-T003-factcheck-contract.md"]
@@ -15,7 +15,7 @@ expected_commit: "feat(P6-T003): 查證兩趟的 schema 與 prompt，adapter 可
 D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行**的搜尋，第二趟「判斷」跟校稿一樣什麼都不開；
 兩趟各有自己的輸出 schema（都沒有 templateData）。本 Task 只做 Agent 這一層，不接流程。
 
-疊在 P5-T036 之上：P5-T036 讓現有各趟 Codex 明確 `web_search="disabled"`、Claude 一律 `--strict-mcp-config`；
+疊在 P5-T036 之上：P5-T036 讓現有各趟 Codex 明確 `web_search="disabled"`、Claude 一律 `--disallowed-tools`（含 `WebSearch`、`WebFetch`）＋`--strict-mcp-config`＋`--no-chrome`；
 本 Task 只在明確要求時把第一趟的搜尋打開。P5-T036 沒合併前不准開工（兩邊都改 adapter 參數）。
 
 ## 範圍
@@ -43,7 +43,8 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 ## 實作要求
 - **測試絕不呼叫真實 CLI**：用假執行檔記錄收到的參數；確認旗標存在只能看 `--help` 這類不送 prompt 的指令。
 - 參數陣列傳遞，不得 `shell: true`。
-- Codex：只准 `cached`，程式裡不得出現 `live`／`indexed` 的路徑。Claude：可用工具只有 `WebSearch`，任何情況都不含 `WebFetch`。
+- Codex：只准 `cached`，程式裡不得出現 `live`／`indexed` 的路徑。
+- Claude：`--disallowed-tools` 禁用優先，所以第一趟＝P5-T036 的禁用名單**減掉 `WebSearch`**（`WebFetch` 與其他照舊禁用）＋`--tools WebSearch --allowed-tools WebSearch`＋`--strict-mcp-config --no-chrome`。
 - `hostedSearch` 沒給或 false 時，產生的參數必須跟 P5-T036 之後完全一樣（有測試逐項比對）。
 - 先寫測試再實作。
 
@@ -51,12 +52,12 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 ### 自動驗證
 `npm run verify` 綠。至少：
 - 兩份 schema 的正反例（含 openai-strict 轉換後仍合格、超過上限被拒）。
-- 假執行檔斷言：Codex 第一趟帶 `web_search="cached"` 且沒有 `live`／`indexed`、其餘 P5-T036 的關閉參數都在；Claude 第一趟是
-  `--tools WebSearch --allowed-tools WebSearch`、有 `--strict-mcp-config`、整串參數沒有 `WebFetch`；agy 收到 `hostedSearch` 被拒；
+- 假執行檔斷言：Codex 第一趟帶 `web_search="cached"` 且沒有 `live`／`indexed`、其餘 P5-T036 的關閉參數都在；Claude 第一趟
+  `--tools`／`--allowed-tools` 的值只有 `WebSearch`（`WebFetch` 不在裡面）、`WebSearch` 不在禁用名單而 `WebFetch` 仍在、`--strict-mcp-config` 與 `--no-chrome` 都在；agy 收到 `hostedSearch` 被拒；
   三家 `hostedSearch` 為 false 時參數不變。
 - prompt：第二趟每份來源有編號與不受信任標示；第一趟開搜尋時不出現「你沒有網路」。
 ### 手動驗證
-無（未證實的兩件——Codex `-c` 在 `--ignore-user-config` 下是否生效、Claude `-p` 下 `WebSearch` 能不能用——在 P6-T005 使用者真跑時確認）。
+無（未證實的三件——Codex `-c` 在 `--ignore-user-config` 下是否生效、Claude `-p` 下 `WebSearch` 能不能用、`--tools WebSearch` 搭配 `--json-schema` 結構化輸出是否仍可用——在 P6-T005 使用者真跑時確認）。
 
 ## 完成定義
 - [ ] `npm run verify` 綠
@@ -68,6 +69,6 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 - 最後完成：開 Task（2026-10-01，P6-T001）
 - 已通過驗證：—
 - 下一步：等 P6-T001、P5-T036 合併後派 subagent 實作（可跟 P6-T002 平行）
-- Blocker：P5-T036 未合併
+- Blocker：P5-T036、P6-T001 未合併（合併後 status 改回 ready）
 
 ## 完成結果

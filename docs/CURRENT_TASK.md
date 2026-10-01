@@ -47,15 +47,18 @@ D-034 AI 查證（設計已裁定）。D-033 那批（P0-T002、P5-T004、P5-T03
 | Task | 內容 | 備註 |
 | --- | --- | --- |
 | [P6-T002](tasks/P6-T002-safe-fetcher.md) | 安全取回器＋維基百科查詢（`src/fetch/`） | 等 P6-T001 合併；可跟 P6-T003 平行 |
-| [P6-T003](tasks/P6-T003-factcheck-contract.md) | 查證兩趟的 schema、prompt、adapter 只開廠商端搜尋 | 等 P6-T001、P5-T036 合併 |
-| [P6-T004](tasks/P6-T004-factcheck-service.md) | 查證流程、migration 009、API | 等 P6-T002、P6-T003 |
-| [P6-T005](tasks/P6-T005-factcheck-ui.md) | 查證畫面；使用者真跑一次查證 | 等 P6-T004 |
 
 順序：P6-T001 →（P6-T002 ∥ P5-T036 → P6-T003）→ P6-T004 → P6-T005。
 
 ## Blocked
 
-無。
+依賴合併後改回 ready。
+
+| Task | 內容 | 等什麼 |
+| --- | --- | --- |
+| [P6-T003](tasks/P6-T003-factcheck-contract.md) | 查證兩趟的 schema、prompt、adapter 只開廠商端搜尋 | P6-T001、P5-T036 合併 |
+| [P6-T004](tasks/P6-T004-factcheck-service.md) | 查證流程、migration 009、API | P6-T002、P6-T003 |
+| [P6-T005](tasks/P6-T005-factcheck-ui.md) | 查證畫面；使用者真跑一次查證 | P6-T004 |
 
 ## 待專案擁有者
 

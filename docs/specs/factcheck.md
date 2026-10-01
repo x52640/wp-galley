@@ -28,7 +28,7 @@
   │
   ├─① 找來源（Agent 第一趟）
   │    輸入：要查的句子＋所在段落（或整篇目前的內容，AI 挑最多 5 條）
-  │    工具：只有廠商伺服器上的搜尋（Codex、Claude）；agy 沒有工具，只憑記憶給網址
+  │    工具：只有廠商伺服器上的搜尋（Codex、Claude）；agy 不開搜尋（跟校稿同樣的限制方式），只憑記憶給網址
   │    輸出：每條主張的原文片段、可查的一句話、搜尋字串、候選網址
   │
   ├─② 抓（我們的程式）
@@ -75,14 +75,15 @@ Claude 也做不到。
 | --- | --- | --- |
 | Codex | 只開快取搜尋（`web_search="cached"`：OpenAI 維護的索引、不對外抓） | `live`／`indexed` 會讓 OpenAI 伺服器去抓任意網址，等於開外洩通道，不准 |
 | Claude Code | 只給 `WebSearch`（Anthropic 伺服器上搜尋，只回標題與網址） | `WebFetch` 在使用者機器上抓，違反 ADR-0001，不准 |
-| Antigravity（agy） | 沒有工具，跟校稿一樣 | `agy` 沒有「只開搜尋」的參數，做不到就不開；只能靠記憶網址＋維基百科 |
+| Antigravity（agy） | 不開搜尋，限制方式跟校稿一樣：只有 `--sandbox`＋prompt 開頭的不准用工具提示（`agy` 沒有停用工具或 MCP 的參數，見 agent-cli.md「已知限制（agy）」） | 沒有「只開搜尋」的參數，做不到就不開；只能靠記憶網址＋維基百科 |
 
 **P6-T003 要加進 [agent-cli.md](agent-cli.md) 的參數**（參數的家在那裡，這裡只列要什麼）：
 疊在 [P5-T036](../tasks/P5-T036-lock-agent-tools.md) 之上——P5-T036 讓所有現有各趟 Codex 明確 `web_search="disabled"`、
-關掉瀏覽器類功能，Claude 一律 `--strict-mcp-config`。查證第一趟只改這些：
+關掉瀏覽器類功能，Claude 一律 `--disallowed-tools`（含 `WebSearch`、`WebFetch`）＋`--strict-mcp-config`＋`--no-chrome`。查證第一趟只改這些：
 
 - Codex：把 `web_search` 換成 `"cached"`（`-c web_search="cached"`），其餘照 P5-T036。
-- Claude：`--tools WebSearch --allowed-tools WebSearch`（可用的內建工具只有它、不跳權限詢問），照樣 `--strict-mcp-config`，不含 `WebFetch`。
+- Claude：禁用優先，所以要把 `WebSearch` 從 `--disallowed-tools` 名單**拿掉**（`WebFetch` 與其他照舊禁用），再加
+  `--tools WebSearch --allowed-tools WebSearch`（可用的內建工具只有它、不跳權限詢問）；`--strict-mcp-config`、`--no-chrome` 照帶。
 - agy：不給。adapter 回報「不能只開搜尋」，registry 要能問得到這件事，畫面據此講明（見「觸發與畫面」）。
 
 第二趟（判斷）的參數跟現有校稿那趟**完全一樣**，不開任何東西。
@@ -117,7 +118,8 @@ interface FactCheckFindOutput {
 | `agent-memory` | 第一趟**沒開搜尋**（agy）時給的網址 | 深層網址常是捏造的；抓不到就丟，不會變成假證據 |
 | `wikipedia` | 我們用 `queries` 查維基百科拿到的條目 | 網址是我們組的，主機固定 |
 
-指向維基百科條目（`<lang>.wikipedia.org/wiki/…`）的網址，不論哪種來源，一律改用下面的 API 拿純文字，不抓 HTML。
+指向維基百科條目（`<lang>.wikipedia.org/wiki/…`）的網址，不論哪種來源，一律改用下面的 API 拿純文字，不抓 HTML；
+這種改走 API 的算進維基百科 API 次數，不算進網址嘗試次數（上限見 security.md「取回器」）。
 
 ### 挑選與上限
 
@@ -169,7 +171,8 @@ interface FactCheckJudgeOutput {
   找到 → `found`；找不到 → `not-found`。少於 8 個非空白字的引文不算核對過（當成 `not-found`）：「1994」到處都找得到，證明不了什麼。
 - **降級**：`supported`、`contradicted` 至少要一條 `found`，否則改成 `unverifiable`，`agentVerdict` 留 AI 原本的判定。
   `needs-context`、`unverifiable` 不用引文。
-- 抓不到的來源照樣列在卡片上，標 `fetch-failed`，讓使用者知道 AI 想看什麼但我們沒拿到。
+- 抓不到的來源照樣列在卡片上，標 `fetch-failed` 並寫出原因，讓使用者知道 AI 想看什麼、為什麼沒拿到。
+  特別是外洩檢查的「網址含文章原句」會誤擋標題跟文章同句的新聞網址，原因一定要看得到，使用者才能自己點開。
 
 ## 存下來的結果
 
@@ -201,6 +204,7 @@ interface FactCheckFinding {
     origin: 'article-link' | 'agent-search' | 'agent-memory' | 'wikipedia';
     quote: string | null;
     check: 'found' | 'not-found' | 'fetch-failed';
+    failReason: string | null; // fetch-failed 時的白話原因，例如「網址含文章原句，沒抓」「網頁太大」「逾時」
     context: string | null;    // 引文前後各約 150 字，「看原文」就地展開用；純文字
   }[];
   blockIndex: number | null;   // 每次讀取時用 excerpt 重算，不存
@@ -256,7 +260,7 @@ interface FactCheckFinding {
 「這部片 1995 年上映」
 維基百科寫 1994 年 9 月首映。建議：改成 1994 年。
  來源  刺激1995 – 維基百科 · zh.wikipedia.org   ✓ 引文已核對   [看原文]
-       IMDb · imdb.com                            ⚠ 網頁抓不到，請自己確認
+       IMDb · imdb.com                            ⚠ 沒抓：網頁太大，請自己點開確認
 [跳到該段]  [去原文改]  [知道了]
 ```
 
@@ -272,11 +276,15 @@ interface FactCheckFinding {
 ## 執行規則
 
 - 整次查證（兩趟 Agent＋抓取＋核對）佔用一個 Agent 名額，跟其他 Agent 動作互斥（同一套「另一個 Agent 動作在跑」的回應，見 http-api.md）。
-- 跑的期間 `JobDetail.agentRun` 一直是 running、`task: 'factcheck'`，另帶目前階段與計數（新增欄位）；抓取階段沒有 CLI 在跑也一樣。
+- **跑的期間鎖住內容**，跟校稿一樣（`src/contract/agent-run.ts` 的 `taskLocksContent`：`factcheck` 不在例外清單，預設就會鎖）：
+  不能在文章上改、不能放圖、不能套用建議。
+- 跑的期間 `JobDetail.agentRun` 一直是 running、`task: 'factcheck'`，另帶目前階段與計數（新增欄位）。抓網頁與核對階段**沒有 CLI 在跑、
+  `agent_runs` 裡沒有 running 的那一筆**，P6-T004 要自己組出 running 的 `agentRun`（現在 `jobs.ts` 是從 `agent_runs` 讀的），鎖也要照樣成立。
 - 停止走既有的 `DELETE …/agent`：停掉正在跑的 CLI 或中止正在抓的請求，不存任何結果；已用掉的額度照算。
 - 後端重啟時還在跑的查證紀錄照既有啟動清理結掉（「後端重啟，這次沒有完成」）。
-- 跑的期間內容被改了：結果照收（查證不改內容、用 excerpt 定位），找不到原句的直接收進已處理。
-- 兩趟組好的 prompt 與每個要抓的網址都過 `assertNoAppPassword`（D-023，security.md）。
+- 防禦性規則（照上面的鎖，理論上不會發生）：萬一跑完時內容已經不是發起時那一版，結果照收、用 excerpt 重新定位，找不到原句的直接收進已處理；不因此丟掉整次結果。
+- WordPress 密碼（D-023，規則的家在 security.md）：選字、兩趟組好的 prompt 在派工前擋（400 `INVALID_INPUT`，一個請求都不發）；
+  第一趟產出的候選網址**在任何抓取之前整批檢查**，任一含已知密碼 → 整次查證失敗、一個網址都不抓、記事件，畫面講「AI 給的網址裡有你的 WordPress 應用程式密碼，這次查證停止」。
 - 只有本機 UI 觸發；MCP 要不要開查證，等 MCP 定稿時再裁定。
 
 ## 已知限制與未證實
@@ -285,7 +293,8 @@ interface FactCheckFinding {
 - Codex 快取搜尋的資料新舊由 OpenAI 決定，很新的事可能查不到。
 - 外洩殘餘風險（取回器照 Agent 給的網址抓）見 security.md「刻意接受的限制」。
 - **未證實，P6-T003／P6-T005 手動驗證時確認**：Codex 的 `-c web_search="cached"` 在 `--ignore-user-config` 下是否生效；
-  Claude `-p` 模式下 `--tools WebSearch` 是否在訂閱帳號可用；`agy` 的 `search_web` 在哪執行（沒有證據前一律不開）；
+  Claude `-p` 模式下 `--tools WebSearch` 是否在訂閱帳號可用、搭配 `--json-schema` 的結構化輸出是否仍可用；
+  `agy` 的 `search_web` 在哪執行、會不會被呼叫（沒有參數能關，見 security.md「刻意接受的限制」）；
   維基百科繁體變體用哪個參數有效。
 
 ## 實作 Task

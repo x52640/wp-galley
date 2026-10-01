@@ -1,7 +1,7 @@
 ---
 id: P6-T001
 phase: 6
-status: in_progress
+status: done
 depends_on: []
 specs: [factcheck.md, security.md]
 write_paths: ["docs/specs/factcheck.md", "docs/specs/security.md", "docs/specs/README.md", "docs/specs/architecture.md", "docs/adr/0001-agent-no-network.md", "docs/adr/README.md", "docs/tasks/P6-T001-factcheck.md", "docs/tasks/P6-T002-*.md", "docs/tasks/P6-T003-*.md", "docs/tasks/P6-T004-*.md", "docs/tasks/P6-T005-*.md", "docs/CURRENT_TASK.md", "plan.md"]
@@ -38,10 +38,10 @@ D-034（修訂 D-009）。設計研究的提案在 `/private/tmp/claude-501/fact
 使用者看一眼 factcheck.md 的「資料流」與 security.md 新增的限制。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新
-- [ ] 留下的殘餘已寫進 `docs/known-issues.md`（本 Task 若有，寫進完成結果由主 session 併入）
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新
+- [x] 留下的殘餘已寫進 `docs/known-issues.md`（本 Task 若有，寫進完成結果由主 session 併入）
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
 - 最後完成：文件全部寫完（2026-10-01）：factcheck.md 定稿、ADR-0001 修訂、security.md（信任邊界、硬性禁令、新節「取回器」、
@@ -54,5 +54,15 @@ D-034（修訂 D-009）。設計研究的提案在 `/private/tmp/claude-501/fact
 - `npm run verify` 綠：typecheck 通過、Vitest 72 檔／1494 測試（2026-10-01，沒改程式，跟主樹基準相同）。
 - 跟提案不同的地方：取回器硬性要求的家放 security.md（提案建議 factcheck.md）；CLI 參數只寫進 agent-cli.md（提案要 security.md 也列參數表）；
   停止沿用 `DELETE …/agent`、進度沿用 `JobDetail.agentRun`（提案另開 `DELETE …/factcheck`）；新增：嘗試上限 12（留 8 份）、
-  引文少於 8 字不算核對、同一句再查舊結果變 `superseded`、維基 API 上限 20、Agent 給的網址才做「文章片段」外洩檢查。
+  引文少於 8 字不算核對、同一句再查舊結果變 `superseded`、維基 API 上限 20（審查後改 30）、Agent 給的網址才做「文章片段」外洩檢查。
 - 留給 known-issues：無新殘餘。P5-T036 Task 檔在另一個 PR，plan.md／CURRENT_TASK／factcheck.md 連過去的連結合併前是斷的。
+
+### 獨立審查修正（2026-10-01，f210f6d 之後）
+- Claude 第一趟：P5-T036 一律帶 `--disallowed-tools`（含 WebSearch），禁用優先 → 第一趟是禁用名單減掉 `WebSearch`＋`--tools/--allowed-tools WebSearch`＋`--strict-mcp-config --no-chrome`；P6-T003 測試照改。
+- 未證實清單與 P6-T005 手動驗證加「`--tools WebSearch` 搭配 `--json-schema` 是否可用」。
+- agy 不是「沒有工具」，只靠 `--sandbox`＋prompt 提示；Codex plugins 類未關；security.md 標「P5-T036 合併後成立」並在刻意接受的限制加一條；ADR-0001 同步。
+- WordPress 密碼：選字與 prompt 派工前擋；候選網址在任何抓取前整批檢查，有密碼整次失敗、零抓取、記事件（security.md、factcheck.md、P6-T004 一致）。
+- 查證跑中鎖內容（`taskLocksContent` 預設已鎖，不用改）；抓網頁階段 P6-T004 要自己組 running 的 `agentRun`；「內容被改」改成防禦性規則。
+- P6-T003～T005 改 `blocked`，CURRENT_TASK 移到 Blocked 表。
+- 取回器：檢查順序（格式與外洩檢查在 DNS 前）、punycode 解回再比、`application/json` 只收維基 API、維基 API 上限 30 且 Agent 給的維基網址算 API 次數、抓不到的原因要讓使用者看得到（`failReason`）。
+- P6-T002 代理測試改成「代理埠沒收到連線」；P6-T005 write_paths 加 review-proposals.md、agent-tasks.md、`src/ui/lib/review-kinds.ts`。

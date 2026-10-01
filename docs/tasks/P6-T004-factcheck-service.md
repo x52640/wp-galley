@@ -1,7 +1,7 @@
 ---
 id: P6-T004
 phase: 6
-status: ready
+status: blocked
 depends_on: [P6-T002, P6-T003]
 specs: [factcheck.md, security.md, architecture.md, core-service.md, http-api.md, review-proposals.md]
 write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
@@ -23,6 +23,10 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 - migration 009：查證紀錄與查證結果兩張表（欄位照 factcheck.md「存下來的結果」）。
 - API：發起查證（`scope: selection | observation | article`）、讀取這篇的查證結果、結案（`dismissed`）；
   停止沿用 `DELETE …/agent`。存檔時從查證卡片進去改的，跟 `resolveItemId` 同樣的方式結案（`resolved-by-edit`）。
+- 跑的期間鎖住內容（跟校稿一致）：`src/contract/agent-run.ts` 的 `taskLocksContent` 對 `factcheck` 預設就回傳會鎖（例外只有 `generate-image`、`suggest-slug`），
+  **不需要改那個檔**，但要有測試證明查證跑中時改文章、放圖、套用建議被擋。
+- 抓網頁與核對階段沒有 CLI 在跑、`agent_runs` 沒有 running 的那一筆；`jobs.ts` 目前從 `agent_runs` 讀 `agentRun`，要自己組出 running 的
+  `agentRun`（`task: 'factcheck'`＋階段），鎖與「另一個 Agent 動作在跑」的互斥在這些階段也要成立。
 - 契約：`api-factcheck.ts`；`AgentRunTask` 加 `factcheck`；`JobDetail.agentRun` 帶查證階段與計數；
   `JobDetail` 帶「說法不同且未結案」的條數給發布面板提醒（不是 blocker）。都是新增欄位。
 - `app.ts` 接上真的取回器；測試用假的。
@@ -59,7 +63,8 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 - 停止：第一趟中、抓取中、第二趟中各停一次，都不存結果。
 - 互斥：另一個 Agent 動作在跑時發起被拒；查證在跑時校驗被拒。
 - 跑校驗、丟棄提案後查證結果還在；excerpt 重算 blockIndex；內容改掉後讀取時算成「原句已經改了」；同一句再查，舊的變 `superseded`。
-- 密碼在選字、prompt、網址裡被擋（`INVALID_INPUT`），一個請求都沒發。
+- 密碼：選字或組好的 prompt 含密碼 → 400 `INVALID_INPUT`、假 adapter 沒被呼叫；第一趟回的候選網址任一含密碼 → 整次查證失敗、假取回器一次都沒被呼叫、有稽核事件，錯誤訊息與事件不含密碼。
+- 查證跑中（含抓網頁階段）改文章、放圖、套用建議、發起校驗都被擋。
 - 後端重啟清理把跑中的查證紀錄結掉。
 - migration 009：從 008 升上來、重跑不重複套用（`tests/migrate.test.ts`）。
 - API：跨站 403、scope 錯誤 400、選字找不到 400、觀察卡片種類不對 400。
@@ -76,6 +81,6 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 - 最後完成：開 Task（2026-10-01，P6-T001）
 - 已通過驗證：—
 - 下一步：等 P6-T002、P6-T003 合併後派 subagent 實作
-- Blocker：P6-T002、P6-T003 未完成
+- Blocker：P6-T002、P6-T003 未完成（完成後 status 改回 ready）
 
 ## 完成結果
