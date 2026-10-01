@@ -2,7 +2,9 @@
  * AI 查證（D-034，docs/specs/factcheck.md）兩趟 Agent 的 prompt：送什麼、怎麼講。純函式，不碰資料庫。
  *
  * 放法跟 `slug-suggestion.ts` 一樣：系統指令是受信任的固定文字；文章與網頁是不受信任的內容，
- * 各自包在分隔區塊裡，內容先過 `neutralize`，做不出系統那條分隔線。
+ * 各自包在分隔區塊裡，內容先過 `textForAgent`（查證專用的前處理＋共用的 `neutralize`），做不出系統那條分隔線。
+ * **prompt 裡放的就是 `textForAgent` 的輸出**，所以核對引文／excerpt 也要拿這一份比（`sourceTextForAgent`、
+ * `articleTextForAgent`），不能拿原文：前處理會刪字、換字，原文跟 Agent 看到的不一樣。
  *
  * 真正的邊界不是 prompt：第一趟手上只有廠商端搜尋、第二趟用該 CLI 做得到的最嚴格無工具模式（adapter 的
  * `hostedSearch`／`strictNoTools`），引文由程式逐字核對（P6-T004）。prompt 只是讓模型不容易被帶偏。
@@ -129,7 +131,10 @@ export interface FactCheckJudgeSource {
   readonly title: string;
   /** 實際抓的網址（跳轉後的最終網址）。 */
   readonly url: string;
-  /** 截短後、實際給 Agent 的純文字。核對以這份為準。 */
+  /**
+   * 截短後的純文字（取回器的輸出）。放進 prompt 前還會過 `sourceTextForAgent`，
+   * **核對引文以 `sourceTextForAgent(text)` 為準**，不是這個欄位本身。
+   */
   readonly text: string;
 }
 
@@ -199,7 +204,7 @@ export function buildFactCheckJudgeUserPrompt(claims: readonly FactCheckJudgeCla
         `${source.ref} 標題：${oneLine(source.title) || '（沒有標題）'}`,
         `${source.ref} 網址：${oneLine(source.url)}`,
         '',
-        neutralize(source.text.trim()) || '（沒有文字）',
+        sourceTextForAgent(source.text) || '（沒有文字）',
         `===== ${source.ref} 結束 =====`,
       );
     }
@@ -207,12 +212,59 @@ export function buildFactCheckJudgeUserPrompt(claims: readonly FactCheckJudgeCla
   return lines.join('\n');
 }
 
-/** 一個分隔區塊。內容做不出分隔線（`neutralize`）。 */
-function block(label: string, content: string, empty = '（沒有內容）'): string[] {
-  return [`===== ${label} 開始 =====`, neutralize(content.trim()) || empty, `===== ${label} 結束 =====`];
+/**
+ * 看不見、會夾在分隔字元中間讓 `neutralize` 認不出來的字：combining grapheme joiner、variation selectors、
+ * 蒙古文 variation selectors、tag 字元。零寬字元由 `neutralize` 自己刪。
+ */
+const INVISIBLE_MODIFIERS = /[\u034F\uFE00-\uFE0F\u180B-\u180D\u{E0000}-\u{E007F}]/gu;
+/** `neutralize` 認得的分隔字元。 */
+const SEPARATOR_ONLY = /^[=＝━─═]+$/u;
+
+/**
+ * 查證用的不受信任文字放進 prompt 前的前處理（共用的 `neutralize` 不動，它也給其他趟用）：
+ * 1. NEL（U+0085）換成換行，刪掉 `INVISIBLE_MODIFIERS`。
+ * 2. NFKC 之後**整個字**變成分隔字元的（`﹦`、`₌`、`⁼`、`⩵`、`⩶`…）換成正規化後的樣子，讓 `neutralize` 認得。
+ *    **只換這種**，不對整段做 NFKC：那會把文章裡的全形數字、全形英文（`２０２４`）也換掉，
+ *    Agent 引的 excerpt 就跟文章原文對不上、在文章上標不到字。
+ * 3. 交給 `neutralize`（刪零寬字元、把三個以上連在一起的分隔字元換成「…」）。
+ */
+function textForAgent(text: string): string {
+  const folded = text
+    // NEL 不在 JS 的 `\s` 裡，`neutralize` 認不出「=NEL=NEL=」；先當成一般換行。
+    .replace(/\u0085/gu, '\n')
+    .replace(INVISIBLE_MODIFIERS, '')
+    .replace(/[^\u0000-\u007F]/gu, (ch) => {
+      const normalized = ch.normalize('NFKC');
+      return normalized !== ch && SEPARATOR_ONLY.test(normalized) ? normalized : ch;
+    });
+  return neutralize(folded.trim());
 }
 
-/** 標題、網址只能佔一行：換行會讓它假冒成下一行的「Sx 網址：」之類的標示。 */
+/**
+ * 第二趟 prompt 裡某份來源的文字＝這個函式的輸出。P6-T004 核對引文要拿 Agent 的 quote 跟**這一份**比，
+ * 不能跟取回器的原文比，否則 Agent 一字不差引用它看到的字也會被誤降為查不到。
+ */
+export function sourceTextForAgent(text: string): string {
+  return textForAgent(text);
+}
+
+/**
+ * 第一趟 prompt 裡文章內容（選字、所在段落、觀察的 excerpt、標題、正文）＝這個函式的輸出。
+ * P6-T004 檢查 AI 給的 excerpt 找不找得到，要拿**這一份**比（再用 excerpt 去原文定位）。
+ */
+export function articleTextForAgent(text: string): string {
+  return textForAgent(text);
+}
+
+/** 一個分隔區塊。內容做不出分隔線（`articleTextForAgent`）。 */
+function block(label: string, content: string, empty = '（沒有內容）'): string[] {
+  return [`===== ${label} 開始 =====`, articleTextForAgent(content) || empty, `===== ${label} 結束 =====`];
+}
+
+/**
+ * 標題、網址只能佔一行：換行會讓它假冒成下一行的「Sx 網址：」之類的標示。
+ * JS 的 `\s` 不含 NEL（U+0085），另外列；U+2028／U+2029 雖然在 `\s` 裡也明列，免得被誤刪。
+ */
 function oneLine(text: string): string {
-  return neutralize(text).replace(/\s+/g, ' ').trim();
+  return textForAgent(text).replace(/[\s\u0085\u2028\u2029]+/gu, ' ').trim();
 }
