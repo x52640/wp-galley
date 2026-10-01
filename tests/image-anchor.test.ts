@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   approveJob,
+  coreInternals,
   createCoreFixture,
   defaultWordPressHandler,
   TINY_PNG,
@@ -89,6 +90,11 @@ async function setup(
   const uuid = fixture.core.createJob({ targetKey: 'diary', sourceText: source, title: '20260828' }).uuid;
   await fixture.core.runAgentReview(uuid, { provider: 'codex', task: 'images' });
   return { core: fixture.core, uuid, adapter };
+}
+
+/** 媒體模組裡的私有方法（自動放位置、自動設精選；模組內部走 this 呼叫，spy 攔得到）。 */
+function mediaModule(core: CoreService): { autoPlace: () => unknown; autoFeature: () => unknown } {
+  return coreInternals(core).media as unknown as { autoPlace: () => unknown; autoFeature: () => unknown };
 }
 
 function briefId(core: CoreService, uuid: string, key: string): number {
@@ -367,14 +373,14 @@ describe('換一張：新圖放到舊圖的位置', () => {
     const second = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'y' });
     const before = core.getJob(uuid).revisionCount;
 
-    const internals = core as unknown as {
-      repo: { jobByUuid(uuid: string): unknown; mediaById(id: number): unknown };
+    const internals = coreInternals(core);
+    const media = internals.media as unknown as {
       replaceInBody(job: unknown, assetId: number, previous: unknown): unknown;
     };
     const job = internals.repo.jobByUuid(uuid);
     const previous = internals.repo.mediaById(first.media.id);
 
-    expect(() => internals.replaceInBody(job, second.id, previous)).toThrow(/找不到原本那張圖/);
+    expect(() => media.replaceInBody(job, second.id, previous)).toThrow(/找不到原本那張圖/);
     expect(core.getJob(uuid).revisionCount).toBe(before);
   });
 
@@ -423,7 +429,7 @@ describe('上傳成功之後出什麼錯都不能讓人以為沒上傳', () => {
   it('自動放位置整個丟例外：回 failed，候選圖算用掉了（不會再上傳一次）', async () => {
     const { core, uuid } = await setup();
     const candidate = await core.generateBriefImage(uuid, briefId(core, uuid, 'rainy_crossing'));
-    vi.spyOn(core as unknown as { autoPlace: () => unknown }, 'autoPlace').mockImplementation(() => {
+    vi.spyOn(mediaModule(core), 'autoPlace').mockImplementation(() => {
       throw new Error('注入的失敗');
     });
 
@@ -437,7 +443,7 @@ describe('上傳成功之後出什麼錯都不能讓人以為沒上傳', () => {
   it('自動設精選整個丟例外：回 failed，候選圖算用掉了', async () => {
     const { core, uuid } = await setup();
     const candidate = await core.generateBriefImage(uuid, briefId(core, uuid, 'featured'));
-    vi.spyOn(core as unknown as { autoFeature: () => unknown }, 'autoFeature').mockImplementation(() => {
+    vi.spyOn(mediaModule(core), 'autoFeature').mockImplementation(() => {
       throw new Error('注入的失敗');
     });
 

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CoreService } from '../../src/core/service.js';
+import type { CoreContext } from '../../src/core/service/context.js';
 import { AgentRegistry } from '../../src/agents/registry.js';
 import { WordPressClient } from '../../src/wordpress/client.js';
 import { loadPublishTargets, type PublishTargetRegistry } from '../../src/wordpress/targets.js';
@@ -21,6 +22,16 @@ import type { Scrubber } from '../../src/config/secrets.js';
  */
 
 const APP_PASSWORD = 'test PASSWORD 1234 abcd';
+
+/**
+ * CoreService 內部的共用狀態與各領域模組（P5-T004 拆檔後）。
+ *
+ * 門面（`core.xxx`）只是轉呼叫：模組之間的呼叫不經過門面，spy 門面攔不到。
+ * 測試要攔「媒體模組裡呼叫的 setFeaturedMedia」這類內部呼叫時，spy 這裡的模組。
+ */
+export function coreInternals(core: CoreService): CoreContext {
+  return (core as unknown as { ctx: CoreContext }).ctx;
+}
 
 export interface CoreFixture {
   readonly core: CoreService;

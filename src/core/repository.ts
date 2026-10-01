@@ -8,7 +8,7 @@ import type { AgentRunStatus, ReviewItemState, ReviewItemType, RevisionOrigin } 
  * CoreService 的 SQLite 存取層。
  *
  * 只做「把 row 讀出來／寫回去」，不做任何判斷。核准會不會失效、狀態能不能轉、
- * 發布前要檢查什麼，全部在 service.ts——那些是安全規則，只能有一份實作。
+ * 發布前要檢查什麼，全部在 service/publish.ts——那些是安全規則，只能有一份實作。
  * 把規則寫進 repository 會讓 MCP 之後有機會繞過去。
  *
  * node:sqlite 是同步 API，`.all()` 回傳 `Record<string, SQLOutputValue>[]`，

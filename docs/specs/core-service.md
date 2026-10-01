@@ -2,9 +2,38 @@
 
 > 擁有範圍：CoreService 的對外方法。狀態與核准規則在 [state-machine.md](state-machine.md)，
 > HTTP 對應在 [http-api.md](http-api.md)。
-> 程式：`src/core/service.ts`、`src/core/repository.ts`。
+> 程式：`src/core/service.ts`（門面）、`src/core/service/*.ts`（各領域）、`src/core/repository.ts`。
 > MCP 與 UI 共用同一個實例（規則見 [security.md](security.md)）。
-> 方法的回傳型別定義在 `src/contract/api.ts`；`service.ts` 以舊名字（`ApprovalView` 等）轉出。
+> 方法的回傳型別定義在 `src/contract/api.ts`；`service.ts` 以舊名字（`ApprovalView` 等）轉出，
+> 輸入型別（`CreateJobInput` 等）在 `service/types.ts`，也由 `service.ts` 轉出。
+
+## 哪個檔負責什麼（P5-T004）
+
+`CoreService`（`src/core/service.ts`）只是**薄門面**：每個公開方法一行轉給對應的領域模組，外部一律 import 它。
+共用狀態只有一份，放在 `service/context.ts` 的 `CoreContext`；門面建構時建一個，把各領域模組掛上去（`ctx.content`、`ctx.media`…），
+模組之間透過 `this.ctx.<領域>.方法` 互相呼叫。下表的路徑都在 `src/core/service/` 底下。
+
+| 檔 | 負責 | 公開方法（門面轉出） | 給別的模組用的 |
+| --- | --- | --- | --- |
+| `context.ts` | 共用狀態（repo、目前的站、`activeRuns`、`publishing`、`mediaUploads`、設定精靈旗標）、啟動清理、內部小工具（`requireJob`、`payloadOf`、`renderPayload`、`toMedia`、`trackWordPress`、`assertNoAppPassword`…） | — | 全部 |
+| `types.ts` | 方法的輸入型別（`CreateJobInput`、`CreateRevisionInput`、`AddMediaInput`、`PublishInput`…）與 `CoreServiceOptions` | — | — |
+| `setup.ts` | 設定精靈要問的事、換連線與發布目標 | `isPublishing`、`tryBeginReconfigure`、`endReconfigure`、`currentSiteUsage`、`openJobCountsByTarget`、`reconfigure` | — |
+| `jobs.ts` | 建立與讀取稿件、取消與恢復、發布前的 blocker、稽核紀錄 | `createJob`、`getJob`、`listJobs`、`cancelJob`、`restoreJob`、`listEvents` | `getJob` |
+| `content.ts` | 建新版本（**所有內容改動的入口**）、渲染、校樣、校對符號 | `createRevision`、`listRevisions`、`render`、`getPreviewDocument`、`getMarks` | `createRevision` |
+| `agent.ts` | 校稿與一鍵配圖、建議英文網址、取消 Agent；system／user prompt | `runAgentReview`、`suggestSlugs`、`cancelAgentRun` | — |
+| `review.ts` | 待處理清單：逐項處理、整份採用、丟棄、對照 | `getReview`、`resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison` | `openProposal`、`closeProposalIfDone`、`reviewView`、`pendingReviewCount` |
+| `briefs.ts` | 配圖需求：存 Agent 給的需求、卡片上改描述、不要了 | `dismissImageBrief`、`updateImageBrief` | `storeImageBriefs`、`imageBriefViews`、`requireOpenBrief`、`toCandidate` |
+| `images.ts` | 用 Codex 生候選圖、用這張、在文章上請 AI 配一張 | `imageGenerationStatus`、`generateBriefImage`、`imageCandidateFile`、`useImageCandidate`、`requestImageAtPosition` | — |
+| `media.ts` | 上傳、換圖、移除、放位置、精選圖片；上傳後自動放位置／設精選 | `addMedia`、`addMediaWithOutcome`、`replaceMedia`、`removeMedia`、`setFeaturedMedia`、`placeMedia` | `addMediaWithOutcome` |
+| `approval.ts` | 核准、撤銷；**核准失效的唯一入口 `invalidateApproval`** | `approve`、`revokeApproval` | `invalidateApproval`、`assertApprovalUnchanged` |
+| `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
+| `authors.ts` | 作者清單、預設作者檢查、發布時送哪位 | `listAuthors`、`assertAuthorChoosable` | `resolvePublishAuthor` |
+
+核准失效只在 `approval.ts` 的 `invalidateApproval` 做（`content.ts` 的 `createRevision` 與 `media.ts` 的換圖呼叫它），
+規則見 [state-machine.md](state-machine.md)「核准失效的實作點」。其他模組不准自己撤銷核准。
+
+測試要攔模組之間的呼叫（例如媒體模組裡呼叫的 `setFeaturedMedia`）時，spy `coreInternals(core).media`
+（`tests/helpers/core-fixture.ts`）；spy 門面攔不到，因為門面只是轉呼叫。
 
 **啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖、建議網址都算）結成
 `failed`，原因「後端重啟，這次沒有完成」，每筆記一條 `agent_interrupted` 事件（actor `system`）。
@@ -12,14 +41,13 @@
 不刪資料、不動其他表。前提：**一個 DB 只有一個 CoreService 行程**；將來若 MCP 另起行程共用同一個 DB，
 這條要改（否則後啟動的會把前一個正在跑的結掉）。
 
-下面是**節錄**，列出核心流程的方法。提案制與配圖需求另有 `getReview`、
-`resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison`、
-`dismissImageBrief`，以及 `getPreviewDocument`、`getMarks`、`listEvents`；完整清單以
-`src/core/service.ts` 為準，P5-T004 拆檔時補齊本檔。
+## 方法的規則
+
+下面是有特別規則的方法（完整清單見上表）；註解寫在 `service/` 各檔的方法上。
 
 ```ts
 interface CoreService {
-  // --- 建立與讀取 ---
+  // --- 建立與讀取（jobs.ts；openJobCountsByTarget 在 setup.ts）---
   /**
    * 本機站台設定檔不存在（targets.setupRequired）時一律拒絕，訊息就是那句「還沒有站台設定…」。
    * target 停用（`disabled: true`，D-032，P5-T032）時拒絕（InvalidInputError），講怎麼到精靈打開；
@@ -41,7 +69,7 @@ interface CoreService {
    */
   restoreJob(uuid: string): Job;
 
-  // --- 內容 ---
+  // --- 內容（content.ts）---
   /** 建立新 revision。任何內容改動都走這裡，因此核准失效也只在這裡處理。 */
   /**
    * `editedBody`：直接在文章上改，只換正文，先經 normalizeEditedBody 整理（P5-T010）。
@@ -61,7 +89,7 @@ interface CoreService {
   /** 渲染最新 revision，產生預覽 HTML 與 content hash。 */
   render(uuid: string): RenderOutcome;
 
-  // --- Agent ---
+  // --- Agent（agent.ts）---
   /** 正文是空的（`isBlankBody`）就 InvalidInputError「正文是空的，先寫點內容再請 AI 看」，不跑、不花額度（P5-T029）。 */
   runAgentReview(uuid: string, input: AgentReviewInput): Promise<AgentRunResult>;
   /**
@@ -79,7 +107,7 @@ interface CoreService {
    */
   cancelAgentRun(uuid: string): void;
 
-  // --- 生圖（D-017，見 agent-tasks.md） ---
+  // --- 生圖（images.ts；updateImageBrief 在 briefs.ts。D-017，見 agent-tasks.md）---
   imageGenerationStatus(): Promise<ImageGenerationStatus>;
   /** 生一張候選圖，只存本機。跟校稿共用「一次一個」；不是內容改動。 */
   generateBriefImage(uuid: string, briefId: number, input?: { timeoutMs?: number }): Promise<ImageCandidate>;
@@ -107,7 +135,7 @@ interface CoreService {
   /** `altText`：卡片上填的替代文字（P5-T018），沒給就用需求上的。使用者那條的檔名用文章 slug／標題（userImageFilename）。 */
   useImageCandidate(uuid: string, candidateId: number, input?: { altText?: string }): Promise<MediaUploadOutcome>;
 
-  // --- 媒體 ---
+  // --- 媒體（media.ts）---
   /** 帶的 briefKey 對上封面那條、且沒有別的封面時，上傳後自動 setFeaturedMedia（D-017）。 */
   addMedia(uuid: string, input: AddMediaInput): Promise<MediaAsset>;
   /**
@@ -131,11 +159,11 @@ interface CoreService {
    */
   placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Revision;
 
-  // --- 核准（只有 UI 能呼叫） ---
+  // --- 核准（approval.ts；只有 UI 能呼叫）---
   approve(uuid: string, input: { contentHash: string; actor: 'ui' }): Approval;
   revokeApproval(uuid: string, reason: string): void;
 
-  // --- 發布 ---
+  // --- 發布（publish.ts）---
   /**
    * 正文轉 Gutenberg 區塊時用**模板的** `blockDefaults`（見 templates.md）；分類項目的查詢、
    * 寫入欄位與遠端快照一律用分類法的 REST 名稱（`taxonomyRestBaseOf(target)`）。
@@ -147,7 +175,7 @@ interface CoreService {
    */
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
 
-  // --- 作者（P5-T024，D-024；站台規則見 wordpress-site.md「作者」） ---
+  // --- 作者（authors.ts。P5-T024，D-024；站台規則見 wordpress-site.md「作者」）---
   /** 站上可以當作者的人（只有 id、名字）、發布台的帳號、預設作者與要提醒的事。 */
   listAuthors(): Promise<AuthorsResponse>;
   /** 設預設作者前的檢查：不在可選名單丟 InvalidInputError。寫檔在路由（writeDefaultAuthor）。 */
