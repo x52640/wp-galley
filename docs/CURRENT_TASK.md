@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **70 檔 / 1449 測試**全綠（2026-10-01，P0-T002 合併後）
+- `npm run verify`：typecheck 通過；Vitest **72 檔 / 1494 測試**全綠（2026-10-01，P5-T033；D-033 這批合併後）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
@@ -15,10 +15,10 @@ D-033 健檢後的瘦身與拆分（[P0-T002](tasks/P0-T002-slim-docs.md) 已合
 
 | Task | 內容 | 狀態 |
 | --- | --- | --- |
-| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService（含 `api.ts`） | PR 審查中 |
-| [P5-T034](tasks/P5-T034-split-styles.md) | 樣式表照畫面拆檔 | PR 審查中 |
-| [P5-T035](tasks/P5-T035-proofview-edit-logic.md) | 抽出 ProofView 編輯邏輯 | PR 審查中 |
-| [P5-T033](tasks/P5-T033-split-fixtures.md) | 拆分示範資料，規則改用 contract（疊在 P5-T004 上） | PR 審查中 |
+| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService（含 `api.ts`） | PR #14 已合併 |
+| [P5-T034](tasks/P5-T034-split-styles.md) | 樣式表照畫面拆檔 | PR #12 已合併 |
+| [P5-T035](tasks/P5-T035-proofview-edit-logic.md) | 抽出 ProofView 編輯邏輯 | PR #13 已合併 |
+| [P5-T033](tasks/P5-T033-split-fixtures.md) | 拆分示範資料，規則改用 contract（疊在 P5-T004 上） | PR 審查中（D-033 最後一個） |
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 

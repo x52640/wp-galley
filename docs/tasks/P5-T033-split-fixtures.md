@@ -1,7 +1,7 @@
 ---
 id: P5-T033
 phase: 5
-status: in_progress
+status: done
 depends_on: [P5-T004]
 specs: [architecture.md, design-system.md]
 write_paths: ["src/ui/service/", "src/contract/", "src/core/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T033-split-fixtures.md", "docs/CURRENT_TASK.md"]
@@ -99,3 +99,5 @@ D-033。`src/ui/service/fixtures.ts`（2233 行）是 `?fixtures=1` 的假後端
 
 ### 留給之後（write_paths 外）
 - `src/ui/lib/agent-tasks.ts` 的 `runLocksContent` 應改成轉出 `contract/agent-run.ts`；`docs/specs/agent-tasks.md:293` 那句「示範資料共用」要改成指向 contract。
+- 獨立審查（2026-10-01）：後端被換掉的片段逐一比對，條件、順序、訊息一字不差，無 high／medium。low 已修：示範資料取消規則對齊後端。
+  low 待使用者：`src/ui/lib/agent-tasks.ts` 的 `runLocksContent` 與 contract 各一份（不在 write_paths）。
