@@ -21,7 +21,7 @@
 | `jobs.ts` | 建立與讀取稿件、取消與恢復、發布前的 blocker、稽核紀錄 | `createJob`、`getJob`、`listJobs`、`cancelJob`、`restoreJob`、`listEvents` | `getJob` |
 | `content.ts` | 建新版本（**所有內容改動的入口**）、渲染、校樣、校對符號 | `createRevision`、`listRevisions`、`render`、`getPreviewDocument`、`getMarks` | `createRevision` |
 | `agent.ts` | 校稿與一鍵配圖、建議英文網址、取消 Agent；system／user prompt | `runAgentReview`、`suggestSlugs`、`cancelAgentRun` | — |
-| `review.ts` | 待處理清單：逐項處理、整份採用、丟棄、對照 | `getReview`、`resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison` | `openProposal`、`closeProposalIfDone`、`reviewView`、`pendingReviewCount` |
+| `review.ts` | 待處理清單：逐項處理、整份採用、丟棄、對照 | `getReview`、`resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison` | `getReview`、`openProposal`、`closeProposalIfDone`、`reviewView`、`pendingReviewCount` |
 | `briefs.ts` | 配圖需求：存 Agent 給的需求、卡片上改描述、不要了 | `dismissImageBrief`、`updateImageBrief` | `storeImageBriefs`、`imageBriefViews`、`requireOpenBrief`、`toCandidate` |
 | `images.ts` | 用 Codex 生候選圖、用這張、在文章上請 AI 配一張 | `imageGenerationStatus`、`generateBriefImage`、`imageCandidateFile`、`useImageCandidate`、`requestImageAtPosition` | — |
 | `media.ts` | 上傳、換圖、移除、放位置、精選圖片；上傳後自動放位置／設精選 | `addMedia`、`addMediaWithOutcome`、`replaceMedia`、`removeMedia`、`setFeaturedMedia`、`placeMedia` | `addMediaWithOutcome` |

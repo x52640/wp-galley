@@ -61,3 +61,6 @@ core-service.md、state-machine.md（核准失效必須仍集中在一處）
 - Blocker：無
 
 ## 完成結果
+- 獨立審查（2026-10-01）：用 TypeScript 解析器自動比對 134 個方法、門面 43 個公開方法、contract 97 個匯出，全部一致，行為不變。
+  low 已修：contract 守門測試改用 `ts.preProcessFile`（regex 擋不住同一行兩個敘述）；core-service.md 補 `getReview`。
+  low 待使用者：`state-machine.md`、`wordpress-site.md` 三處舊路徑 `src/core/service.ts`（不在 write_paths）。
