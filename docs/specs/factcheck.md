@@ -138,14 +138,19 @@ interface FactCheckFindOutput {
   內文用 action API `prop=extracts&explaintext=1`（純文字）。**不用 `api.wikimedia.org`**（2026-07 起逐步停用）。
 - 每條主張、每個語言只用第一個搜尋字串、取第一筆結果（次數上限見 security.md「取回器」）。
 - 請求帶可識別的 `User-Agent: Galley/<版本> (+https://github.com/x52640/wp-galley)`：沒帶的每分鐘只有 10 次（Wikimedia 2026 速率限制，官方註明仍在實驗）。
-- 中文要繁體：用 zh-TW 變體（`Accept-Language: zh-TW` 或 API 的變體參數，**未證實哪個有效**，P6-T002 以文件為準、P6-T005 手動驗證時看畫面確認）。
+- 中文要繁體：兩個都送——請求帶 `Accept-Language: zh-TW`，extracts 另加 `variant=zh-tw`。**未證實哪個有效**，P6-T005 手動驗證時看畫面確認。
+- 條目網址怎麼認：`<lang>.wikipedia.org` 或手機版 `<lang>.m.wikipedia.org`，路徑 `/wiki/<標題>`、`/zh-tw/<標題>` 這類變體路徑、`/w/index.php?title=`；
+  `Special:`／`File:`／`Category:`（含中文名稱）不是條目，當一般網頁抓。改走 API 之前，原本的網址照樣先過它來源該過的全套檢查（Agent 給的就含「文章片段」）。
+- 程式：`src/fetch/wikipedia.ts`（組網址、解析回應）；測試用的回應在 `tests/fixtures/fetch/`，照 API 文件的格式手寫（實作時不准連外網，沒有錄真實回應，P6-T005 手動驗證時順便對一次）。
 - 內容是 CC BY-SA；畫面只顯示短引文＋連結。
 
 ### 抽文字
 
 - HTML 用 parse5（已是依賴）解析，拿掉 `script`、`style`、`nav`、`header`、`footer`、`aside`、`form`，取純文字、摺疊空白。
+  另外也拿掉本來就不是正文的 `head`、`noscript`、`template`、`svg`、`math`、`iframe`、`object`、`canvas`、`button`、`select`；
+  區塊元素（段落、標題、清單項目…）前後換行，`<pre>` 保留原本的換行。程式：`src/fetch/extract-text.ts`。
 - `text/plain` 原樣；維基百科用 extracts 的純文字。
-- 每份最多給第二趟 12,000 字；全部加起來最多 40,000 字，超過時各份等比例截短。**核對與「看原文」都以截短後、實際給 Agent 的那份文字為準**。
+- 每份最多給第二趟 12,000 字；全部加起來最多 40,000 字，超過時各份等比例截短（`truncateSources`；字數以 Unicode 字元算、無條件捨去，不切壞 emoji）。**核對與「看原文」都以截短後、實際給 Agent 的那份文字為準**。
 - 抓回的全文只活在這一次查證的記憶體裡，不存 DB；存下來的只有引文前後文（見「存下來的結果」）。
 
 ## ③ 判斷

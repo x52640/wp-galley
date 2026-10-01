@@ -1,7 +1,7 @@
 ---
 id: P6-T002
 phase: 6
-status: ready
+status: in_progress
 depends_on: [P6-T001]
 specs: [security.md, factcheck.md, architecture.md, testing.md]
 write_paths: ["src/fetch/", "tests/safe-fetch.test.ts", "tests/url-guard.test.ts", "tests/extract-text.test.ts", "tests/wikipedia.test.ts", "tests/fixtures/fetch/", "docs/specs/security.md", "docs/specs/factcheck.md", "docs/specs/architecture.md", "docs/tasks/P6-T002-safe-fetcher.md"]
@@ -68,9 +68,19 @@ D-034。AI 查證要由我們的程式代抓網頁（Agent 不能在使用者機
 - [ ] CURRENT_TASK 已更新（由主 session）
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01，P6-T001）
-- 已通過驗證：—
-- 下一步：等 P6-T001 合併後派 subagent 實作
+- 最後完成：`src/fetch/` 九個檔＋四個測試檔＋`tests/fixtures/fetch/`；security.md「取回器」補實作細節、factcheck.md 維基與抽文字、architecture.md 模組表與依賴規則（2026-10-01）
+- 已通過驗證：`npm run verify` 綠，77 檔／1646（基準 73／1497，新增 4 檔／149）；代理測試另做過變異驗證（改用 `https.globalAgent` 時測試會紅）
+- 下一步：主 session 審查 → 另派審查 → commit；殘餘併入 known-issues；P6-T004 接進流程
 - Blocker：無
 
 ## 完成結果
+- 模組：`types.ts`（上限、失敗碼與白話原因）、`address-guard.ts`（BlockList＋取出內含 IPv4）、`url-guard.ts`（DNS 前的格式與外洩檢查、候選網址整批密碼檢查）、
+  `budget.ts`（這次查證的額度）、`transport.ts`（預設 https 傳輸與 DNS）、`safe-fetch.ts`（請求、跳轉、回應檢查）、`wikipedia.ts`、`extract-text.ts`、`index.ts`（`createSourceFetcher` 組起來）。
+- 偏離：
+  - 實作與測試是同一輪寫的，不是嚴格的先紅後綠。
+  - 維基回應的 fixture 照 API 文件手寫，沒有錄真實回應（實作時不准連外網）。
+- 殘餘（給 known-issues）：
+  - 「文章片段」對英文誤擋較多：12 字只有兩三個英文字，文章裡的專有名詞出現在網址裡就會擋（例如 `united states`）。
+  - 中文繁體變體（`Accept-Language` 與 `variant=zh-tw`）哪個有效未證實，P6-T005 手動驗證時看。
+  - 維基 fixture 不是錄的真實回應，P6-T005 手動驗證時順便對一次格式。
+  - 測試用的自簽憑證與私鑰（`tests/fixtures/fetch/test-*.pem`，只給 example.test）進版控，秘密掃描工具可能會報。
