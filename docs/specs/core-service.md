@@ -29,8 +29,11 @@
 | `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
 | `authors.ts` | 作者清單、預設作者檢查、發布時送哪位 | `listAuthors`、`assertAuthorChoosable` | `resolvePublishAuthor` |
 
-核准失效只在 `approval.ts` 的 `invalidateApproval` 做（`content.ts` 的 `createRevision` 與 `media.ts` 的換圖呼叫它），
-規則見 [state-machine.md](state-machine.md)「核准失效的實作點」。其他模組不准自己撤銷核准。
+**內容修改造成的核准失效**只走 `approval.ts` 的 `invalidateApproval`（`content.ts` 的 `createRevision` 與 `media.ts` 的換圖呼叫它），
+規則見 [state-machine.md](state-machine.md)「核准失效的實作點」。其他模組不准為了內容修改自己撤銷核准。
+
+兩個刻意的例外直接撤銷核准、不經過 `invalidateApproval`（拆分前就如此，不是內容修改）：
+`approval.ts` 的 `approve` 建新核准前撤掉舊的（理由「重新核准」），`jobs.ts` 的 `cancelJob` 取消稿件時撤掉（理由「工作項目已取消」）。
 
 測試要攔模組之間的呼叫（例如媒體模組裡呼叫的 `setFeaturedMedia`）時，spy `coreInternals(core).media`
 （`tests/helpers/core-fixture.ts`）；spy 門面攔不到，因為門面只是轉呼叫。
