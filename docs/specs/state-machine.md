@@ -1,7 +1,7 @@
 # 狀態機與核准
 
 > 擁有範圍：job 狀態轉移、核准的建立與失效、發布前置檢查。
-> 程式：`src/core/state-machine.ts`、`src/core/service.ts`（approve / revoke / publish）、
+> 程式：`src/core/state-machine.ts`、`src/core/service/approval.ts`（approve / revoke）、`src/core/service/publish.ts`（publish）、
 > `src/core/content-hash.ts`。
 > 為什麼核准只能由 UI 建立：見 [security.md](security.md)。
 

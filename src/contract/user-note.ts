@@ -17,3 +17,15 @@ export function normalizeUserNote(note: string | undefined | null): string | nul
 export function userNoteLength(note: string | undefined | null): number {
   return Array.from(normalizeUserNote(note) ?? '').length;
 }
+
+/**
+ * 整理並檢查長度（P5-T033：CoreService 建需求、改需求與示範資料共用）。空的算沒寫（null），合格。
+ * 不合格時 `message` 就是對使用者講的那句話。
+ */
+export function checkUserNote(
+  note: string | undefined | null,
+): { readonly ok: true; readonly note: string | null } | { readonly ok: false; readonly message: string } {
+  const value = normalizeUserNote(note);
+  if (userNoteLength(value) > USER_NOTE_MAX) return { ok: false, message: `想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字` };
+  return { ok: true, note: value };
+}

@@ -18,7 +18,16 @@ import { isFeaturedBrief } from '../image-generation.js';
 import { isContentMutable } from '../state-machine.js';
 import { uploadMedia } from '../../media/upload.js';
 import type { AddMediaInput, MediaUploadOutcome } from './types.js';
-import { GENERATE_IMAGE_PURPOSE, SUGGEST_SLUG_PURPOSE, OTHER_SITE_MEDIA_MESSAGE, featuredInput } from './context.js';
+import { OTHER_SITE_MEDIA_MESSAGE, featuredInput } from './context.js';
+import {
+  AUTO_FEATURE_AGENT_RUNNING,
+  AUTO_FEATURE_KEPT_EXISTING,
+  AUTO_FEATURE_SET,
+  AUTO_PLACE_AGENT_RUNNING,
+  placeByAnchor,
+  replacedResult,
+} from '../../contract/auto-place.js';
+import { taskLocksContent } from '../../contract/agent-run.js';
 import type { CoreContext } from './context.js';
 
 /**
@@ -421,8 +430,7 @@ export class MediaModule {
   private contentRunActive(job: JobRow): boolean {
     const active = this.ctx.activeRuns.get(job.uuid);
     if (!active) return false;
-    const purpose = this.ctx.repo.agentRunById(active.rowId)?.purpose;
-    return purpose !== GENERATE_IMAGE_PURPOSE && purpose !== SUGGEST_SLUG_PURPOSE;
+    return taskLocksContent(this.ctx.repo.agentRunById(active.rowId)?.purpose);
   }
 
   /**
@@ -447,14 +455,7 @@ export class MediaModule {
     const featuredKey = latest ? this.ctx.payloadOf(latest).templateData['featuredImageBriefKey'] : undefined;
     if (isFeaturedBrief(featuredInput(brief), featuredKey)) return null;
 
-    if (this.contentRunActive(job)) {
-      return {
-        outcome: 'agent-running',
-        message:
-          'AI 還在跑，等它跑完再放（圖已經上傳了）：跑完之後在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。',
-        afterBlockIndex: null,
-      };
-    }
+    if (this.contentRunActive(job)) return AUTO_PLACE_AGENT_RUNNING;
 
     const html = latest?.rendered_html ?? '';
     const blocks = splitTopLevelBlocks(html);
@@ -468,36 +469,13 @@ export class MediaModule {
       .find((row) => containsImage(html, row.wordpress_media_id!));
     if (previous) return this.replaceInBody(job, assetId, previous);
 
-    // 使用者自己選的位置（P5-T018）講「你選的位置」，Agent 建議的講「建議的位置」。
-    const mine = brief.origin === 'user';
-    const side = brief.anchor_position === 'before' ? '後面' : '前面';
-    const notPlaced = (outcome: AutoPlaceResult['outcome'], why: string): AutoPlaceResult => ({
-      outcome,
-      message:
-        `找不到${mine ? '你選的' : '建議的'}位置，請自己放：` +
-        `${why}在文章段落之間按「在這裡插圖」，或用圖片的「插入位置」選。`,
-      afterBlockIndex: null,
-    });
-
-    const anchor = brief.anchor?.trim() ?? '';
-    if (anchor === '') {
-      return notPlaced('not-found', mine ? '你選的位置前後都沒有文字可以對照。' : 'AI 沒有指定要放在哪一段。');
-    }
-    const quoted = mine ? `你選的位置${side}那段「${anchor}」` : `AI 引用的「${anchor}」`;
-    const hits = findBlocksContaining(blocks, anchor);
-    if (hits.length === 0) return notPlaced('not-found', `${quoted}在目前的文章裡找不到（可能改過了）。`);
-    if (hits.length > 1) {
-      return notPlaced('ambiguous', `${quoted}在文章裡出現在 ${hits.length} 段，不確定是哪一段。`);
-    }
-
-    // 錨點那段之後；「文章最前面」那種是錨點那段之前（P5-T018）。
-    const afterBlockIndex = brief.anchor_position === 'before' ? hits[0]! - 1 : hits[0]!;
-    this.placeMedia(job.uuid, assetId, afterBlockIndex);
-    return {
-      outcome: 'placed',
-      message: afterBlockIndex < 0 ? '已放進正文最前面。' : `已放進正文第 ${afterBlockIndex + 1} 段之後。`,
-      afterBlockIndex,
-    };
+    // 照錨點：放不放、講什麼在共用契約（示範資料也用同一份，P5-T033）。
+    const decision = placeByAnchor(
+      { origin: brief.origin, anchorPosition: brief.anchor_position, anchor: brief.anchor },
+      (anchor) => findBlocksContaining(blocks, anchor),
+    );
+    if (decision.place) this.placeMedia(job.uuid, assetId, decision.afterBlockIndex);
+    return decision.result;
   }
 
   /**
@@ -527,12 +505,7 @@ export class MediaModule {
       reason: '換一張配圖',
     });
     const at = findImageBlockIndex(revision.publishHtml, asset.wordpress_media_id!);
-    const afterBlockIndex = at - 1;
-    return {
-      outcome: 'replaced',
-      message: `已換掉正文裡原本那張（${afterBlockIndex < 0 ? '文章最前面' : `第 ${afterBlockIndex + 1} 段之後`}）。舊圖拿出正文了，還留在媒體庫。`,
-      afterBlockIndex,
-    };
+    return replacedResult(at - 1);
   }
 
   /**
@@ -554,27 +527,17 @@ export class MediaModule {
     if (!isFeaturedBrief(featuredInput(brief), featuredKey)) return null;
 
     // 設精選會建新版本；校稿或配圖正在跑的時候建，那一趟跑完的結果就會作廢（見 contentRunActive）。
-    if (this.contentRunActive(job)) {
-      return {
-        outcome: 'agent-running',
-        message: 'AI 還在跑，等它跑完再設成精選（圖已經上傳了）：跑完之後按圖片上的「設為精選」。',
-      };
-    }
+    if (this.contentRunActive(job)) return AUTO_FEATURE_AGENT_RUNNING;
 
     const currentId = payload?.featuredMediaAssetId ?? null;
     if (currentId !== null && currentId !== assetId) {
       const current = this.ctx.repo.mediaById(currentId);
-      if (current !== null && current.brief_key !== brief.brief_key) {
-        return {
-          outcome: 'kept-existing',
-          message: '已經有封面了，沒有換掉。要換成這張，按圖片上的「設為精選」。',
-        };
-      }
+      if (current !== null && current.brief_key !== brief.brief_key) return AUTO_FEATURE_KEPT_EXISTING;
     }
 
     try {
       this.setFeaturedMedia(job.uuid, assetId);
-      return { outcome: 'set', message: '已設成精選圖片。' };
+      return AUTO_FEATURE_SET;
     } catch (error) {
       const reason = this.ctx.scrub(error instanceof Error ? error.message : String(error));
       this.ctx.repo.insertEvent({

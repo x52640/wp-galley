@@ -15,13 +15,9 @@ import type { JobRow } from '../repository.js';
 import { buildTemplateDataFromSource } from '../source-text.js';
 import { EMPTY_BODY_MESSAGE, isBlankBody } from '../../contract/empty-body.js';
 import { titleMaxLengthFromSchema } from '../../contract/plain-title.js';
-import {
-  assertTransition,
-  canTransition,
-  InvalidTransitionError,
-  isJobState,
-  type JobState,
-} from '../state-machine.js';
+import { assertTransition, InvalidTransitionError, type JobState } from '../state-machine.js';
+import { restoreStateFor } from '../../contract/job-states.js';
+import { pendingReviewBlocker } from '../../contract/review-state.js';
 import { createJobWorkspace } from '../../agents/workspace.js';
 import type { PublishTarget } from '../../wordpress/targets.js';
 import type { CreateJobInput, RevisionPayload } from './types.js';
@@ -238,7 +234,7 @@ export class JobsModule {
     return this.ctx.toJob(this.ctx.repo.jobById(job.id)!);
   }
 
-  /** 恢復要回到的狀態。能不能回去看轉移表，不在這裡另列一份清單。 */
+  /** 恢復要回到的狀態。能回去的清單就是轉移表的 CANCELLED 那一列（`RESTORABLE_STATES`）。 */
   private restoreTargetOf(job: JobRow): JobState {
     const event = this.ctx.repo.latestSucceededEvent(job.id, 'job_cancelled');
     let from: unknown = null;
@@ -248,9 +244,8 @@ export class JobsModule {
     } catch {
       // 紀錄壞掉就當成沒記，回 SOURCE。
     }
-    if (typeof from !== 'string' || !isJobState(from)) return 'SOURCE';
-    const target: JobState = from === 'APPROVED' ? 'RENDERED' : from;
-    return canTransition('CANCELLED', target) ? target : 'SOURCE';
+    // APPROVED 回 RENDERED；認不得或轉移表不允許的回 SOURCE（規則在共用契約，示範資料也用）。
+    return restoreStateFor(from);
   }
 
   /** 稽核紀錄。UI 的「這一步」面板與日後的除錯都靠它。 */
@@ -292,7 +287,7 @@ export class JobsModule {
     // 使用者的心智模型是「清單從上往下清完，就可以發了」。沒清完就講出來——
     // 但這是提醒不是禁令，blockers 只餵給畫面，發布的硬性前置檢查在 preflightPublish。
     if (review !== null && review.pendingCount > 0) {
-      blockers.push(`還有 ${review.pendingCount} 項校稿建議沒處理`);
+      blockers.push(pendingReviewBlocker(review.pendingCount));
     }
 
     switch (job.state) {

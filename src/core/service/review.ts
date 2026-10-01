@@ -17,6 +17,7 @@ import { applyChanges, isAlreadyDone, type ChangeSlot } from '../review-apply.js
 import type { AgentId } from '../../agents/types.js';
 import type { ResolveReviewInput, ProposalRef } from './types.js';
 import type { CoreContext } from './context.js';
+import { countOpenReviewItems, isOpenReviewState } from '../../contract/review-state.js';
 
 export class ReviewModule {
   constructor(private readonly ctx: CoreContext) {}
@@ -414,7 +415,7 @@ export class ReviewModule {
     // 用推算的結果把提案永久關掉——結掉之後文章改回去，那張卡片也回不來。
     const remaining = this.ctx.repo
       .listReviewItems(proposalId)
-      .filter((row) => row.state === 'pending' || row.state === 'unappliable');
+      .filter((row) => isOpenReviewState(row.state));
     if (remaining.length === 0) this.ctx.repo.closeReviewProposal(proposalId, '所有項目都處理完了');
   }
 
@@ -437,7 +438,7 @@ export class ReviewModule {
    */
   private openReviewRows(rows: readonly ReviewItemRow[], templateData: Record<string, unknown> | null): ReviewItemRow[] {
     const done = this.alreadyDoneIds(rows, templateData);
-    return rows.filter((row) => (row.state === 'pending' || row.state === 'unappliable') && !done.has(row.id));
+    return rows.filter((row) => isOpenReviewState(row.state) && !done.has(row.id));
   }
 
   /**
@@ -455,7 +456,7 @@ export class ReviewModule {
     for (const row of rows) {
       if (row.item_type !== 'change') continue;
       const plainSkip = row.state === 'skipped' && row.revision_id === null;
-      if (row.state !== 'pending' && row.state !== 'unappliable' && !plainSkip) continue;
+      if (!isOpenReviewState(row.state) && !plainSkip) continue;
       if (isAlreadyDone(templateData, JSON.parse(row.payload_json) as ReviewChange)) done.add(row.id);
     }
     return done;
@@ -491,8 +492,7 @@ export class ReviewModule {
       baseContentHash: proposal.base_content_hash,
       stale: currentHash !== null && currentHash !== proposal.base_content_hash,
       // 已經改好了的在 toReviewItem 已經是 skipped，不會被數進來。
-      pendingCount: items.filter((item) => item.state === 'pending' || item.state === 'unappliable')
-        .length,
+      pendingCount: countOpenReviewItems(items),
       items,
     };
   }

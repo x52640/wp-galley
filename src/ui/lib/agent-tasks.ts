@@ -108,9 +108,7 @@ export function agentStatusText(status: string): string {
 
 /**
  * 這一趟 Agent 在跑的時候，會不會因為內容被改而整趟作廢（校稿、一鍵配圖）。
- * 生圖與建議網址（D-026）不對著某一版文字做，不算——跟後端 `contentRunActive` 同一套。
- * 是的話，放進正文、設精選這類會建新版本的動作要鎖住。
+ * 生圖與建議網址（D-026）不對著某一版文字做，不算。是的話，放進正文、設精選這類會建新版本的動作要鎖住。
+ * 規則跟後端 `contentRunActive`、示範資料同一份，在共用契約（P5-T033）。
  */
-export function runLocksContent(run: { status: string; task: string } | null | undefined): boolean {
-  return run?.status === 'running' && run.task !== 'generate-image' && run.task !== 'suggest-slug';
-}
+export { runLocksContent } from '../../contract/agent-run.js';

@@ -10,15 +10,13 @@ import type { AgentRunStatus, JobRow, ImageCandidateRow } from '../repository.js
 import {
   buildImagePrompt,
   buildPositionImagePrompt,
-  normalizeUserNote,
   POSITION_ASPECT_RATIO,
   positionAnchor,
   positionContext,
   USER_BRIEF_PREFIX,
-  USER_NOTE_MAX,
   userImageFilename,
 } from '../image-generation.js';
-import { userNoteLength } from '../../contract/user-note.js';
+import { checkUserNote } from '../../contract/user-note.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { createJobWorkspace } from '../../agents/workspace.js';
 import { sha256Of } from '../../media/upload.js';
@@ -256,12 +254,11 @@ export class ImagesModule {
     this.ctx.assertMutable(job);
     const revisionRow = this.ctx.requireRevision(job);
 
-    const note = normalizeUserNote(input.note);
     this.ctx.assertNoAppPassword(input.note);
     // 跟前端計數、zod 同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。
-    if (userNoteLength(note) > USER_NOTE_MAX) {
-      throw new InvalidInputError(`想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`);
-    }
+    const checked = checkUserNote(input.note);
+    if (!checked.ok) throw new InvalidInputError(checked.message);
+    const note = checked.note;
     if (input.contentHash !== revisionRow.content_hash) {
       throw new ContentChangedError('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。', {
         expected: input.contentHash,
