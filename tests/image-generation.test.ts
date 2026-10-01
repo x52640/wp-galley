@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   approveJob,
+  coreInternals,
   createCoreFixture,
   defaultWordPressHandler,
   TINY_PNG,
@@ -594,7 +595,7 @@ describe('封面卡片自動設精選', () => {
     const { f } = await setup();
     const uuid = newJob(f.core);
     await withBriefs(f.core, uuid);
-    vi.spyOn(f.core, 'setFeaturedMedia').mockImplementation(() => {
+    vi.spyOn(coreInternals(f.core).media, 'setFeaturedMedia').mockImplementation(() => {
       throw new Error('這一版渲染不過');
     });
 

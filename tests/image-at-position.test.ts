@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
-import { approveJob, createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
+import { approveJob, coreInternals, createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
 import { FakeAdapter, type FakeImageBehaviour } from './helpers/fake-adapter.js';
 import { AgentError, ContentChangedError, InvalidInputError } from '../src/core/errors.js';
 import { AgentUnavailableError } from '../src/agents/registry.js';
@@ -236,7 +236,7 @@ describe('上傳的檔名與替代文字', () => {
     });
     expect(brief.altText).toBe('');
     const candidate = await generation;
-    const spy = vi.spyOn(f.core, 'addMediaWithOutcome');
+    const spy = vi.spyOn(coreInternals(f.core).media, 'addMediaWithOutcome');
     const used = await f.core.useImageCandidate(uuid, candidate.id, { altText: '  雨後的路口  ' });
     const input = spy.mock.calls[0]![1];
     expect(input.filename).not.toContain('user-');
@@ -248,7 +248,7 @@ describe('上傳的檔名與替代文字', () => {
   it('用這張不帶替代文字：照需求上的（使用者那條是空的）', async () => {
     const { f, uuid } = await setup();
     const { generation } = await f.core.requestImageAtPosition(uuid, { afterBlockIndex: 1, contentHash: hashOf(f.core, uuid) });
-    const spy = vi.spyOn(f.core, 'addMediaWithOutcome');
+    const spy = vi.spyOn(coreInternals(f.core).media, 'addMediaWithOutcome');
     await f.core.useImageCandidate(uuid, (await generation).id);
     expect(spy.mock.calls[0]![1].altText ?? '').toBe('');
   });

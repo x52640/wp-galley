@@ -1,7 +1,7 @@
 /**
  * AI 建議英文網址（D-026，P5-T026）的純函式：送什麼、怎麼講。
  *
- * 流程本身（一次一趟、取消、記 agent_runs）在 service.ts 的 `suggestSlugs`；候選合不合格在
+ * 流程本身（一次一趟、取消、記 agent_runs）在 service/agent.ts 的 `suggestSlugs`；候選合不合格在
  * `contract/slug.ts`（示範資料也用）。這裡不碰資料庫。
  */
 

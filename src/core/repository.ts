@@ -7,9 +7,10 @@ import type { AgentRunStatus, ReviewItemState, ReviewItemType, RevisionOrigin } 
 /**
  * CoreService 的 SQLite 存取層。
  *
- * 只做「把 row 讀出來／寫回去」，不做任何判斷。核准會不會失效、狀態能不能轉、
- * 發布前要檢查什麼，全部在 service.ts——那些是安全規則，只能有一份實作。
- * 把規則寫進 repository 會讓 MCP 之後有機會繞過去。
+ * 只做「把 row 讀出來／寫回去」，不做任何判斷。規則全部在 `service/`（CoreService 各領域）——
+ * 那些是安全規則，只能有一份實作：核准與核准失效在 `service/approval.ts`、建新版本在
+ * `service/content.ts`、取消與恢復在 `service/jobs.ts`、發布前置檢查在 `service/publish.ts`，
+ * 狀態能不能轉看 `state-machine.ts` 的轉移表。把規則寫進 repository 會讓 MCP 之後有機會繞過去。
  *
  * node:sqlite 是同步 API，`.all()` 回傳 `Record<string, SQLOutputValue>[]`，
  * 所以每個查詢都要 `as unknown as` 轉型；欄位名稱與 001-init.ts 必須一致。
