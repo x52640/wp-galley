@@ -82,7 +82,7 @@ const CODEX_DISABLED_FEATURES = [
 ];
 
 describe('Codex：每一趟都關掉網路搜尋與瀏覽器類功能', () => {
-  it('校稿／建議網址（runStructured）帶 web_search="disabled" 與 --disable 名單', async () => {
+  it('校稿／建議網址（runStructured）帶 web_search="disabled" 與 features.*=false 名單', async () => {
     const { command, callFile, request } = fakeCli(`
       const out = argv[argv.indexOf('--output-last-message') + 1];
       writeFileSync(out, JSON.stringify({ ok: true }));
@@ -94,12 +94,14 @@ describe('Codex：每一趟都關掉網路搜尋與瀏覽器類功能', () => {
     const argv = readArgv(callFile);
     expect(hasPair(argv, '-c', 'web_search="disabled"')).toBe(true);
     for (const feature of CODEX_DISABLED_FEATURES) {
-      expect(hasPair(argv, '--disable', feature)).toBe(true);
+      expect(hasPair(argv, '-c', `features.${feature}=false`)).toBe(true);
     }
     // 原本的隔離仍在。
     expect(hasPair(argv, '--sandbox', 'read-only')).toBe(true);
     expect(argv).toContain('--ignore-user-config');
     expect(argv).toContain('--ephemeral');
+    // 不用 --disable：遇到不認得的 feature 名稱會整趟報錯（實測 0.159.3）。
+    expect(argv).not.toContain('--disable');
     // 沒有任何打開搜尋的參數。
     expect(argv).not.toContain('--search');
     expect(argv.some((arg) => /web_search="(cached|indexed|live)"/.test(arg))).toBe(false);
@@ -118,7 +120,7 @@ describe('Codex：每一趟都關掉網路搜尋與瀏覽器類功能', () => {
     const argv = readArgv(callFile);
     expect(hasPair(argv, '-c', 'web_search="disabled"')).toBe(true);
     for (const feature of CODEX_DISABLED_FEATURES) {
-      expect(hasPair(argv, '--disable', feature)).toBe(true);
+      expect(hasPair(argv, '-c', `features.${feature}=false`)).toBe(true);
     }
     expect(hasPair(argv, '-s', 'read-only')).toBe(true);
   });

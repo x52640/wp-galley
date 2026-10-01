@@ -118,8 +118,8 @@ adapter，介面不變。
 | CLI（本機版本） | 參數 | 為什麼 | 依據 |
 | --- | --- | --- | --- |
 | Codex（0.159.3） | `-c web_search="disabled"` | 官方預設 `cached`（OpenAI 伺服器上的搜尋），`--ignore-user-config` 不讀設定檔也不會關掉預設 | [Config reference](https://learn.chatgpt.com/docs/config-file/config-reference)：`web_search` 值 `disabled`／`cached`／`indexed`／`live`，預設 `cached`；[Web search](https://learn.chatgpt.com/docs/web-search)：`web_search = "disabled"` 關掉工具 |
-| Codex | `--disable browser_use`、`browser_use_external`、`browser_use_full_cdp_access`、`computer_use`、`in_app_browser` | 這些在 `codex features list` 都是 stable／**true**，會操作瀏覽器或電腦 | `codex exec --help`：`--disable <FEATURE>` 等於 `-c features.<name>=false` |
-| Codex | `--disable apps` | ChatGPT 連接器（帳號層級，不靠 config.toml），流量不受沙箱網路規則管 | Config reference：`features.apps` 預設開；「App and connector traffic is not controlled by the sandboxed-command network proxy」 |
+| Codex | `-c features.<name>=false`：`browser_use`、`browser_use_external`、`browser_use_full_cdp_access`、`computer_use`、`in_app_browser` | 這些在 `codex features list` 都是 stable／**true**，會操作瀏覽器或電腦 | `codex exec --help`：`-c` 覆寫設定值、`--disable <FEATURE>` 等於 `-c features.<name>=false`；實測見下方「為什麼不用 `--disable`」 |
+| Codex | `-c features.apps=false` | ChatGPT 連接器（帳號層級，不靠 config.toml），流量不受沙箱網路規則管 | Config reference：`features.apps` 預設開；「App and connector traffic is not controlled by the sandboxed-command network proxy」 |
 | Codex | 不關 `image_generation` | 生圖那趟要用；它是 OpenAI 伺服器端工具，不從本機連外 | D-017 |
 | Claude Code（2.1.286） | `--strict-mcp-config`（且不給 `--mcp-config`） | 不帶的話使用者自己設定的 MCP server 會被載入 | `claude --help`：「Only use MCP servers from --mcp-config, ignoring all other MCP configurations」 |
 | Claude Code | `--no-chrome` | 使用者設定可能預設開著 Claude in Chrome | `claude --help`：「Disable Claude in Chrome integration」 |
@@ -129,15 +129,30 @@ adapter，介面不變。
 程式：`CODEX_NO_NETWORK_ARGS`（`adapters/codex.ts`）、`CLAUDE_NO_EXTERNAL_TOOLS_ARGS`（`adapters/claude.ts`）；
 測試 `tests/agent-cli-args.test.ts` 用假執行檔以字面值斷言。
 
+**為什麼不用 `--disable`（2026-10-01 實測，codex-cli 0.159.3，只跑 `features list`，不送 prompt）：**
+
+| 指令 | 結果 |
+| --- | --- |
+| `codex --disable not_a_feature features list` | `Error: Unknown feature flag: not_a_feature`，exit 非 0 |
+| `codex -c features.not_a_feature=false features list` | 正常列出，exit 0（不認得的名稱被忽略） |
+| `codex -c features.browser_use=false … -c features.apps=false features list` | 六個名稱全部變 `false`，`image_generation` 仍是 `true` |
+
+`--disable` 會讓 Codex 改版拿掉任一名稱時**每一趟都失敗**；`-c features.<name>=false` 容錯而且確實生效，所以改用它。
+代價：改版改名時這個開關會**默默失效**（不報錯），CLI 升版後要重跑 `codex features list` 對一次名單。
+
 **未證實（等使用者真跑確認）：**
 
-- Codex 的 `-c`／`--disable` 在 `--ignore-user-config` 下仍生效。`--help` 的說法是 `--ignore-user-config` 只跳過
+- Codex 的 `-c` 在 `--ignore-user-config` 下仍生效（上面的實測是在 `features list` 上，沒帶 `--ignore-user-config`、沒跑 `exec`）。`--help` 的說法是 `--ignore-user-config` 只跳過
   `$CODEX_HOME/config.toml`、`-c` 是另一層命令列覆寫；官方進階設定文件把命令列覆寫列為最高優先，但沒有明講兩者並用。
-- `--disable` 一個這版不認得的 feature 名稱會不會報錯（CLI 改版改名時可能踩到）；名單只用本機 0.159.3 列得出來的名字。
-- `--disable apps` 不影響生圖（`image_generation` 是另一個 feature，推論不受影響）。
+- `features.apps=false` 不影響生圖（`image_generation` 是另一個 feature，推論不受影響）。
 - Claude `--strict-mcp-config` 是否也擋掉 claude.ai 帳號層級的連接器（help 只說「all other MCP configurations」）。
 - Claude 的工具限制是**黑名單**：新版若加了沒列到的工具（例如會連外的新工具）不會被擋。`--tools ""` 能整個關掉內建工具，
-  但沒驗證它會不會連帶讓 `--json-schema` 的結構化輸出失效，所以沒換。
+  但沒驗證它會不會連帶讓 `--json-schema` 的結構化輸出失效，所以沒換。黑名單外的工具（例如 `Artifact`、`ArtifactData`、
+  `Skill`、`Monitor`、`PowerShell`）在 `--print` 模式會不會載入**未證實**。手動驗證時加測一次 `--tools ""` 搭配 `--json-schema`，
+  能用就改成整個關掉。
+- Codex 其他預設開著的功能：`plugins`、`remote_plugin`、`skill_mcp_dependency_install`、`tool_suggest`、`multi_agent`
+  會不會被 `--ignore-user-config` 擋掉**未證實**（外掛與它帶的 MCP 可能裝在 `CODEX_HOME` 而不是 config.toml）。暫不關：
+  生圖實測時有讀 imagegen skill，關掉 plugins 類可能連帶弄壞生圖，要真跑才知道。
 
 **已知限制（agy）：** `agy` 沒有停用工具或忽略使用者 MCP 設定（`agy mcp`）的參數。目前靠 `--sandbox`（終端機限制）、
 headless 模式下需要權限的工具會被自動拒絕、以及 prompt 開頭的 `NO_TOOLS_NOTICE`。不需要權限的工具（例如搜尋）

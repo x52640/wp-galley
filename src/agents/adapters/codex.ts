@@ -41,34 +41,33 @@ const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp)$/i;
 const THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 
 /**
- * 每一趟都帶的「不連外」參數（P5-T036，D-034；依據見 docs/specs/agent-cli.md「Codex 不連外參數」）。
+ * 每一趟都帶的「不連外」參數（P5-T036，D-034；依據見 docs/specs/agent-cli.md「各趟的不連外參數」）。
  *
  * - `web_search` 官方預設是 `cached`（在 OpenAI 伺服器上執行的搜尋），`--ignore-user-config`
  *   只是不讀 config.toml、不會關掉預設，所以要明確關掉。
- * - `--disable <feature>` 依 `codex exec --help` 等於 `-c features.<name>=false`。
+ * - 功能開關用 `-c features.<name>=false`，**不用 `--disable <name>`**：實測（0.159.3）`--disable`
+ *   遇到不認得的名稱直接報 `Unknown feature flag` 結束，Codex 改版拿掉任一名稱就會讓每一趟都失敗；
+ *   `-c features.<name>=false` 對不認得的名稱不報錯，對認得的名稱確實生效（`codex features list` 變 false）。
  *   名單取自 `codex features list`（0.159.3）裡預設開著、會操作瀏覽器／電腦或連到外部服務的功能。
  *   `apps` 是 ChatGPT 連接器（帳號層級，不靠 config.toml），流量不受沙箱網路規則管。
  * - 沒關 `image_generation`：生圖那一趟要用，而且它是 OpenAI 伺服器端工具，不從本機連外。
  *
- * ⚠️ 未證實：`-c`／`--disable` 在 `--ignore-user-config` 下仍生效。`--help` 的說法是
- * `--ignore-user-config` 只跳過 `$CODEX_HOME/config.toml`，`-c` 是另一層命令列覆寫，
- * 但官方文件沒有明講兩者並用的結果。等使用者真跑確認。
+ * ⚠️ 未證實：`-c` 在 `--ignore-user-config` 下仍生效（`--help` 說 `--ignore-user-config` 只跳過
+ * `$CODEX_HOME/config.toml`，`-c` 是另一層命令列覆寫，但沒明講兩者並用）。等使用者真跑確認。
  */
+const CODEX_DISABLED_FEATURES = [
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'computer_use',
+  'in_app_browser',
+  'apps',
+] as const;
+
 export const CODEX_NO_NETWORK_ARGS: readonly string[] = [
   '-c',
   'web_search="disabled"',
-  '--disable',
-  'browser_use',
-  '--disable',
-  'browser_use_external',
-  '--disable',
-  'browser_use_full_cdp_access',
-  '--disable',
-  'computer_use',
-  '--disable',
-  'in_app_browser',
-  '--disable',
-  'apps',
+  ...CODEX_DISABLED_FEATURES.flatMap((name) => ['-c', `features.${name}=false`]),
 ];
 
 export interface CodexAdapterOptions {
