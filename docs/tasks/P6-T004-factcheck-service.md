@@ -129,7 +129,8 @@ Task 要求的兩個新增欄位會碰到 write_paths 以外的既有檔，各�
 模組表 `src/fetch` 那列的「P6-T004 接進流程」可改成已接上（`server/app.ts` 的 `realFactCheckFetcher`）。
 
 ### 給 known-issues
-- 查證跑的時候「換一張圖」（`replaceMedia`）會先把新圖傳上 WordPress，建版本時才被鎖擋下，媒體庫多一張孤兒圖（`media.ts` 不在本 Task 範圍；畫面會鎖住按鈕，只有直接打 API 才碰得到）。
+- ~~查證跑的時候「換一張圖」會先把新圖傳上 WordPress，建版本時才被鎖擋下~~ → 已修（見「PR 審查修正：查證與換圖」）。
+  剩下：換圖上傳失敗（或上傳回來時工作已不能改）時，核准在上傳前就已撤銷，不會還原（既有行為，跟查證無關）。
 - 網頁來源的標題用 Agent 給的（或連結文字、網域）：取回器沒有回頁面 `<title>`。
 - 停止時抽文字的 worker 不會被中止（上限 10 秒，結果丟掉）。
 - 查證跑的期間取消稿件（`cancelJob`）不會停掉查證，跑完照樣存結果（無害，但會用掉額度）。
@@ -162,3 +163,18 @@ Task 要求的兩個新增欄位會碰到 write_paths 以外的既有檔，各�
 - **（MEDIUM）儲存是一個交易**：`Repository.transaction`（SAVEPOINT，可巢狀）包住 supersede、寫入全部結果、結成 succeeded、完成事件；
   中途失敗全部回滾，外層把查證紀錄結成 failed。測試：第二筆寫入失敗 → 舊結果仍 open、沒有新結果、紀錄 failed、只有第一次的完成事件。
 - 2026-10-01 使用者同意擴大 write_paths 加 `src/core/service/media.ts`：查證中換圖會先改媒體紀錄才被鎖擋下（Codex 審查 medium）。
+
+### PR 審查修正：查證與換圖（Codex，write_paths 加 `src/core/service/media.ts`）
+- **換圖**：`replaceMedia` 在撤銷核准、上傳之前先做跟 `createRevision` 同一個內容鎖判斷（`factcheck.assertNotRunning`），鎖住就 502 `AGENT_ERROR`
+  「查證正在跑，內容先鎖住…」，什麼都不動。上傳回來後在改本機紀錄、建版本前再查一次（防禦）：鎖住就不改媒體紀錄、不建版本、
+  記 `media_replaced` failed、錯誤講清楚新圖留在 WordPress 媒體庫（不自動刪）。
+- **反方向**：`runFactCheck` 在 `mediaUploads` 有紀錄（上傳或換圖進行中）時拒絕開始（502「圖片正在上傳或換圖，等它完成再查證」）。
+  兩邊從檢查到登記（`mediaUploads`／`activeRuns`）之間都沒有 await，不會交錯，所以上面的防禦分支正常流程到不了。
+- **media.ts 其他會建版本的路徑逐一看過**：`placeMedia`、`setFeaturedMedia`、`removeMedia`（要動正文或封面時）第一個寫入就是 `createRevision`，
+  鎖在任何副作用之前；`removeMedia` 不動正文時只移掉本機圖片清單，不算內容改動。`addMedia` 上傳本身不改內容；
+  自動設精選／自動放圖靠 `contentRunActive`（查證的 purpose 也算鎖內容），回「AI 還在跑」不建版本。
+- **沒照指示做的一點**：防禦分支裡核准**仍會被撤銷**——撤銷核准仍在上傳之前（既有順序）。要改成上傳回來才撤銷，
+  `tests/publish-path-guards.test.ts`「換圖上傳期間重新核准再發布」要改寫（它在上傳途中重新核准，順序改了之後核准還有效、重新核准會丟錯），
+  那個檔不在 write_paths。正常流程到不了防禦分支，所以實際影響只剩「上傳失敗時核准已撤銷」這個既有行為。
+- 測試（`tests/factcheck-service.test.ts`「查證與換圖互斥」）：查證中換圖 → 拒絕、零上傳、媒體紀錄／正文／版本數／核准都不變；
+  換圖上傳途中開始查證 → 被拒、adapter 零呼叫、沒有查證紀錄，換圖照常完成；防禦分支 → 媒體紀錄、正文、版本不變，事件 failed、訊息提到媒體庫。

@@ -73,6 +73,8 @@ export const SECRET_IN_URLS_MESSAGE = 'AI 給的網址或搜尋字串裡有你�
 export const SECRET_IN_CANDIDATES_MESSAGE = '要抓的網址裡有你的 WordPress 應用程式密碼（可能在文章原有的連結裡），這次查證停止';
 /** 要存的查證結果含 WordPress 密碼：整次停止，什麼都不存。訊息本身不含密碼。 */
 export const SECRET_IN_RESULT_MESSAGE = '查證結果裡有你的 WordPress 應用程式密碼，這次查證停止，沒有留下任何結果';
+/** 上傳或換圖進行中：不開始查證。 */
+export const FACTCHECK_MEDIA_UPLOADING_MESSAGE = '圖片正在上傳或換圖，等它完成再查證';
 /** 按了停止：等著的請求拿到這句，什麼都不存。 */
 export const FACTCHECK_CANCELLED_MESSAGE = '查證已停止，沒有留下任何結果';
 const CANCELLED_REASON = '使用者取消';
@@ -123,6 +125,8 @@ export class FactCheckModule {
     if (this.ctx.activeRuns.has(job.uuid)) {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     }
+    // 上傳或換圖進行中（等 WordPress 回應）不開始：換圖回來要改正文，查證會把內容鎖住。
+    if (this.ctx.mediaUploads.has(job.uuid)) throw new AgentError(FACTCHECK_MEDIA_UPLOADING_MESSAGE);
 
     const workspace = job.workspace_path ?? createJobWorkspace(this.ctx.draftsDir, job.uuid);
     const runRow = this.ctx.repo.insertFactCheckRun({

@@ -1,7 +1,16 @@
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { approveJob, coreInternals, createCoreFixture, TINY_PNG, type CoreFixture } from './helpers/core-fixture.js';
+import {
+  approveJob,
+  coreInternals,
+  createCoreFixture,
+  defaultWordPressHandler,
+  TINY_PNG,
+  type CoreFixture,
+  type CoreFixtureOptions,
+} from './helpers/core-fixture.js';
+import type { RecordedRequest } from './helpers/mock-wordpress.js';
 import { FakeAdapter } from './helpers/fake-adapter.js';
 import { createFakeFetcher, type FakeFetcherOptions } from './helpers/fake-fetcher.js';
 import { AgentError, InvalidInputError } from '../src/core/errors.js';
@@ -9,6 +18,7 @@ import { APP_PASSWORD_IN_CONTENT_MESSAGE, CoreService } from '../src/core/servic
 import {
   FACTCHECK_CANCELLED_MESSAGE,
   FACTCHECK_LOCKED_MESSAGE,
+  FACTCHECK_MEDIA_UPLOADING_MESSAGE,
   SECRET_IN_CANDIDATES_MESSAGE,
   SECRET_IN_RESULT_MESSAGE,
   SECRET_IN_URLS_MESSAGE,
@@ -98,6 +108,7 @@ async function setup(
     review?: (core: CoreService, uuid: string) => unknown;
     scrub?: ReturnType<typeof createMutableScrubber>;
     body?: string;
+    handler?: CoreFixtureOptions['handler'];
   } = {},
 ): Promise<Setup> {
   const fetcher = createFakeFetcher(options.fetch ?? FETCH);
@@ -117,6 +128,7 @@ async function setup(
     adapters: [adapter],
     factCheckFetcher: fetcher.factory,
     ...(options.scrub ? { scrub: options.scrub.scrub } : {}),
+    ...(options.handler ? { handler: options.handler } : {}),
   });
   fixture = f;
   const uuid = f.core.createJob({ targetKey: 'read-think', sourceText: '開場白。', title: '刺激1995 觀後' }).uuid;
@@ -666,6 +678,125 @@ describe('互斥與鎖', () => {
     expect(core.listRevisions(uuid)).toHaveLength(revisionsBefore);
     // 跑完就解鎖。
     expect(() => core.placeMedia(uuid, ctx.mediaId!, 0)).not.toThrow();
+  });
+});
+
+describe('查證與換圖互斥（不留半套）', () => {
+  const isUpload = (request: RecordedRequest): boolean =>
+    request.method === 'POST' && request.path.split('?')[0] === '/wp-json/wp/v2/media';
+  const uploads = (f: CoreFixture): number => f.requests.filter(isUpload).length;
+  const PNG = { bytes: TINY_PNG, mimeType: 'image/png', filename: 'b.png' };
+
+  /** 第 n 次上傳時跑 hook，並讓那次上傳晚一點回來。 */
+  function uploadHook(uploadNumber: number, hook: () => void | Promise<void>) {
+    const base = defaultWordPressHandler();
+    let count = 0;
+    return (request: RecordedRequest) => {
+      const response = base(request);
+      if (isUpload(request)) {
+        count += 1;
+        if (count === uploadNumber) {
+          void hook();
+          return { ...response, delayMs: 100 };
+        }
+      }
+      return response;
+    };
+  }
+
+  /** 放一張圖進正文、核准；回傳換圖前的狀態快照。 */
+  async function placedAndApproved(core: CoreService, uuid: string) {
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a.png' });
+    core.placeMedia(uuid, asset.id, 0);
+    approveJob(core, uuid);
+    return asset;
+  }
+
+  function snapshot(core: CoreService, uuid: string, assetId: number) {
+    const detail = core.getJob(uuid);
+    return {
+      wordpressMediaId: detail.media.find((m) => m.id === assetId)?.wordpressMediaId,
+      hash: detail.currentRevision!.contentHash,
+      revisions: core.listRevisions(uuid).length,
+      approved: detail.approval?.valid,
+    };
+  }
+
+  it('查證進行中換圖 → 上傳前就拒絕：沒上傳、媒體紀錄、正文、核准都不變', async () => {
+    const ctx: { core?: CoreService; uuid?: string; assetId?: number; error?: unknown; uploadsBefore?: number } = {};
+    const { core, uuid, f } = await setup({
+      fetch: {
+        ...FETCH,
+        onFetch: async (url) => {
+          if (url !== 'https://example.org/review') return;
+          ctx.uploadsBefore = uploads(fixture!);
+          ctx.error = await caught(ctx.core!.replaceMedia(ctx.uuid!, ctx.assetId!, PNG));
+        },
+      },
+    });
+    ctx.core = core;
+    ctx.uuid = uuid;
+    const asset = await placedAndApproved(core, uuid);
+    ctx.assetId = asset.id;
+    const before = snapshot(core, uuid, asset.id);
+    expect(before.approved).toBe(true);
+
+    await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+
+    expect(ctx.error).toBeInstanceOf(AgentError);
+    expect((ctx.error as Error).message).toBe(FACTCHECK_LOCKED_MESSAGE);
+    expect(uploads(f)).toBe(ctx.uploadsBefore);
+    expect(snapshot(core, uuid, asset.id)).toEqual(before);
+  });
+
+  it('換圖上傳途中開始查證 → 查證被拒（不派工），換圖照常完成', async () => {
+    const ctx: { core?: CoreService; uuid?: string; error?: unknown } = {};
+    const { core, uuid, adapter } = await setup({
+      handler: uploadHook(2, async () => {
+        ctx.error = await caught(ctx.core!.runFactCheck(ctx.uuid!, { provider: 'claude', scope: 'article' }));
+      }),
+    });
+    ctx.core = core;
+    ctx.uuid = uuid;
+    const asset = await placedAndApproved(core, uuid);
+
+    const replaced = await core.replaceMedia(uuid, asset.id, PNG);
+
+    expect(ctx.error).toBeInstanceOf(AgentError);
+    expect((ctx.error as Error).message).toBe(FACTCHECK_MEDIA_UPLOADING_MESSAGE);
+    expect(adapter.calls).toHaveLength(0);
+    expect(count(fixture!, 'factcheck_runs')).toBe(0);
+    expect(replaced.wordpressMediaId).not.toBe(asset.wordpressMediaId);
+    expect(core.getJob(uuid).approval?.valid).toBe(false);
+  });
+
+  it('防禦：上傳回來時查證已經鎖住內容 → 不改媒體紀錄、不建版本，講清楚新圖留在媒體庫', async () => {
+    const ctx: { core?: CoreService; uuid?: string } = {};
+    const { core, uuid } = await setup({
+      handler: uploadHook(2, () => {
+        // 模擬「上傳途中查證已經佔住名額」（正常流程被 mediaUploads 擋著，到不了）。
+        coreInternals(ctx.core!).activeRuns.set(ctx.uuid!, {
+          runId: 'simulated',
+          provider: 'claude',
+          rowId: -1,
+          factCheck: { runRowId: -1, abort: new AbortController(), cliRunning: false },
+        });
+      }),
+    });
+    ctx.core = core;
+    ctx.uuid = uuid;
+    const asset = await placedAndApproved(core, uuid);
+    const before = snapshot(core, uuid, asset.id);
+
+    const error = await caught(core.replaceMedia(uuid, asset.id, PNG));
+    coreInternals(core).activeRuns.delete(uuid);
+
+    expect(error).toBeInstanceOf(AgentError);
+    expect((error as Error).message).toMatch(/媒體庫/);
+    // 核准在上傳前就撤銷了（既有順序）；媒體紀錄、正文、版本都不變。
+    expect(snapshot(core, uuid, asset.id)).toEqual({ ...before, approved: false });
+    const replacedEvents = core.listEvents(uuid).filter((event) => event.eventType === 'media_replaced');
+    expect(replacedEvents.map((event) => event.status)).toEqual(['failed']);
   });
 });
 

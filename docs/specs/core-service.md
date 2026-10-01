@@ -120,7 +120,8 @@ interface CoreService {
   /**
    * 發起查證，等它跑完才回。派工前擋（InvalidInputError，一個請求都不發）：稿件不能改、正文空的、範圍輸入不對
    * （選字 4～300 字且在目前的標題或正文裡找得到；觀察卡片要屬於這篇、種類是三種之一、excerpt 還在文章裡）、
-   * 選字或第一趟組好的 prompt 含 WordPress 密碼。另一個 Agent 動作在跑 AgentError；沒有取回器 AgentUnavailableError。
+   * 選字或第一趟組好的 prompt 含 WordPress 密碼。另一個 Agent 動作在跑、或圖片正在上傳／換圖（`mediaUploads`）AgentError；
+   * 沒有取回器 AgentUnavailableError。查證跑的期間 `replaceMedia` 在上傳前就被內容鎖拒絕。
    * 第一趟產出的候選網址或搜尋字串任一含密碼：整次失敗（AgentError）、一個網址都不抓、記 `factcheck_secret_in_urls` 事件（只記筆數）。
    * 抓之前所有候選（含文章原有連結）再整批檢查一次，命中同樣處理。存之前每筆要存的文字欄位（含來源清單）再檢查一次，
    * 命中整次失敗、不存任何結果、記 `factcheck_secret_in_result`。存結果（supersede、寫入、結成 succeeded、事件）包在同一個交易（`Repository.transaction`）。
