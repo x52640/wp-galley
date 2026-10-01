@@ -4,7 +4,7 @@
 
 | 檔案 | 擁有 | 狀態 |
 | --- | --- | --- |
-| [security.md](security.md) | 信任邊界、三條分界線、硬性禁令、秘密、守門、刻意接受的限制 | 現行 |
+| [security.md](security.md) | 信任邊界、三條分界線、硬性禁令、秘密、守門、取回器的安全硬性要求（AI 查證）、刻意接受的限制 | 現行（取回器一節待 P6-T002 實作） |
 | [architecture.md](architecture.md) | 技術選型、模組邊界、依賴方向、程式慣例、本機資料、功能地圖（功能 → 畫面 → 路由 → 後端 → 測試） | 現行 |
 | [state-machine.md](state-machine.md) | 狀態轉移、核准建立與失效、發布前置檢查 | 現行 |
 | [core-service.md](core-service.md) | CoreService 對外方法 | 現行 |
@@ -16,5 +16,5 @@
 | [wordpress-site.md](wordpress-site.md) | 目標站台實測事實 | 現行 |
 | [design-system.md](design-system.md) | 顏色、字體、版面、品質底線、文案 | 現行（B 版） |
 | [testing.md](testing.md) | 測試守則 | 現行 |
-| [factcheck.md](factcheck.md) | 階段 6 AI 查證 | 草案 |
+| [factcheck.md](factcheck.md) | AI 查證：資料流、兩趟 Agent 的輸入輸出 schema、候選來源挑選與抽文字、引文核對與降級、存下來的形狀、觸發與畫面、執行規則 | 定稿（P6-T001），實作待 P6-T002～P6-T005 |
 | [mcp.md](mcp.md) | MCP 工具與 MCP 專屬安全規則 | 草案 |
