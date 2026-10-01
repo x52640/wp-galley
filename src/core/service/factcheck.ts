@@ -68,7 +68,7 @@ import { FACTCHECK_PURPOSE, MAX_AGENT_OUTPUT_BYTES, type ActiveRun, type CoreCon
 const DEFAULT_FACTCHECK_TIMEOUT_MS = 180_000;
 
 /** 第一趟給的網址含 WordPress 密碼（security.md「取回器」）：整次停止。訊息本身不含密碼。 */
-export const SECRET_IN_URLS_MESSAGE = 'AI 給的網址裡有你的 WordPress 應用程式密碼，這次查證停止';
+export const SECRET_IN_URLS_MESSAGE = 'AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止';
 /** 按了停止：等著的請求拿到這句，什麼都不存。 */
 export const FACTCHECK_CANCELLED_MESSAGE = '查證已停止，沒有留下任何結果';
 const CANCELLED_REASON = '使用者取消';
@@ -228,11 +228,15 @@ export class FactCheckModule {
     this.assertStillRunning(run.runId);
 
     const allClaims = Array.isArray(findOutput.claims) ? findOutput.claims : [];
-    // 第一趟產出的候選網址，在任何抓取之前整批檢查 WordPress 密碼（含被丟掉的主張的網址）。
+    // 第一趟產出的候選網址與搜尋字串（搜尋字串會變成維基百科的網址），在任何抓取之前整批檢查 WordPress 密碼
+    // （含被丟掉的主張的）。
     const agentUrls = allClaims.flatMap((claim) =>
       (Array.isArray(claim.candidateUrls) ? claim.candidateUrls : []).map((candidate) => String(candidate.url ?? '')),
     );
-    if (anyUrlContainsSecret(agentUrls, (text) => this.ctx.hasAppPassword(text))) {
+    const agentQueries = allClaims.flatMap((claim) =>
+      (Array.isArray(claim.queries) ? claim.queries : []).map((query) => String(query?.q ?? '')),
+    );
+    if (anyUrlContainsSecret([...agentUrls, ...agentQueries], (text) => this.ctx.hasAppPassword(text))) {
       this.ctx.repo.finishFactCheckRun(run.runId, { status: 'failed', errorMessage: SECRET_IN_URLS_MESSAGE });
       this.ctx.repo.insertEvent({
         jobId: job.id,
@@ -241,8 +245,13 @@ export class FactCheckModule {
         actor: 'system',
         eventType: 'factcheck_secret_in_urls',
         status: 'rejected',
-        // 不記網址本身（裡面有密碼）。
-        detail: { factCheckRunId: run.runId, provider: input.provider, urlCount: agentUrls.length },
+        // 不記網址與搜尋字串本身（裡面有密碼）。
+        detail: {
+          factCheckRunId: run.runId,
+          provider: input.provider,
+          urlCount: agentUrls.length,
+          queryCount: agentQueries.length,
+        },
       });
       throw new AgentError(SECRET_IN_URLS_MESSAGE);
     }
@@ -567,7 +576,9 @@ export class FactCheckModule {
 
   /** 主張所在段落裡本來就有的連結（使用者自己引的出處）。excerpt 在標題或跨段時沒有。 */
   private linksNear(article: ArticleText, excerpt: string): { url: string; text: string }[] {
-    return findBlocksContaining(article.blocks, excerpt).flatMap((index) => extractLinks(article.blocks[index]!.html));
+    return findBlocksContaining(blocksForMatch(article.blocks), articleTextForAgent(excerpt)).flatMap((index) =>
+      extractLinks(article.blocks[index]!.html),
+    );
   }
 
   // --- 停止 ------------------------------------------------------------------------
@@ -680,7 +691,7 @@ export class FactCheckModule {
     if (open.length === 0) return 0;
     const ctx = this.readContextOf(revision);
     return countOpenContradictions(
-      open.map((row) => ({ verdict: row.verdict, status: row.status, excerptGone: isExcerptGone(row.excerpt, ctx.texts) })),
+      open.map((row) => ({ verdict: row.verdict, status: row.status, excerptGone: isExcerptGone(articleTextForAgent(row.excerpt), ctx.texts) })),
     );
   }
 
@@ -734,7 +745,11 @@ export class FactCheckModule {
     };
   }
 
-  /** 讀取時要的東西：目前這一版的頂層區塊與「找得到嗎」要比的文字（標題、正文、各段）。 */
+  /**
+   * 讀取時要的東西：目前這一版的頂層區塊與「找得到嗎」要比的文字（標題、正文、各段）。
+   * **都是處理後的**（`articleTextForAgent`）：excerpt 是 AI 照處理後的文字抄的，拿原文比會因為 VS16、零寬字之類
+   * 被刪掉的字而對不上（factcheck.md「核對與定位都拿處理後那一份比」）。區塊的 `text` 換掉、順序不變，index 照用。
+   */
   private readContext(job: JobRow): { blocks: readonly TopLevelBlock[]; texts: string[] } {
     const row = this.ctx.repo.latestRevision(job.id);
     return this.readContextOf(row ? this.ctx.toRevision(row) : null);
@@ -743,7 +758,10 @@ export class FactCheckModule {
   private readContextOf(revision: Revision | null): { blocks: readonly TopLevelBlock[]; texts: string[] } {
     if (!revision) return { blocks: [], texts: [] };
     const article = this.articleOf(revision.templateData, revision.publishHtml);
-    return { blocks: article.blocks, texts: [article.title, article.bodyText, ...article.blocks.map((block) => block.text)] };
+    return {
+      blocks: blocksForMatch(article.blocks),
+      texts: [article.title, article.bodyText, ...article.blocks.map((block) => block.text)].map(articleTextForAgent),
+    };
   }
 
   private findingView(
@@ -769,9 +787,9 @@ export class FactCheckModule {
       correction: row.correction,
       sources,
       // review-proposals.md「blockIndex 每次讀取時重算」：一律以目前內容去找，找不到就是 null。
-      blockIndex: ctx.blocks.length === 0 ? null : findBlockContaining(ctx.blocks, row.excerpt),
+      blockIndex: ctx.blocks.length === 0 ? null : findBlockContaining(ctx.blocks, articleTextForAgent(row.excerpt)),
       status: row.status,
-      excerptGone: row.status === 'open' && isExcerptGone(row.excerpt, ctx.texts),
+      excerptGone: row.status === 'open' && isExcerptGone(articleTextForAgent(row.excerpt), ctx.texts),
       agentId: (run?.provider ?? 'claude') as AgentId,
       revisionId: run?.revision_id ?? null,
       createdAt: row.created_at,
@@ -780,3 +798,10 @@ export class FactCheckModule {
   }
 }
 
+/**
+ * 定位用的區塊：`text` 換成處理後的（`articleTextForAgent`），其他不變、順序不變。
+ * AI 的 excerpt 是照處理後的文字抄的，定位與「找得到嗎」都拿這一份比。
+ */
+function blocksForMatch(blocks: readonly TopLevelBlock[]): TopLevelBlock[] {
+  return blocks.map((block) => ({ ...block, text: articleTextForAgent(block.text) }));
+}

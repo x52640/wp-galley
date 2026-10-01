@@ -1,7 +1,7 @@
 ---
 id: P6-T004
 phase: 6
-status: in_progress
+status: done
 depends_on: [P6-T002, P6-T003]
 specs: [factcheck.md, security.md, architecture.md, core-service.md, http-api.md, review-proposals.md]
 write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
@@ -72,10 +72,10 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 無（P6-T005 一起做）。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新（http-api.md、core-service.md；factcheck.md 若實作時發現跟規格不同）
-- [ ] 留下的殘餘寫進完成結果（由主 session 併入 `docs/known-issues.md`）
-- [ ] CURRENT_TASK 已更新（由主 session；migration head 改 009）
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新（http-api.md、core-service.md；factcheck.md 若實作時發現跟規格不同）
+- [x] 留下的殘餘寫進完成結果（由主 session 併入 `docs/known-issues.md`）
+- [x] CURRENT_TASK 已更新（由主 session；migration head 改 009）
 
 ## 中斷／接手紀錄
 - 最後完成：流程、儲存、API、測試、spec 更新（2026-10-01，subagent）；migration 009 已在副本驗過並註冊
@@ -140,3 +140,16 @@ Task 要求的兩個新增欄位會碰到 write_paths 以外的既有檔，各�
 - 同一網址出現在好幾條主張只給前面那條（spec 只說「只抓一次」）。
 - 維基百科搜尋沒找到也列成 fetch-failed 來源，網址記成搜尋頁。
 - 鎖內容的錯誤用 502 `AGENT_ERROR`（跟「另一個 Agent 動作在跑」同一類），不是 409。
+
+### 獨立審查修正
+- **（medium）定位與存在性改用處理後的文字比**：excerpt 是 AI 照 `articleTextForAgent` 處理後的文字抄的，原文含 ❤️（VS16）或零寬字時拿原文比會對不上。
+  `src/core/service/factcheck.ts` 的 `linksNear`（該段連結候選）、`findingView` 的 `blockIndex`／`excerptGone`、`openContradictionCount`，
+  一律把區塊、標題、正文與 excerpt 先過 `articleTextForAgent` 再比（`blocksForMatch`：只換 `text`、順序不變，index 照用）。
+  `isExcerptGone`（contract）規則不變，註解寫明兩邊都要先過同一套前處理。
+  測試：含 VS16 與零寬字的段落 → `excerptGone=false`、`blockIndex` 正確、該段連結列為 article-link 候選、說法不同算進 `openFactCheckContradictions`。
+- **（low）抓取前的整批密碼檢查加上搜尋字串**：每條主張（含會被丟掉的）的 `queries[].q` 跟候選網址一起過 `anyUrlContainsSecret`；命中整次失敗、零抓取、
+  記 `factcheck_secret_in_urls`（只記 `urlCount`／`queryCount`）。訊息改成「AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止」
+  （factcheck.md、http-api.md、core-service.md 同步）。測試：被丟掉的主張的搜尋字串含密碼 → 失敗、取回器零呼叫、事件不含密碼。
+- **未做（待主 session 裁定）**：把前處理搬進 `src/contract/`，讓前端示範資料（P6-T005）與 prompt 共用同一份。前處理在
+  `src/core/factcheck-prompts.ts`（`textForAgent`，還依賴 `src/core/image-generation.ts` 的 `neutralize`），兩個檔都不在 write_paths。
+  目前後端已正確；P6-T005 的示範資料若要自己算 `excerptGone`／`blockIndex`，需要先把這套前處理搬進 contract。

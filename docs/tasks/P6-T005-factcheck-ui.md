@@ -71,3 +71,4 @@ D-034、D-008（不離開發布台）、D-010（一鍵、慢可以不確定不�
 - Blocker：P6-T004 未完成（完成後 status 改回 ready）
 
 ## 完成結果
+- 備忘（P6-T004 審查，2026-10-01）：`excerptGone`／`blockIndex` 由後端以 `articleTextForAgent` 處理後的文字計算並經 API 回傳；示範資料若要自己算，須先把該前處理搬進 `src/contract`（目前在 `src/core/factcheck-prompts.ts`，依賴 `image-generation.ts` 的 `neutralize`），另需放寬 write_paths。

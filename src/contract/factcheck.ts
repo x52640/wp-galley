@@ -39,6 +39,8 @@ export function checkFactCheckSelection(text: string): { ok: true } | { ok: fals
 /**
  * 原句已經改了：excerpt 在目前的任何一段文字（標題、正文、各段）裡都找不到（忽略空白，`text-match`）。
  * 空的 excerpt 也算找不到。
+ * **兩邊都要先過跟 prompt 同一套前處理**（後端：`articleTextForAgent`）：AI 照處理後的文字抄 excerpt，
+ * 原文有 VS16、零寬字之類被刪掉的字時，直接拿原文比會誤判成找不到。
  */
 export function isExcerptGone(excerpt: string, texts: readonly string[]): boolean {
   if (excerpt.replace(/\s+/gu, '').length === 0) return true;

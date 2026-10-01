@@ -95,6 +95,7 @@ async function setup(
     onRun?: (callIndex: number, core: CoreService, uuid: string) => void | Promise<void>;
     review?: (core: CoreService, uuid: string) => unknown;
     scrub?: ReturnType<typeof createMutableScrubber>;
+    body?: string;
   } = {},
 ): Promise<Setup> {
   const fetcher = createFakeFetcher(options.fetch ?? FETCH);
@@ -117,7 +118,7 @@ async function setup(
   });
   fixture = f;
   const uuid = f.core.createJob({ targetKey: 'read-think', sourceText: '開場白。', title: '刺激1995 觀後' }).uuid;
-  f.core.createRevision(uuid, { editedBody: BODY });
+  f.core.createRevision(uuid, { editedBody: options.body ?? BODY });
   ref = { core: f.core, uuid };
   return { f, core: f.core, uuid, adapter, fetcher };
 }
@@ -272,6 +273,33 @@ describe('整條流程', () => {
   });
 });
 
+describe('原文含 VS16、零寬字：定位與存在性都拿處理後那一份比', () => {
+  // 原文：❤️（U+2764＋VS16 U+FE0F）與零寬空白（U+200B）。prompt 裡這兩個看不見的字被刪掉，
+  // AI 照它看到的抄 excerpt，所以 excerpt 裡沒有它們；原文直接比會對不上。
+  const RAW = '這部片\u2764\uFE0F在 1995\u200B 年上映';
+  const SEEN = '這部片\u2764在 1995 年上映';
+  const body =
+    '<p class="wp-block-paragraph">開場白，跟查證無關的一段。</p>' +
+    `<p class="wp-block-paragraph">${RAW}，<a href="https://example.org/review">影評</a>也這樣寫。</p>` +
+    '<p class="wp-block-paragraph">導演是法蘭克·達拉邦特。</p>';
+  const find: FactCheckFindOutput = { claims: [{ ...FIND.claims[0]!, excerpt: SEEN }] };
+
+  it('excerptGone=false、blockIndex 正確、該段連結列為候選、說法不同算進發布提醒', async () => {
+    const { core, uuid, fetcher } = await setup({ body, find });
+    const result = await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+
+    expect(result.run.counts.droppedClaims).toBe(0);
+    expect(fetcher.calls[0]).toMatchObject({ kind: 'url', target: 'https://example.org/review', origin: 'article-link' });
+    expect(result.findings[0]).toMatchObject({ excerpt: SEEN, verdict: 'contradicted', blockIndex: 1, excerptGone: false });
+    expect(result.findings[0]!.sources.some((s) => s.origin === 'article-link')).toBe(true);
+
+    const list = core.listFactChecks(uuid);
+    expect(list.findings[0]).toMatchObject({ blockIndex: 1, excerptGone: false });
+    expect(list.openContradictions).toBe(1);
+    expect(core.getJob(uuid).openFactCheckContradictions).toBe(1);
+  });
+});
+
 describe('範圍的輸入', () => {
   it('選字：太短、找不到 → 400，不派工', async () => {
     const { core, uuid, adapter } = await setup();
@@ -382,6 +410,35 @@ describe('WordPress 密碼', () => {
     expect(run).toEqual({ status: 'failed', error_message: SECRET_IN_URLS_MESSAGE });
     expect(count(f, 'factcheck_findings')).toBe(0);
     expect(core.getJob(uuid).agentRun).toMatchObject({ status: 'failed', task: 'factcheck', errorMessage: SECRET_IN_URLS_MESSAGE });
+  });
+});
+
+describe('WordPress 密碼：搜尋字串', () => {
+  const password = 'Zq7vXk2mPa9LwR4tBn6cYd8e';
+
+  it('第一趟回的搜尋字串含密碼（含被丟掉的主張）→ 整次失敗、零抓取、有事件，事件不含密碼', async () => {
+    const secrets = createMutableScrubber([password]);
+    const find: FactCheckFindOutput = {
+      claims: [
+        FIND.claims[0]!,
+        { ...FIND.claims[0]!, excerpt: '找不到的句子', candidateUrls: [], queries: [{ q: `查 ${password}`, lang: 'zh' }] },
+      ],
+    };
+    const { core, uuid, adapter, fetcher, f } = await setup({ scrub: secrets, find });
+    const error = await caught(core.runFactCheck(uuid, { provider: 'claude', scope: 'article' }));
+    expect(error).toBeInstanceOf(AgentError);
+    expect((error as Error).message).toBe(SECRET_IN_URLS_MESSAGE);
+    expect(adapter.calls).toHaveLength(1);
+    expect(fetcher.calls).toHaveLength(0);
+    expect(fetcher.created).toHaveLength(0);
+
+    const events = core.listEvents(uuid).filter((event) => event.eventType === 'factcheck_secret_in_urls');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.status).toBe('rejected');
+    expect(JSON.stringify(events)).not.toContain(password);
+    const run = f.db.handle.prepare('SELECT status FROM factcheck_runs').get() as Record<string, unknown>;
+    expect(run).toEqual({ status: 'failed' });
+    expect(count(f, 'factcheck_findings')).toBe(0);
   });
 });
 
