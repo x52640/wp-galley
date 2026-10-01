@@ -24,6 +24,7 @@ import { stripNulls, toOpenAiStrictSchema } from './openai-strict.js';
  * - `--output-schema FILE` 吃 JSON Schema 檔案，強制最終回應的形狀
  * - `-o FILE` 把最終訊息寫進檔案，比解析 JSONL 事件流可靠
  * - `-s read-only` 沙箱；`--cd DIR` 指定工作根目錄
+ * - 每一趟都帶 `CODEX_NO_NETWORK_ARGS`：關掉預設開著的網路搜尋與瀏覽器類功能（P5-T036）
  * - `codex login status` 回報登入狀態（exit code 非 0 代表未登入）
  *
  * ⚠️ `codex exec` **不接受** `--ask-for-approval`，那是互動模式的參數；
@@ -38,6 +39,36 @@ const MAX_GENERATED_IMAGE_BYTES = 20 * 1024 * 1024;
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp)$/i;
 /** thread_id 會被拿去組路徑，只接受這個形狀（實測是 UUID）。 */
 const THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
+
+/**
+ * 每一趟都帶的「不連外」參數（P5-T036，D-034；依據見 docs/specs/agent-cli.md「各趟的不連外參數」）。
+ *
+ * - `web_search` 官方預設是 `cached`（在 OpenAI 伺服器上執行的搜尋），`--ignore-user-config`
+ *   只是不讀 config.toml、不會關掉預設，所以要明確關掉。
+ * - 功能開關用 `-c features.<name>=false`，**不用 `--disable <name>`**：實測（0.159.3）`--disable`
+ *   遇到不認得的名稱直接報 `Unknown feature flag` 結束，Codex 改版拿掉任一名稱就會讓每一趟都失敗；
+ *   `-c features.<name>=false` 對不認得的名稱不報錯，對認得的名稱確實生效（`codex features list` 變 false）。
+ *   名單取自 `codex features list`（0.159.3）裡預設開著、會操作瀏覽器／電腦或連到外部服務的功能。
+ *   `apps` 是 ChatGPT 連接器（帳號層級，不靠 config.toml），流量不受沙箱網路規則管。
+ * - 沒關 `image_generation`：生圖那一趟要用，而且它是 OpenAI 伺服器端工具，不從本機連外。
+ *
+ * ⚠️ 未證實：`-c` 在 `--ignore-user-config` 下仍生效（`--help` 說 `--ignore-user-config` 只跳過
+ * `$CODEX_HOME/config.toml`，`-c` 是另一層命令列覆寫，但沒明講兩者並用）。等使用者真跑確認。
+ */
+const CODEX_DISABLED_FEATURES = [
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'computer_use',
+  'in_app_browser',
+  'apps',
+] as const;
+
+export const CODEX_NO_NETWORK_ARGS: readonly string[] = [
+  '-c',
+  'web_search="disabled"',
+  ...CODEX_DISABLED_FEATURES.flatMap((name) => ['-c', `features.${name}=false`]),
+];
 
 export interface CodexAdapterOptions {
   /** 測試用：換成假的執行檔。正式環境一律是 PATH 上的 `codex`。 */
@@ -122,6 +153,7 @@ export class CodexAdapter implements AgentAdapter {
         // 不載入 ~/.codex/config.toml：避免使用者設定的模型、指令或 MCP
         // 工具影響校稿結果。官方說明指出登入狀態仍走 CODEX_HOME，不受影響。
         '--ignore-user-config',
+        ...CODEX_NO_NETWORK_ARGS,
         '--color',
         'never',
         '--cd',
@@ -186,7 +218,7 @@ export class CodexAdapter implements AgentAdapter {
    *
    * 參數照實測那一次，再加上跟校稿（runStructured）一樣的隔離：`-s read-only`、
    * `--ephemeral`（不留 session）、`--ignore-user-config`（不載入使用者的 config.toml：
-   * MCP、網路搜尋、自訂指令）。stdin 裡有 Agent 寫的 brief 文字，是不受信任內容，
+   * MCP、自訂指令）、`CODEX_NO_NETWORK_ARGS`（關掉預設開著的搜尋與瀏覽器類功能）。stdin 裡有 Agent 寫的 brief 文字，是不受信任內容，
    * 不能讓它拿到比校稿更多的能力（D-009）。
    *
    * ⚠️ 這兩個參數**沒有在真實生圖上驗證過**（實測那一次沒帶）。如果它們讓圖不見了，
@@ -207,6 +239,7 @@ export class CodexAdapter implements AgentAdapter {
           'read-only',
           '--ephemeral',
           '--ignore-user-config',
+          ...CODEX_NO_NETWORK_ARGS,
           '--color',
           'never',
         ],

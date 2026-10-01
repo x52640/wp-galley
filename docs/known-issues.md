@@ -32,6 +32,12 @@
 - 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
   `docs/specs/review-proposals.md` 的逐項套用定位規則。
 
+- P5-T036 Agent 不連外參數（2026-10-01）：Codex 功能開關用 `-c features.X=false`（未知名稱不報錯，但 Codex 改名時會默默失效——
+  升級 CLI 後重跑 `codex features list` 對名單）。未證實：`-c` 在 `exec`＋`--ignore-user-config` 下是否生效（使用者手動真跑確認）；
+  Codex 預設開著的 `plugins`、`remote_plugin`、`skill_mcp_dependency_install`、`tool_suggest`、`multi_agent` 是否被 `--ignore-user-config` 擋掉（暫不關，怕弄壞生圖）；
+  Claude 工具限制是黑名單，名單外的 `Artifact`、`ArtifactData`、`Skill`、`Monitor`、`PowerShell` 等在 `--print` 是否載入未證實（手動驗證加測 `--tools ""`＋`--json-schema`）；
+  `--strict-mcp-config` 是否也擋 claude.ai 帳號層級連接器未證實；agy 沒有停用工具／忽略 MCP 的參數，只靠 `--sandbox` 與 prompt 提示。
+
 ## 收官紀錄裡的殘餘（原在 CURRENT_TASK「上次停在哪」「更早」）
 
 - P5-T030：取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）。

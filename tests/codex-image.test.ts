@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CodexAdapter } from '../src/agents/adapters/codex.js';
+import { CODEX_NO_NETWORK_ARGS, CodexAdapter } from '../src/agents/adapters/codex.js';
 import type { ImageRequest } from '../src/agents/types.js';
 import { FAKE_GENERATED_PNG } from './helpers/fake-adapter.js';
 
@@ -107,6 +107,7 @@ describe('CodexAdapter.generateImage', () => {
       'read-only',
       '--ephemeral',
       '--ignore-user-config',
+      ...CODEX_NO_NETWORK_ARGS,
       '--color',
       'never',
     ]);

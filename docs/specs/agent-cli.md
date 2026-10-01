@@ -73,7 +73,7 @@ CLI 改版或官方換了安裝方式，改這一個檔就好（README 的表格
 | 指定模型 | `-m` | `--model` | `--model` |
 | 列出模型 | 無指令 | 無指令 | `agy models` |
 | 工作目錄 | `-C DIR` | 行程 cwd（`--add-dir` 加額外目錄） | `--add-dir` |
-| 限制工具 | `-s read-only` | `--disallowed-tools`、`--permission-mode` | `--sandbox` |
+| 限制工具 | `-s read-only`＋不連外參數（見下節） | `--disallowed-tools`＋`--strict-mcp-config`、`--no-chrome` | `--sandbox`（沒有停用工具／MCP 的參數） |
 | 逾時 | 自行控制 | 自行控制 | `--print-timeout`（預設 5m） |
 
 **三個都支援 JSON Schema 強制結構化輸出**，所以都不必標成 `experimental`。
@@ -109,6 +109,56 @@ adapter，介面不變。
 
 `--help` 沒寫、但實際會炸的東西。CLI 改版後請重新驗證這一節。
 
+#### 各趟的不連外參數（P5-T036，2026-10-01 查證）
+
+[ADR-0001](../adr/0001-agent-no-network.md)：Agent 不握有連外能力。下表是**每一趟**（校稿、配圖、建議網址、生圖）
+實際帶的參數。查證只看 `--help`、`codex features list` 與官方文件，**沒有送任何 prompt**；真跑確認見 Task 的手動驗證。
+之後查證功能要開搜尋，只在「找來源」那一趟明確打開（P6-T003），不改這裡的預設。
+
+| CLI（本機版本） | 參數 | 為什麼 | 依據 |
+| --- | --- | --- | --- |
+| Codex（0.159.3） | `-c web_search="disabled"` | 官方預設 `cached`（OpenAI 伺服器上的搜尋），`--ignore-user-config` 不讀設定檔也不會關掉預設 | [Config reference](https://learn.chatgpt.com/docs/config-file/config-reference)：`web_search` 值 `disabled`／`cached`／`indexed`／`live`，預設 `cached`；[Web search](https://learn.chatgpt.com/docs/web-search)：`web_search = "disabled"` 關掉工具 |
+| Codex | `-c features.<name>=false`：`browser_use`、`browser_use_external`、`browser_use_full_cdp_access`、`computer_use`、`in_app_browser` | 這些在 `codex features list` 都是 stable／**true**，會操作瀏覽器或電腦 | `codex exec --help`：`-c` 覆寫設定值、`--disable <FEATURE>` 等於 `-c features.<name>=false`；實測見下方「為什麼不用 `--disable`」 |
+| Codex | `-c features.apps=false` | ChatGPT 連接器（帳號層級，不靠 config.toml），流量不受沙箱網路規則管 | Config reference：`features.apps` 預設開；「App and connector traffic is not controlled by the sandboxed-command network proxy」 |
+| Codex | 不關 `image_generation` | 生圖那趟要用；它是 OpenAI 伺服器端工具，不從本機連外 | D-017 |
+| Claude Code（2.1.286） | `--strict-mcp-config`（且不給 `--mcp-config`） | 不帶的話使用者自己設定的 MCP server 會被載入 | `claude --help`：「Only use MCP servers from --mcp-config, ignoring all other MCP configurations」 |
+| Claude Code | `--no-chrome` | 使用者設定可能預設開著 Claude in Chrome | `claude --help`：「Disable Claude in Chrome integration」 |
+| Claude Code | `--disallowed-tools` 名單加 `Agent` | 新版子代理工具叫 `Agent`（舊名 `Task` 保留） | Claude Code 目前的工具名稱；**未實測**被拒的效果 |
+| Antigravity（1.2.14） | 不變 | `agy --help` **沒有**停用工具或忽略 MCP 的參數（只有 `--sandbox`、`--disable-slash-commands`、`--dangerously-skip-permissions`） | `agy --help`；見下方已知限制 |
+
+程式：`CODEX_NO_NETWORK_ARGS`（`adapters/codex.ts`）、`CLAUDE_NO_EXTERNAL_TOOLS_ARGS`（`adapters/claude.ts`）；
+測試 `tests/agent-cli-args.test.ts` 用假執行檔以字面值斷言。
+
+**為什麼不用 `--disable`（2026-10-01 實測，codex-cli 0.159.3，只跑 `features list`，不送 prompt）：**
+
+| 指令 | 結果 |
+| --- | --- |
+| `codex --disable not_a_feature features list` | `Error: Unknown feature flag: not_a_feature`，exit 非 0 |
+| `codex -c features.not_a_feature=false features list` | 正常列出，exit 0（不認得的名稱被忽略） |
+| `codex -c features.browser_use=false … -c features.apps=false features list` | 六個名稱全部變 `false`，`image_generation` 仍是 `true` |
+
+`--disable` 會讓 Codex 改版拿掉任一名稱時**每一趟都失敗**；`-c features.<name>=false` 容錯而且確實生效，所以改用它。
+代價：改版改名時這個開關會**默默失效**（不報錯），CLI 升版後要重跑 `codex features list` 對一次名單。
+
+**未證實（等使用者真跑確認）：**
+
+- Codex 的 `-c` 在 `--ignore-user-config` 下仍生效（上面的實測是在 `features list` 上，沒帶 `--ignore-user-config`、沒跑 `exec`）。`--help` 的說法是 `--ignore-user-config` 只跳過
+  `$CODEX_HOME/config.toml`、`-c` 是另一層命令列覆寫；官方進階設定文件把命令列覆寫列為最高優先，但沒有明講兩者並用。
+- `features.apps=false` 不影響生圖（`image_generation` 是另一個 feature，推論不受影響）。
+- Claude `--strict-mcp-config` 是否也擋掉 claude.ai 帳號層級的連接器（help 只說「all other MCP configurations」）。
+- Claude 的工具限制是**黑名單**：新版若加了沒列到的工具（例如會連外的新工具）不會被擋。`--tools ""` 能整個關掉內建工具，
+  但沒驗證它會不會連帶讓 `--json-schema` 的結構化輸出失效，所以沒換。黑名單外的工具（例如 `Artifact`、`ArtifactData`、
+  `Skill`、`Monitor`、`PowerShell`）在 `--print` 模式會不會載入**未證實**。手動驗證時加測一次 `--tools ""` 搭配 `--json-schema`，
+  能用就改成整個關掉。
+- Codex 其他預設開著的功能：`plugins`、`remote_plugin`、`skill_mcp_dependency_install`、`tool_suggest`、`multi_agent`
+  會不會被 `--ignore-user-config` 擋掉**未證實**（外掛與它帶的 MCP 可能裝在 `CODEX_HOME` 而不是 config.toml）。暫不關：
+  生圖實測時有讀 imagegen skill，關掉 plugins 類可能連帶弄壞生圖，要真跑才知道。
+
+**已知限制（agy）：** `agy` 沒有停用工具或忽略使用者 MCP 設定（`agy mcp`）的參數。目前靠 `--sandbox`（終端機限制）、
+headless 模式下需要權限的工具會被自動拒絕、以及 prompt 開頭的 `NO_TOOLS_NOTICE`。不需要權限的工具（例如搜尋）
+在哪裡執行、會不會被呼叫，**未證實**。另外 1.2.14 的 `--print-timeout` 預設變成 `0s`（等到回合結束），
+我們本來就自己控制逾時，不受影響。
+
 #### Codex 生圖（2026-09-23 實測，codex-cli 0.153.4）
 
 `--help` 看不出來，但 `codex features list` 的 `image_generation` 是 stable／true，用訂閱就能生圖。
@@ -129,7 +179,8 @@ adapter，介面不變。
   --color never`。prompt 走 **stdin**，不放在命令列（[security.md](security.md) 的硬性禁令；Task 寫的是
   位置參數，以 security.md 為準）。
 - `--ephemeral`、`--ignore-user-config` 跟校稿（runStructured）一樣帶：stdin 裡有 Agent 寫的 brief 文字
-  （不受信任），不能讓使用者 `config.toml` 裡的 MCP、網路搜尋、自訂指令套用到這一趟（D-009）。
+  （不受信任），不能讓使用者 `config.toml` 裡的 MCP、自訂指令套用到這一趟（D-009）。
+  ⚠️ `--ignore-user-config` **關不掉預設值**：網路搜尋預設就是開的，靠的是上面「各趟的不連外參數」那一節（P5-T036）。
   **已驗證（2026-09-24）**：使用者從插圖面板「請 AI 配一張」真實生圖、按「用這張」上傳並放進正文、
   存成草稿，全程正常——帶著這兩個參數生圖沒有問題。
 - `CODEX_HOME`：沒設就是 `~/.codex`。process-runner 的環境變數 allowlist 不含它，所以用 `extraEnv`
