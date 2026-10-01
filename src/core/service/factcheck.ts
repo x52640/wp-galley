@@ -69,6 +69,10 @@ const DEFAULT_FACTCHECK_TIMEOUT_MS = 180_000;
 
 /** 第一趟給的網址含 WordPress 密碼（security.md「取回器」）：整次停止。訊息本身不含密碼。 */
 export const SECRET_IN_URLS_MESSAGE = 'AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止';
+/** 要抓的候選（含文章原有的連結）含 WordPress 密碼：整次停止，一個都不抓。訊息本身不含密碼。 */
+export const SECRET_IN_CANDIDATES_MESSAGE = '要抓的網址裡有你的 WordPress 應用程式密碼（可能在文章原有的連結裡），這次查證停止';
+/** 要存的查證結果含 WordPress 密碼：整次停止，什麼都不存。訊息本身不含密碼。 */
+export const SECRET_IN_RESULT_MESSAGE = '查證結果裡有你的 WordPress 應用程式密碼，這次查證停止，沒有留下任何結果';
 /** 按了停止：等著的請求拿到這句，什麼都不存。 */
 export const FACTCHECK_CANCELLED_MESSAGE = '查證已停止，沒有留下任何結果';
 const CANCELLED_REASON = '使用者取消';
@@ -236,24 +240,11 @@ export class FactCheckModule {
     const agentQueries = allClaims.flatMap((claim) =>
       (Array.isArray(claim.queries) ? claim.queries : []).map((query) => String(query?.q ?? '')),
     );
-    if (anyUrlContainsSecret([...agentUrls, ...agentQueries], (text) => this.ctx.hasAppPassword(text))) {
-      this.ctx.repo.finishFactCheckRun(run.runId, { status: 'failed', errorMessage: SECRET_IN_URLS_MESSAGE });
-      this.ctx.repo.insertEvent({
-        jobId: job.id,
-        revisionId: run.revisionId,
-        approvalId: null,
-        actor: 'system',
-        eventType: 'factcheck_secret_in_urls',
-        status: 'rejected',
-        // 不記網址與搜尋字串本身（裡面有密碼）。
-        detail: {
-          factCheckRunId: run.runId,
-          provider: input.provider,
-          urlCount: agentUrls.length,
-          queryCount: agentQueries.length,
-        },
+    if (this.containsSecret([...agentUrls, ...agentQueries])) {
+      this.failForSecret(job, input, run, SECRET_IN_URLS_MESSAGE, 'factcheck_secret_in_urls', {
+        urlCount: agentUrls.length,
+        queryCount: agentQueries.length,
       });
-      throw new AgentError(SECRET_IN_URLS_MESSAGE);
     }
 
     // excerpt 要在文章裡找得到：拿「給 Agent 看的那一份」比。
@@ -277,6 +268,17 @@ export class FactCheckModule {
       { hostedSearch: run.hostedSearch },
     );
     this.ctx.repo.updateFactCheckRun(run.runId, { candidates: plans.reduce((n, plan) => n + plan.length, 0) });
+
+    // 抓取前再整批檢查一次**所有**候選（含文章原有的連結與它的文字）：取回器雖然會拒抓含密碼的網址，
+    // 但候選的網址與標題會被記進結果的來源清單，所以任一含密碼就整次停止、一個都不抓。
+    const candidateTexts = plans.flat().flatMap((candidate) =>
+      candidate.kind === 'url' ? [candidate.url, candidate.title] : [candidate.query],
+    );
+    if (this.containsSecret(candidateTexts)) {
+      this.failForSecret(job, input, run, SECRET_IN_CANDIDATES_MESSAGE, 'factcheck_secret_in_urls', {
+        candidateCount: candidateTexts.length,
+      });
+    }
 
     const fetcher = run.fetcher({
       articleText: article.plainText,
@@ -401,6 +403,36 @@ export class FactCheckModule {
     options: { judged: boolean },
   ): FactCheckRunResult {
     this.assertStillRunning(run.runId);
+    // 存之前把每一筆要存的文字欄位（含來源清單裡的網址、標題、引文、前後文）再查一次密碼：任一命中整次停止、什麼都不存。
+    const storedTexts = drafts.flatMap((draft) => [
+      draft.excerpt,
+      draft.claim,
+      draft.evidence,
+      draft.correction ?? '',
+      ...draft.sources.flatMap((source) => Object.values(source).filter((value): value is string => typeof value === 'string')),
+    ]);
+    if (this.containsSecret(storedTexts)) {
+      this.failForSecret(job, input, run, SECRET_IN_RESULT_MESSAGE, 'factcheck_secret_in_result', { findings: drafts.length });
+    }
+
+    // 舊結果標 superseded、寫新結果、查證紀錄結成 succeeded、事件：同一個交易，中途失敗全部回滾
+    // （外層把查證紀錄結成 failed）。
+    const row = this.ctx.repo.transaction(() => this.persistRows(job, input, run, drafts, options));
+
+    const ctx = this.readContext(job);
+    return {
+      run: this.runView(row),
+      findings: this.ctx.repo.factCheckFindingsOfRun(run.runId).map((finding) => this.findingView(finding, row, ctx)),
+    };
+  }
+
+  private persistRows(
+    job: JobRow,
+    input: FactCheckInput,
+    run: { runId: number; revisionId: number },
+    drafts: ReturnType<typeof verifyFindings>,
+    options: { judged: boolean },
+  ): FactCheckRunRow {
     const previous = this.ctx.repo.listFactCheckFindings(job.id).filter((row) => row.status === 'open');
     for (const row of previous) {
       if (drafts.some((draft) => sameExcerpt(draft.excerpt, row.excerpt))) {
@@ -443,12 +475,34 @@ export class FactCheckModule {
         droppedClaims: row.dropped_claim_count,
       },
     });
+    return row;
+  }
 
-    const ctx = this.readContext(job);
-    return {
-      run: this.runView(row),
-      findings: this.ctx.repo.factCheckFindingsOfRun(run.runId).map((finding) => this.findingView(finding, row, ctx)),
-    };
+  /** 任一段文字含已知的 WordPress 密碼（原字串，以及網址的各種解碼形式）。 */
+  private containsSecret(texts: readonly string[]): boolean {
+    return anyUrlContainsSecret(texts, (text) => this.ctx.hasAppPassword(text));
+  }
+
+  /** 密碼命中：查證紀錄結成 failed、記稽核事件（只記筆數，不記內容）、丟 AgentError。 */
+  private failForSecret(
+    job: JobRow,
+    input: FactCheckInput,
+    run: { runId: number; revisionId: number },
+    message: string,
+    eventType: string,
+    counts: Record<string, number>,
+  ): never {
+    this.ctx.repo.finishFactCheckRun(run.runId, { status: 'failed', errorMessage: message });
+    this.ctx.repo.insertEvent({
+      jobId: job.id,
+      revisionId: run.revisionId,
+      approvalId: null,
+      actor: 'system',
+      eventType,
+      status: 'rejected',
+      detail: { factCheckRunId: run.runId, provider: input.provider, ...counts },
+    });
+    throw new AgentError(message);
   }
 
   /** 一趟 Agent 的結果：失敗就把那筆 agent_runs 結掉、丟 AgentError；成功也結掉（已經被取消的不改寫）。 */

@@ -4,7 +4,7 @@ phase: 6
 status: done
 depends_on: [P6-T002, P6-T003]
 specs: [factcheck.md, security.md, architecture.md, core-service.md, http-api.md, review-proposals.md]
-write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
+write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/media.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
 contract_change: additive
 expected_commit: "feat(P6-T004): 查證流程、儲存與 API"
 ---
@@ -153,3 +153,12 @@ Task 要求的兩個新增欄位會碰到 write_paths 以外的既有檔，各�
 - **未做（待主 session 裁定）**：把前處理搬進 `src/contract/`，讓前端示範資料（P6-T005）與 prompt 共用同一份。前處理在
   `src/core/factcheck-prompts.ts`（`textForAgent`，還依賴 `src/core/image-generation.ts` 的 `neutralize`），兩個檔都不在 write_paths。
   目前後端已正確；P6-T005 的示範資料若要自己算 `excerptGone`／`blockIndex`，需要先把這套前處理搬進 contract。
+
+### PR 審查修正（Codex）
+- **（HIGH）密碼不進查證資料表**：抓之前在排好候選後再整批檢查**所有**候選（含文章原有連結的網址與文字），命中整次失敗、一個都不抓
+  （`SECRET_IN_CANDIDATES_MESSAGE`，事件 `factcheck_secret_in_urls`）。存結果前對每筆要存的文字欄位（excerpt、claim、evidence、correction、
+  來源清單的網址／標題／引文／前後文）再檢查一次，命中整次失敗、不存任何結果、記 `factcheck_secret_in_result`（只記筆數）。
+  檢查一律用 `anyUrlContainsSecret`（原字串＋網址的解碼形式）。測試：文章連結、無來源時的 claim、evidence、correction 各一案，掃描整個 DB 確認含密碼的列跟查證前一樣。
+- **（MEDIUM）儲存是一個交易**：`Repository.transaction`（SAVEPOINT，可巢狀）包住 supersede、寫入全部結果、結成 succeeded、完成事件；
+  中途失敗全部回滾，外層把查證紀錄結成 failed。測試：第二筆寫入失敗 → 舊結果仍 open、沒有新結果、紀錄 failed、只有第一次的完成事件。
+- 2026-10-01 使用者同意擴大 write_paths 加 `src/core/service/media.ts`：查證中換圖會先改媒體紀錄才被鎖擋下（Codex 審查 medium）。

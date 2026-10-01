@@ -190,7 +190,7 @@
   `observationItemId` 只有觀察卡片能給、而且一定要給（形狀不對 400 `VALIDATION_FAILED`）。觀察卡片的 excerpt 一律後端讀。
   選字長度不對（4～300 字）、選字在目前的標題或正文裡找不到、卡片不存在或不屬於這篇、卡片種類不是三種之一、卡片引的句子已經不在文章裡、
   選字或組好的 prompt 含 WordPress 密碼、正文是空的：400 `INVALID_INPUT`，一個請求都不發。另一個 Agent 動作在跑 502 `AGENT_ERROR`；
-  AI 給的網址或搜尋字串含密碼 502（訊息「AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止」，一個網址都不抓）；被停止 502「查證已停止…」；
+  AI 給的網址或搜尋字串含密碼 502（訊息「AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止」，一個網址都不抓）；要抓的候選（含文章原有連結）含密碼 502、一個都不抓；要存的結果含密碼 502、不存任何結果；被停止 502「查證已停止…」；
   Agent 不能用或沒有取回器 503。
   跑的期間 `JobDetail.agentRun` 是 running、`task: 'factcheck'`，`agentRun.factCheck` 帶 `stage`（`find`／`fetch`／`judge`／`verify`）、
   `counts`、`hostedSearch`、`judged`——抓網頁、核對兩段沒有 CLI 在跑也一樣；停止走 `DELETE /agent`。這段期間改內容的路由

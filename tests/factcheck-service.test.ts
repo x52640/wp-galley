@@ -9,6 +9,8 @@ import { APP_PASSWORD_IN_CONTENT_MESSAGE, CoreService } from '../src/core/servic
 import {
   FACTCHECK_CANCELLED_MESSAGE,
   FACTCHECK_LOCKED_MESSAGE,
+  SECRET_IN_CANDIDATES_MESSAGE,
+  SECRET_IN_RESULT_MESSAGE,
   SECRET_IN_URLS_MESSAGE,
 } from '../src/core/service/factcheck.js';
 import { NO_SOURCE_EVIDENCE } from '../src/core/factcheck.js';
@@ -439,6 +441,111 @@ describe('WordPress 密碼：搜尋字串', () => {
     const run = f.db.handle.prepare('SELECT status FROM factcheck_runs').get() as Record<string, unknown>;
     expect(run).toEqual({ status: 'failed' });
     expect(count(f, 'factcheck_findings')).toBe(0);
+  });
+});
+
+/** 整個 DB 裡含這段字的列（表名＋整列內容）。 */
+function rowsContaining(f: CoreFixture, needle: string): string[] {
+  const tables = f.db.handle
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as { name: string }[];
+  return tables.flatMap(({ name }) =>
+    (f.db.handle.prepare(`SELECT * FROM "${name}"`).all() as Record<string, unknown>[])
+      .map((row) => `${name}:${JSON.stringify(row)}`)
+      .filter((line) => line.includes(needle)),
+  );
+}
+
+describe('WordPress 密碼：不進查證資料表', () => {
+  const password = 'Zq7vXk2mPa9LwR4tBn6cYd8e';
+
+  /** 跑一次會因密碼停下的查證：整次失敗、沒有結果、事件不含密碼，DB 裡含密碼的列跟查證前一模一樣。 */
+  async function expectRejected(
+    s: Setup,
+    message: string,
+    eventType: string,
+  ): Promise<void> {
+    const before = rowsContaining(s.f, password);
+    const error = await caught(s.core.runFactCheck(s.uuid, { provider: 'claude', scope: 'article' }));
+    expect(error).toBeInstanceOf(AgentError);
+    expect((error as Error).message).toBe(message);
+    expect(count(s.f, 'factcheck_findings')).toBe(0);
+    expect(s.f.db.handle.prepare('SELECT status, error_message FROM factcheck_runs').get()).toEqual({
+      status: 'failed',
+      error_message: message,
+    });
+    const events = s.core.listEvents(s.uuid).filter((event) => event.eventType === eventType);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.status).toBe('rejected');
+    expect(rowsContaining(s.f, password)).toEqual(before);
+  }
+
+  it('文章原有的連結含密碼 → 抓取前整批擋下，一個都不抓、網址不進來源清單', async () => {
+    const secrets = createMutableScrubber([]);
+    const body = BODY.replace('https://example.org/review', `https://example.org/review?k=${password}`);
+    const s = await setup({ scrub: secrets, body });
+    secrets.add([password]);
+    // 前提：文章本身（版本內容）本來就含它，這不算外洩；要確認的是查證沒有多存任何一筆。
+    expect(rowsContaining(s.f, password).length).toBeGreaterThan(0);
+    await expectRejected(s, SECRET_IN_CANDIDATES_MESSAGE, 'factcheck_secret_in_urls');
+    expect(s.fetcher.calls).toHaveLength(0);
+    expect(s.fetcher.created).toHaveLength(0);
+  });
+
+  it('沒有來源（不跑第二趟）的 claim 含密碼 → 不存任何結果', async () => {
+    const secrets = createMutableScrubber([password]);
+    const find: FactCheckFindOutput = { claims: [{ ...FIND.claims[0]!, claim: `主張 ${password}` }] };
+    const s = await setup({ scrub: secrets, find, fetch: { pages: {}, wikipedia: {} } });
+    await expectRejected(s, SECRET_IN_RESULT_MESSAGE, 'factcheck_secret_in_result');
+    expect(s.adapter.calls).toHaveLength(1);
+  });
+
+  it('第二趟的 evidence 含密碼 → 不存任何結果', async () => {
+    const secrets = createMutableScrubber([password]);
+    const judge: FactCheckJudgeOutput = { findings: [{ ...JUDGE.findings[0]!, evidence: `依據 ${password}` }] };
+    const s = await setup({ scrub: secrets, judge });
+    await expectRejected(s, SECRET_IN_RESULT_MESSAGE, 'factcheck_secret_in_result');
+    expect(s.adapter.calls).toHaveLength(2);
+  });
+
+  it('第二趟的 correction 含密碼 → 不存任何結果', async () => {
+    const secrets = createMutableScrubber([password]);
+    const judge: FactCheckJudgeOutput = { findings: [{ ...JUDGE.findings[0]!, correction: `改成 ${password}` }] };
+    const s = await setup({ scrub: secrets, judge });
+    await expectRejected(s, SECRET_IN_RESULT_MESSAGE, 'factcheck_secret_in_result');
+  });
+});
+
+describe('儲存是一個交易', () => {
+  it('中途寫入失敗：全部回滾，舊結果仍 open、沒有新結果，查證紀錄結成 failed', async () => {
+    const find: FactCheckFindOutput = {
+      claims: [
+        FIND.claims[0]!,
+        { excerpt: '導演是法蘭克·達拉邦特', claim: '導演', queries: [{ q: '沒有這個條目', lang: 'en' }], candidateUrls: [] },
+      ],
+    };
+    const { core, uuid, f } = await setup({ find });
+    const first = await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+    const snapshot = f.db.handle.prepare('SELECT * FROM factcheck_findings ORDER BY id').all();
+    expect(first.findings.every((x) => x.status === 'open')).toBe(true);
+
+    const repo = coreInternals(core).repo;
+    const original = repo.insertFactCheckFinding.bind(repo);
+    let calls = 0;
+    repo.insertFactCheckFinding = (input) => {
+      calls += 1;
+      if (calls === 2) throw new Error('模擬寫入失敗');
+      return original(input);
+    };
+
+    const error = await caught(core.runFactCheck(uuid, { provider: 'claude', scope: 'article' }));
+    expect((error as Error).message).toBe('模擬寫入失敗');
+    expect(calls).toBe(2);
+    expect(f.db.handle.prepare('SELECT * FROM factcheck_findings ORDER BY id').all()).toEqual(snapshot);
+    const runs = f.db.handle.prepare('SELECT status FROM factcheck_runs ORDER BY id').all();
+    expect(runs).toEqual([{ status: 'succeeded' }, { status: 'failed' }]);
+    expect(core.listEvents(uuid).filter((event) => event.eventType === 'factcheck_completed')).toHaveLength(1);
+    expect(core.listFactChecks(uuid).findings.map((x) => x.id)).toEqual(first.findings.map((x) => x.id));
   });
 });
 

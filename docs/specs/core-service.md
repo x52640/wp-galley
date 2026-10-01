@@ -122,6 +122,8 @@ interface CoreService {
    * （選字 4～300 字且在目前的標題或正文裡找得到；觀察卡片要屬於這篇、種類是三種之一、excerpt 還在文章裡）、
    * 選字或第一趟組好的 prompt 含 WordPress 密碼。另一個 Agent 動作在跑 AgentError；沒有取回器 AgentUnavailableError。
    * 第一趟產出的候選網址或搜尋字串任一含密碼：整次失敗（AgentError）、一個網址都不抓、記 `factcheck_secret_in_urls` 事件（只記筆數）。
+   * 抓之前所有候選（含文章原有連結）再整批檢查一次，命中同樣處理。存之前每筆要存的文字欄位（含來源清單）再檢查一次，
+   * 命中整次失敗、不存任何結果、記 `factcheck_secret_in_result`。存結果（supersede、寫入、結成 succeeded、事件）包在同一個交易（`Repository.transaction`）。
    * 第二趟組好的 prompt 含密碼 InvalidInputError（整次失敗）。結果**永不自動套用**、不建版本、不動核准、不寫 review_items；
    * 同一句（忽略空白）已有 open 的舊結果標成 superseded。被停止丟 AgentError「查證已停止，沒有留下任何結果」。
    * 跑的期間佔 `activeRuns`（跟其他 Agent 動作互斥），`createRevision` 一律 AgentError（`FACTCHECK_LOCKED_MESSAGE`）。

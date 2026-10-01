@@ -246,6 +246,23 @@ function rowId(result: { lastInsertRowid: number | bigint }): number {
 export class Repository {
   constructor(private readonly db: DatabaseSync) {}
 
+  /**
+   * 包成一個交易：`fn` 丟錯就全部回滾、錯誤往外丟；成功才一起生效。用 SAVEPOINT，巢狀呼叫也安全。
+   * `fn` 必須是同步的（node:sqlite 是同步 API，中間不會被別的請求插隊）。
+   */
+  transaction<T>(fn: () => T): T {
+    this.db.exec('SAVEPOINT repo_tx');
+    try {
+      const result = fn();
+      this.db.exec('RELEASE repo_tx');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK TO repo_tx');
+      this.db.exec('RELEASE repo_tx');
+      throw error;
+    }
+  }
+
   // --- 設定同步 -------------------------------------------------------------
 
   /**
