@@ -4,14 +4,12 @@ import type { LoadedJob, ProofMark } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
-import { locateEditCaret } from '../lib/edit-target.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
 import { FormatBar, type LinkEditorState } from './FormatBar.js';
 import {
   availableCommands,
   formatStateFrom,
   nextLinkEditor,
-  shortcutCommand,
   type FormatCommand,
   type FormatState,
 } from '../lib/rich-format.js';
@@ -19,7 +17,6 @@ import {
   applyLink,
   cleanEditedBody,
   snapshotBody,
-  cleanPastedHtml,
   currentLink,
   removeLink,
   runCommand,
@@ -30,9 +27,17 @@ import {
 } from '../lib/rich-commands.js';
 import type { RichUnit } from '../../contract/rich-text.js';
 import { isBlankBody } from '../../contract/empty-body.js';
-import { flattenTitleText } from '../../contract/plain-title.js';
 import { readString } from '../lib/format.js';
 import { decideProofSave } from '../lib/write-in-place.js';
+import {
+  attachEditInterceptors,
+  disableWriting,
+  editTarget,
+  enableWriting,
+  markBlank,
+  showEditTarget,
+  unwrapHighlightMarks,
+} from '../lib/proof-edit-dom.js';
 
 /**
  * 中央校樣。
@@ -120,51 +125,6 @@ const HIGHLIGHT_COLORS: Record<SuggestionKind, { bg: string; line: string }> = {
   fact: { bg: '#DDE8F5', line: '#1E4F8A' },
   source: { bg: '#F6EDCF', line: '#8A6A14' },
 };
-
-/**
- * 直接在文章上改時，標出「要改的是哪裡」（P5-T011）。
- *
- * 用 CSS Custom Highlight（`CSS.highlights` ＋ `::highlight()`），不用 `<mark>`：它只在畫面上
- * 上色，不改 DOM，所以不會混進要存檔的正文，也不會在打字時被 contenteditable 拆成碎片。
- * 顏色是螢光筆黃，刻意跟四種建議標記都不同——這個標記的意思是「游標在這裡」，不是「這裡有建議」。
- */
-const EDIT_TARGET = 'publisher-edit-target';
-const EDIT_TARGET_RULE = `::highlight(${EDIT_TARGET}) { background-color: #FFE066; text-decoration: underline 2px #1C1B19; }`;
-
-function showEditTarget(frame: HTMLIFrameElement, target: Range | null): void {
-  // 要用 iframe 自己視窗的 CSS 與 Highlight：Range 屬於那份文件。
-  const win = frame.contentWindow as (Window & typeof globalThis) | null;
-  const doc = frame.contentDocument;
-  const registry = win?.CSS?.highlights;
-  if (!win || !doc || !registry || typeof win.Highlight !== 'function') return; // 舊瀏覽器：只有游標，沒有標色
-  registry.delete(EDIT_TARGET);
-  if (target === null) return;
-  const sheet = doc.styleSheets[0];
-  if (sheet && !doc.documentElement.hasAttribute('data-edit-target-rule')) {
-    // CSSOM 插規則，不動文件的 <style>；每份文件只插一次。
-    sheet.insertRule(EDIT_TARGET_RULE, sheet.cssRules.length);
-    doc.documentElement.setAttribute('data-edit-target-rule', '');
-  }
-  registry.set(EDIT_TARGET, new win.Highlight(target));
-}
-
-/** 打字模式裡標題看得出「可以點進去改」、空正文有提示（P5-T029）。用 CSSOM 插進文件，不動文件的 <style>。 */
-const WRITE_RULES = [
-  '.preview-title[contenteditable] { outline: 1px dashed #B8B2A6; outline-offset: 6px; border-radius: 2px; cursor: text; }',
-  '.preview-title[contenteditable]:focus { outline: 2px solid #1E4F8A; }',
-  '.preview-body[data-blank="yes"] > p:first-child::before { content: "從這裡開始寫…"; color: #9A958C; float: left; height: 0; pointer-events: none; }',
-];
-
-function ensureWriteRules(doc: Document): void {
-  const sheet = doc.styleSheets[0];
-  if (!sheet || doc.documentElement.hasAttribute('data-write-rules')) return;
-  for (const rule of WRITE_RULES) sheet.insertRule(rule, sheet.cssRules.length);
-  doc.documentElement.setAttribute('data-write-rules', '');
-}
-
-function markBlank(body: HTMLElement): void {
-  body.setAttribute('data-blank', isBlankBody(body.innerHTML) ? 'yes' : 'no');
-}
 
 /**
  * 文件內容的完整高度（P5-T029）。
@@ -569,61 +529,12 @@ export function ProofView({
     doc.addEventListener('scroll', () => {
       if ((doc.defaultView?.scrollY ?? 0) !== 0) measure(measureToken.current);
     });
-    const inTitle = (target: EventTarget | null): boolean => {
-      const element = target as Element | null;
-      return typeof element?.closest === 'function' && element.closest('.preview-title') !== null;
-    };
-    // 貼上（P5-T028）：有格式的剪貼簿只保留模板 allowlist 內的標籤（粗體、連結、標題、清單…），
-    // 樣式、class、span、script、不允許的連結一律拿掉、字留著；只有純文字就照舊插純文字。
-    doc.addEventListener('paste', (event) => {
-      if (!editingRef.current) return;
-      event.preventDefault();
-      // 標題只收純文字、一行（P5-T029）。
-      if (inTitle(event.target)) {
-        doc.execCommand('insertText', false, flattenTitleText(event.clipboardData?.getData('text/plain') ?? '').trim());
-        return;
-      }
-      const html = event.clipboardData?.getData('text/html') ?? '';
-      const cleaned = html.trim().length > 0 ? cleanPastedHtml(html, allowRef.current) : '';
-      if (cleaned.trim().length > 0) {
-        doc.execCommand('insertHTML', false, cleaned);
-      } else {
-        doc.execCommand('insertText', false, event.clipboardData?.getData('text/plain') ?? '');
-      }
-    });
-    // 拖檔案進來：瀏覽器會把圖片直接塞進正文（不經過媒體庫）。擋掉；插圖走「在這裡插圖」。
-    doc.addEventListener('drop', (event) => {
-      if (!editingRef.current) return;
-      if (event.dataTransfer?.types.includes('Files') || inTitle(event.target)) event.preventDefault();
-    });
-    // 格式快捷鍵：⌘B／⌘I／⌘K；⌘U（底線，不在 allowlist）攔下來不做事。
-    doc.addEventListener('keydown', (event) => {
-      if (!editingRef.current) return;
-      if (inTitle(event.target)) {
-        // 標題是一行：Enter 跳到正文開頭。格式快捷鍵在標題裡不做事（也不讓瀏覽器自己加粗）。
-        if (event.key === 'Enter' && !event.isComposing) {
-          event.preventDefault();
-          const body = doc.querySelector<HTMLElement>('.preview-body');
-          if (!body) return;
-          body.focus();
-          const range = doc.createRange();
-          range.selectNodeContents(body.firstElementChild ?? body);
-          range.collapse(true);
-          const selection = doc.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          return;
-        }
-        if (shortcutCommand(event) !== null) event.preventDefault();
-        return;
-      }
-      const shortcut = shortcutCommand(event);
-      if (shortcut === null) return;
-      event.preventDefault();
-      if (shortcut === 'block') return;
-      const state = formatStateRef.current;
-      if (state !== null && !isShortcutEnabled(shortcut, state)) return;
-      doCommandRef.current(shortcut);
+    // 貼上整理、拖放、按鍵攔截（P5-T028、P5-T029）：規則在 lib/proof-edit.ts。
+    attachEditInterceptors(doc, {
+      isEditing: () => editingRef.current,
+      allow: () => allowRef.current,
+      formatState: () => formatStateRef.current,
+      runCommand: (command) => doCommandRef.current(command),
     });
     doc.addEventListener('selectionchange', () => {
       if (editingRef.current) refreshFormat();
@@ -661,10 +572,7 @@ export function ProofView({
     const doc = frameRef.current?.contentDocument;
     const body = doc?.querySelector('.preview-body');
     if (!doc || !body) return;
-    for (const mark of Array.from(body.querySelectorAll('mark[data-hl]'))) {
-      mark.replaceWith(...Array.from(mark.childNodes));
-    }
-    body.normalize();
+    unwrapHighlightMarks(body);
     if (mode !== 'edit') return;
     for (const highlight of highlights) {
       const scope = highlight.blockIndex === null ? body : body.children[highlight.blockIndex];
@@ -698,10 +606,7 @@ export function ProofView({
     if (!frame || !doc || !body) return;
     const title = doc.querySelector<HTMLElement>('.preview-title');
     if (editing === null) {
-      showEditTarget(frame, null);
-      body.removeAttribute('contenteditable');
-      body.removeAttribute('data-blank');
-      title?.removeAttribute('contenteditable');
+      disableWriting(frame, body, title);
       originalTitle.current = null;
       originalBody.current = null;
       originalClean.current = null;
@@ -712,10 +617,7 @@ export function ProofView({
       linkTarget.current = null;
       return;
     }
-    for (const mark of Array.from(body.querySelectorAll('mark[data-hl]'))) {
-      mark.replaceWith(...Array.from(mark.childNodes));
-    }
-    body.normalize();
+    unwrapHighlightMarks(body);
     if (originalBody.current === null) {
       originalBody.current = body.innerHTML;
       originalUnits.current = snapshotBody(body);
@@ -724,15 +626,7 @@ export function ProofView({
       // 空文章（新稿件剛建好）：放一個有高度的空段落，游標才有地方停（存檔時照樣整理掉）。
       if (isBlankBody(body.innerHTML)) body.innerHTML = '<p><br></p>';
     }
-    ensureWriteRules(doc);
-    markBlank(body);
-    body.setAttribute('contenteditable', 'true');
-    if (title) {
-      title.setAttribute('contenteditable', 'plaintext-only');
-      title.setAttribute('spellcheck', 'false');
-    }
-    // 按 Enter 開新段落用 <p>，不要 Chrome 預設的 <div>。
-    doc.execCommand('defaultParagraphSeparator', false, 'p');
+    enableWriting(doc, body, title);
     setSaveError(null);
 
     const { caret: range, target, inTitle } = editTarget(doc, body, title, editing);
@@ -1059,61 +953,6 @@ export function ProofView({
       </div>
     </section>
   );
-}
-
-function isShortcutEnabled(command: 'bold' | 'italic' | 'link', state: FormatState): boolean {
-  return command === 'link' || !(command === 'bold' && (state.block === 'h2' || state.block === 'h3'));
-}
-
-/**
- * 游標要放哪裡、要標出哪一段。
- *
- * - 游標：那一項引用的字前面（忽略空白，跟定位同一套規則）；沒有段落、正文找不到的，到標題裡找
- *   （講標題的建議，P5-T031，規則見 `lib/edit-target.ts`）；都找不到就放那一段的開頭，再不行就放文章開頭。
- * - 標色：找得到字就標那段字；找不到但知道是第幾段，就標整段（至少是「大概在這裡」）；
- *   從上方「改原文」進來的沒有目標，不標。
- * - `inTitle`：游標在標題裡，焦點要給標題（不然 `body.focus()` 會把游標拉回正文）。
- */
-function editTarget(
-  doc: Document,
-  body: Element,
-  title: Element | null,
-  request: ProofEditRequest,
-): { caret: Range; target: Range | null; inTitle: boolean } {
-  const caret = doc.createRange();
-  const block = request.blockIndex === null ? null : (body.children[request.blockIndex] ?? null);
-  const scopeNodes = textNodes(doc, block ?? body);
-  const titleNodes = title === null ? [] : textNodes(doc, title);
-  const spot = locateEditCaret(
-    request,
-    scopeNodes.map((node) => node.data),
-    titleNodes.map((node) => node.data),
-  );
-  if (spot.in !== 'fallback') {
-    const node = (spot.in === 'title' ? titleNodes : scopeNodes)[spot.node]!;
-    caret.setStart(node, spot.start);
-    caret.collapse(true);
-    const target = doc.createRange();
-    target.setStart(node, spot.start);
-    target.setEnd(node, spot.end);
-    return { caret, target, inTitle: spot.in === 'title' };
-  }
-  // 沒有指定段落：游標放第一段裡面（第一段是文字段落時），不要停在段落外面——
-  // 停在外面打的字會變成頂層裸文字（新稿件剛建好的空段落就是這種情況，P5-T029）。
-  const first = body.firstElementChild;
-  caret.selectNodeContents(block ?? (first !== null && first.tagName === 'P' ? first : body));
-  caret.collapse(true);
-  if (block === null) return { caret, target: null, inTitle: false };
-  const target = doc.createRange();
-  target.selectNodeContents(block);
-  return { caret, target, inTitle: false };
-}
-
-function textNodes(doc: Document, scope: Element): Text[] {
-  const nodes: Text[] = [];
-  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text);
-  return nodes;
 }
 
 /**
