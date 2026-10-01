@@ -77,28 +77,28 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-010** 2026-08-28 Remus｜高頻動作做成一鍵（校稿面板：一鍵校驗、只找錯字、一鍵配圖）；慢可以、不確定不行：要計時器與說明，不畫假的百分比進度條｜→ 階段 5.5
 - **D-011** 2026-08-28 Remus｜定位：本機 AI 當編輯，使用者當總編｜→ 本檔「目標」
 - **D-012** 2026-08-27 Remus｜版面：左狀態軌＋大校樣＋右操作面板｜**已被 D-013 取代**
-- **D-013** 2026-09-23 Remus｜UI 採 B 版「文件式」：文章在中間、建議標在字上、右側卡片對應、發布面板從右側滑出並顯示「發到哪裡」，另有 B0 稿件總覽；首頁不出現在畫面上｜→ P5-T003、[設計稿](https://claude.ai/artifact/1D5TrmCQESR3icmD6TVnC6)
-- **D-014** 2026-09-23 Remus｜採冷啟動治理架構（plan.md／docs/README／specs／adr／tasks／CURRENT_TASK）；多 agent 協作流程與契約 checksum 暫緩（單人單 repo 用不到）｜→ P0-T001
-- **D-015** 2026-09-23 Remus 同意｜前後端契約改為共用模組，取代手抄的 `src/ui/service/types.ts`，排在 UI 改版之前｜→ P5-T002
-- **D-016** 2026-09-23 Remus｜產品化為開源自架工具，別人自己架、自己修，不提供支援；任何 WordPress 站、一次連一個；站台設定抽成本機設定檔（remusplus 是第一份）＋首次設定精靈。第一版不做 API Key（賣點是用既有訂閱）、不支援 CPT；各家 CLI 條款是否允許第三方呼叫未查證，公開前要查｜→ P8-T001、P8-T002、`docs/specs/wordpress-site.md`
-- **D-017** 2026-09-23 Remus｜用 Codex 訂閱生圖，不接生圖 API：生完先給使用者看，按「用這張」才上傳（會進媒體庫）；封面上傳後自動設精選（手動上傳也是）；只有 Codex 提供這顆按鈕｜→ P5-T013
-- **D-018** 2026-09-23 Remus｜拿掉「編輯／對照／成品」三段切換（修正 D-013；可在文章上直接改後「編輯」這名字也誤導）：預設是帶標記的文章，「對照」改成工具列切換，乾淨成品只在打開發布面板時出現（核准前一定看過成品，不變）｜→ P5-T014
-- **D-019** 2026-09-23 Remus｜對照改成 git diff 式單欄：只列有改的段落、先一行講結論（含標題、網址、封面、分類等正文以外的改動）；跟 AI 提案對照共用同一個畫面｜→ P5-T015
-- **D-020** 2026-09-23 Remus｜段落之間直接「在這裡插圖」；AI 內文圖用錨點（引用原文，不用段落編號——內容一改就位移）自動放位置，找不到就明講；右欄下拉保留當調整位置用｜→ P5-T016
-- **D-021** 2026-09-24 Remus｜AI 校稿與一鍵配圖的 prompt 只給目前的內容，不送過期原稿（sourceText）；要改成的字已在文章裡的建議自動標「已經改好了」；真的找不到要講找不到哪一句｜→ P5-T017
-- **D-022** 2026-09-24 Remus｜插圖面板可以「請 AI 配一張」：Codex 讀該位置前後段落，一趟就決定畫面並生圖（不先另跑配圖建議，省一次額度）；按「用這張」才上傳並放在那個位置；沒有 Codex 就停用並說明｜→ P5-T018
-- **D-023** 2026-09-24 Remus｜修掉 Codex 全 repo 審查的 16 條（全部查證屬實），依「使用者碰不碰得到」分五個 Task 依序做；正文或指示裡有已知 WordPress 密碼一律**直接拒絕並提示**，不只遮 prompt（只遮的話仍會進預覽並發布）｜→ P5-T019～P5-T023、[審查報告](docs/reviews/2026-09-24-codex-repo-audit.md)
-- **D-024** 2026-09-24 Remus｜發布時指定作者：每個站一個預設作者，發布面板顯示「作者：某某」、可改這一篇（常做的事一鍵，D-010）；帳號只是 Author 時在面板先講做不到，不等發布才失敗｜→ P5-T024
-- **D-025** 2026-09-27 Remus｜配圖 prompt 可以在卡片上直接改、按「存」，之後生圖一律用改過的版本；已生好的候選圖留著；後端照原規則再驗（長度上限、含 WordPress 密碼直接拒絕）｜→ P5-T025
-- **D-026** 2026-09-27 Remus｜「建議網址」：本機 Agent 讀標題＋內文開頭給 3 個英文網址，知道官方英文名就用；點了才填、可再改，不自動填（AI 可能認錯作品）；不用拼音（又長又難讀）；日記不用（網址是日期）；短的 Agent 呼叫也要計時器（D-010）｜→ P5-T026
-- **D-027** 2026-09-27 Remus｜使用者在卡片上改過的配圖描述，之後任何一趟 Agent（含「校驗」）都不覆蓋｜→ P5-T027
-- **D-028** 2026-09-28 Remus｜在文章上改時可以加格式，只做模板 allowlist 內的（連結、粗體、斜體、H2、H3、清單、引用、分隔線）；自己做、不引入編輯器套件（allowlist 與後端早已支援；Tiptap／Lexical 要換掉整個編輯區另接文件模型，古騰堡太重）；貼上保留 allowlist 內格式；`b`／`i` 轉 `strong`／`em` 不默默丟；後端照原規則再驗。補充（同日，Codex 第二輪後）：存檔時沒改的頂層區塊原樣保留（整篇仍過 sanitize）；相對連結只收 `#` 錨點與單一 `/` 開頭的站內路徑，各處共用一套規則｜→ P5-T028、`docs/specs/security.md`
+- **D-013** 2026-09-23 Remus｜UI 採 B 版「文件式」：文章在中間、建議標在字上、右側卡片對應、發布面板從右側滑出並顯示「發到哪裡」，另有 B0 稿件總覽；首頁不出現在畫面上｜→ [P5-T003](docs/tasks/P5-T003-ui-redesign-b.md)、[設計稿](https://claude.ai/artifact/1D5TrmCQESR3icmD6TVnC6)
+- **D-014** 2026-09-23 Remus｜採冷啟動治理架構（plan.md／docs/README／specs／adr／tasks／CURRENT_TASK）；多 agent 協作流程與契約 checksum 暫緩（單人單 repo 用不到）｜→ [P0-T001](docs/tasks/P0-T001-governance.md)
+- **D-015** 2026-09-23 Remus 同意｜前後端契約改為共用模組，取代手抄的 `src/ui/service/types.ts`，排在 UI 改版之前｜→ [P5-T002](docs/tasks/P5-T002-shared-contract.md)
+- **D-016** 2026-09-23 Remus｜產品化為開源自架工具，別人自己架、自己修，不提供支援；任何 WordPress 站、一次連一個；站台設定抽成本機設定檔（remusplus 是第一份）＋首次設定精靈。第一版不做 API Key（賣點是用既有訂閱）、不支援 CPT；各家 CLI 條款是否允許第三方呼叫未查證，公開前要查｜→ [P8-T001](docs/tasks/P8-T001-site-profile.md)、[P8-T002](docs/tasks/P8-T002-setup-wizard.md)、`docs/specs/wordpress-site.md`
+- **D-017** 2026-09-23 Remus｜用 Codex 訂閱生圖，不接生圖 API：生完先給使用者看，按「用這張」才上傳（會進媒體庫）；封面上傳後自動設精選（手動上傳也是）；只有 Codex 提供這顆按鈕｜→ [P5-T013](docs/tasks/P5-T013-codex-image-generation.md)
+- **D-018** 2026-09-23 Remus｜拿掉「編輯／對照／成品」三段切換（修正 D-013；可在文章上直接改後「編輯」這名字也誤導）：預設是帶標記的文章，「對照」改成工具列切換，乾淨成品只在打開發布面板時出現（核准前一定看過成品，不變）｜→ [P5-T014](docs/tasks/P5-T014-remove-view-switch.md)
+- **D-019** 2026-09-23 Remus｜對照改成 git diff 式單欄：只列有改的段落、先一行講結論（含標題、網址、封面、分類等正文以外的改動）；跟 AI 提案對照共用同一個畫面｜→ [P5-T015](docs/tasks/P5-T015-unified-diff.md)
+- **D-020** 2026-09-23 Remus｜段落之間直接「在這裡插圖」；AI 內文圖用錨點（引用原文，不用段落編號——內容一改就位移）自動放位置，找不到就明講；右欄下拉保留當調整位置用｜→ [P5-T016](docs/tasks/P5-T016-insert-image-in-article.md)
+- **D-021** 2026-09-24 Remus｜AI 校稿與一鍵配圖的 prompt 只給目前的內容，不送過期原稿（sourceText）；要改成的字已在文章裡的建議自動標「已經改好了」；真的找不到要講找不到哪一句｜→ [P5-T017](docs/tasks/P5-T017-review-current-content.md)
+- **D-022** 2026-09-24 Remus｜插圖面板可以「請 AI 配一張」：Codex 讀該位置前後段落，一趟就決定畫面並生圖（不先另跑配圖建議，省一次額度）；按「用這張」才上傳並放在那個位置；沒有 Codex 就停用並說明｜→ [P5-T018](docs/tasks/P5-T018-ai-image-at-position.md)
+- **D-023** 2026-09-24 Remus｜修掉 Codex 全 repo 審查的 16 條（全部查證屬實），依「使用者碰不碰得到」分五個 Task 依序做；正文或指示裡有已知 WordPress 密碼一律**直接拒絕並提示**，不只遮 prompt（只遮的話仍會進預覽並發布）｜→ [P5-T019](docs/tasks/P5-T019-proposal-and-image-data-loss.md)～[P5-T023](docs/tasks/P5-T023-security-hardening.md)、[審查報告](docs/reviews/2026-09-24-codex-repo-audit.md)
+- **D-024** 2026-09-24 Remus｜發布時指定作者：每個站一個預設作者，發布面板顯示「作者：某某」、可改這一篇（常做的事一鍵，D-010）；帳號只是 Author 時在面板先講做不到，不等發布才失敗｜→ [P5-T024](docs/tasks/P5-T024-choose-author.md)
+- **D-025** 2026-09-27 Remus｜配圖 prompt 可以在卡片上直接改、按「存」，之後生圖一律用改過的版本；已生好的候選圖留著；後端照原規則再驗（長度上限、含 WordPress 密碼直接拒絕）｜→ [P5-T025](docs/tasks/P5-T025-edit-image-prompt.md)
+- **D-026** 2026-09-27 Remus｜「建議網址」：本機 Agent 讀標題＋內文開頭給 3 個英文網址，知道官方英文名就用；點了才填、可再改，不自動填（AI 可能認錯作品）；不用拼音（又長又難讀）；日記不用（網址是日期）；短的 Agent 呼叫也要計時器（D-010）｜→ [P5-T026](docs/tasks/P5-T026-suggest-slug.md)
+- **D-027** 2026-09-27 Remus｜使用者在卡片上改過的配圖描述，之後任何一趟 Agent（含「校驗」）都不覆蓋｜→ [P5-T027](docs/tasks/P5-T027-keep-edited-brief.md)
+- **D-028** 2026-09-28 Remus｜在文章上改時可以加格式，只做模板 allowlist 內的（連結、粗體、斜體、H2、H3、清單、引用、分隔線）；自己做、不引入編輯器套件（allowlist 與後端早已支援；Tiptap／Lexical 要換掉整個編輯區另接文件模型，古騰堡太重）；貼上保留 allowlist 內格式；`b`／`i` 轉 `strong`／`em` 不默默丟；後端照原規則再驗。補充（同日，Codex 第二輪後）：存檔時沒改的頂層區塊原樣保留（整篇仍過 sanitize）；相對連結只收 `#` 錨點與單一 `/` 開頭的站內路徑，各處共用一套規則｜→ [P5-T028](docs/tasks/P5-T028-rich-edit-toolbar.md)、`docs/specs/security.md`
 - **D-029** 2026-09-28 Remus｜開源名稱 Galley、repo `wp-galley`（MIT）：名稱不含 WordPress（商標，說明文字用「for WordPress」）也不含 AI 廠商名；commit 信箱用 GitHub noreply；新功能一律開 PR｜無 Task
   （Galley＝校樣，對上「AI 當編輯、你當總編」；npm 的 galley／copydesk／masthead 已被佔，Copydesk 在 GitHub 已有 AI 寫作工具。https://github.com/x52640/wp-galley ）
-- **D-030** 2026-09-28 Remus｜新稿件只問類型與標題，「建立並打開」直接進文章打字模式（內文可以是空的）；拖放檔案、總覽 ⌘V 貼上建稿保留；打字模式裡標題可直接改、跟內文一起存｜→ P5-T029
-- **D-031** 2026-09-30 Remus｜已取消的稿件可以「恢復這篇」：回到取消前的狀態（`APPROVED` 回 `RENDERED`，核准不復活；記不到的回 `SOURCE`），恢復同一篇、WordPress 草稿連結照舊；不做「複製成新稿」（會跟已送出的草稿斷開、多一篇重複草稿）；只有本機 UI，MCP 不開；`FAILED`／`SUPERSEDED` 不在範圍｜→ P5-T030
-- **D-032** 2026-09-30 Remus｜設定精靈可以**停用**文章類型（隱藏、不刪；原本要手改設定檔，違反 D-008）：停用的不出現在新稿件選單，同一畫面隨時可再打開，舊稿件照常編輯發布；不做真刪（舊稿件會失去目標，read-think／diary 這類手寫的 target 精靈加不回來）｜→ P5-T032
-- **D-033** 2026-10-01 Remus｜健檢後依序瘦身與拆分：文件瘦身＋功能地圖 → 拆 CoreService（含 `api.ts`）→ 拆 fixtures → 拆 styles.css → 抽出 ProofView 編輯邏輯；重構不改行為，各一個 Task、一個 PR；新規矩：前後端都要的規則一律寫成 `src/contract` 純函式，fixtures 只放假資料不重寫規則｜→ P0-T002、P5-T004、P5-T033～P5-T035
+- **D-030** 2026-09-28 Remus｜新稿件只問類型與標題，「建立並打開」直接進文章打字模式（內文可以是空的）；拖放檔案、總覽 ⌘V 貼上建稿保留；打字模式裡標題可直接改、跟內文一起存｜→ [P5-T029](docs/tasks/P5-T029-write-in-place.md)
+- **D-031** 2026-09-30 Remus｜已取消的稿件可以「恢復這篇」：回到取消前的狀態（`APPROVED` 回 `RENDERED`，核准不復活；記不到的回 `SOURCE`），恢復同一篇、WordPress 草稿連結照舊；不做「複製成新稿」（會跟已送出的草稿斷開、多一篇重複草稿）；只有本機 UI，MCP 不開；`FAILED`／`SUPERSEDED` 不在範圍｜→ [P5-T030](docs/tasks/P5-T030-restore-cancelled.md)
+- **D-032** 2026-09-30 Remus｜設定精靈可以**停用**文章類型（隱藏、不刪；原本要手改設定檔，違反 D-008）：停用的不出現在新稿件選單，同一畫面隨時可再打開，舊稿件照常編輯發布；不做真刪（舊稿件會失去目標，read-think／diary 這類手寫的 target 精靈加不回來）｜→ [P5-T032](docs/tasks/P5-T032-disable-targets.md)
+- **D-033** 2026-10-01 Remus｜健檢後依序瘦身與拆分：文件瘦身＋功能地圖 → 拆 CoreService（含 `api.ts`）→ 拆 fixtures → 拆 styles.css → 抽出 ProofView 編輯邏輯；重構不改行為，各一個 Task、一個 PR；新規矩：前後端都要的規則一律寫成 `src/contract` 純函式，fixtures 只放假資料不重寫規則｜→ [P0-T002](docs/tasks/P0-T002-slim-docs.md)、[P5-T004](docs/tasks/P5-T004-split-core-service.md)、[P5-T033](docs/tasks/P5-T033-split-fixtures.md)～[P5-T035](docs/tasks/P5-T035-proofview-edit-logic.md)
 
 ## 待裁定
 

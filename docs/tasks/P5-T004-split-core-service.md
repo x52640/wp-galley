@@ -19,7 +19,9 @@ D-033。`src/core/service.ts` 開 Task 時 2,474 行，2026-10-01 已 4,000 行�
 ### 包含
 - 依檔內既有的區段註解拆檔（設定精靈、建立與讀取、內容、Agent、待處理清單、生圖、媒體、核准、發布、作者、內部共用），行為不變。
   做法由實作者選（例如 CoreService 保留為薄門面、各領域是接收共用 context 的模組），先在 Task 寫下選的方式再動手。
-- `src/contract/api.ts`（1000 行）同樣照領域拆檔，由 `api.ts` 重新匯出，import 路徑不變或一次改齊。
+- `src/contract/api.ts`（1000 行）同樣照領域拆檔。`tests/contract.test.ts` 目前禁止 contract 裡任何 `import`／`export … from`：
+  若要由 `api.ts` 重新匯出，守門測試改成**只允許同資料夾的相對路徑**（`./xxx.js`），仍禁止任何外部模組，並同步 architecture.md「依賴方向」的說法；
+  或不重新匯出、把各處 import 一次改齊。兩者擇一，寫進 Task 再動手。
 - `core-service.md` 的方法清單改成「哪個檔負責什麼」；architecture.md 功能地圖的後端欄改成檔名。
 ### 不包含
 - 任何行為或 API 變更
@@ -35,7 +37,7 @@ core-service.md、state-machine.md（核准失效必須仍集中在一處）
 - 與 P5-T002 都動到 `src/core/`，序列化執行。
 
 ## 完成定義
-- [ ] `npm run verify` 綠，測試數不變
+- [ ] `npm run verify` 綠，測試數不減、既有測試全保留（contract 守門測試每檔一條，拆檔會變多）
 - [ ] core-service.md 改成各檔負責什麼、功能地圖後端欄改成檔名
 - [ ] CURRENT_TASK 已更新
 

@@ -2,7 +2,7 @@
 id: P5-T035
 phase: 5
 status: ready
-depends_on: []
+depends_on: [P5-T034]
 specs: [design-system.md, architecture.md]
 write_paths: ["src/ui/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T035-proofview-edit-logic.md", "docs/CURRENT_TASK.md"]
 contract_change: none

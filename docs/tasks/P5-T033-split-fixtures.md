@@ -26,7 +26,7 @@ D-033。`src/ui/service/fixtures.ts`（2233 行）是 `?fixtures=1` 的假後端
 
 ## 實作要求
 - 重構不改行為：`npm run verify` 測試數不減；抽到 contract 的函式補單元測試。
-- `src/contract` 不得 import 任何模組（`tests/contract.test.ts` 守著）。
+- `src/contract` 不得 import 外部模組（`tests/contract.test.ts` 守著；P5-T004 若放寬為允許同資料夾相對路徑，照放寬後的規則）。
 - `?fixtures=1` 用 `scripts/ui-drive.mjs` 走過主要流程（總覽、文章、校稿、配圖、發布面板、精靈）無錯誤。
 
 ## 完成定義
