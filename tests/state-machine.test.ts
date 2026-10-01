@@ -9,6 +9,7 @@ import {
   TRANSITIONS,
   type JobState,
 } from '../src/core/state-machine.js';
+import { canCancel, cancelRejectedMessage } from '../src/contract/job-states.js';
 
 describe('狀態機的表格', () => {
   it('每個狀態都在表格裡，沒有漏掉的', () => {
@@ -179,5 +180,14 @@ describe('內容還能不能改', () => {
       }
     }
     expect(isContentMutable('CANCELLED')).toBe(false);
+  });
+});
+
+describe('示範資料用的「能不能取消」跟轉移表一致（P5-T033）', () => {
+  it.each(JOB_STATES)('%s', (state) => {
+    expect(canCancel(state)).toBe(canTransition(state, 'CANCELLED'));
+    if (!canCancel(state)) {
+      expect(cancelRejectedMessage(state)).toBe(new InvalidTransitionError(state, 'CANCELLED').message);
+    }
   });
 });

@@ -1,7 +1,7 @@
 /** 建立與讀取稿件、取消與恢復（對應後端 `service/jobs.ts`）。 */
 
 import { EMPTY_BODY_HTML } from '../../../contract/empty-body.js';
-import { restoreStateFor } from '../../../contract/job-states.js';
+import { canCancel, cancelRejectedMessage, restoreStateFor } from '../../../contract/job-states.js';
 import type { CreateJobInput, JobSummary, PublisherApi } from '../types.js';
 import { DIARY_TARGET, LONGFORM_TARGET, PAGE_TARGET, POST_TARGET, revision } from './data.js';
 import { baseArticle, baseDiary, baseLongform, store } from './store.js';
@@ -79,7 +79,8 @@ export const jobsApi: Pick<PublisherApi, 'listJobs' | 'createJob' | 'getJob' | '
   async cancelJob(uuid: string) {
     await delay();
     const job = mustGet(uuid);
-    if (job.state === 'CANCELLED') throw new Error('這篇已經取消了');
+    // 跟後端 cancelJob 同一條規則與說法（`contract/job-states.ts`，對著轉移表測過）。
+    if (!canCancel(job.state)) throw new Error(cancelRejectedMessage(job.state));
     job.cancelledFrom = { state: job.state, blockers: job.blockers };
     job.state = 'CANCELLED';
     // 跟後端一樣：取消就撤銷核准。

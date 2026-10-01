@@ -75,6 +75,8 @@ D-033。`src/ui/service/fixtures.ts`（2233 行）是 `?fixtures=1` 的假後端
 | 卡片能改哪一欄 `briefEditFieldError`、描述檢查 `checkBriefPrompt` | `brief-prompt.ts`（加） | `service/briefs.ts` | 自己寫 |
 | 想要什麼樣的圖檢查 `checkUserNote` | `user-note.ts`（加） | `service/briefs.ts`、`service/images.ts` | 兩處自己寫 |
 
+審查修正（low）：示範資料的取消改用 `job-states.ts` 的 `canCancel`／`cancelRejectedMessage`（後端仍用轉移表；`tests/state-machine.test.ts` 逐一比對兩者與 `InvalidTransitionError` 的訊息），PUBLISHED／PUBLISHING／FAILED 等不能取消，訊息跟後端一字不差。
+
 示範資料因此唯一的行為差異：恢復「取消前是 PUBLISHED／PUBLISHING／FAILED」的稿件改回 SOURCE（跟後端一樣）；後端本來就不准從這些狀態取消，只有示範資料湊得出來。
 
 ### 抽不了（或這次不抽）的清單

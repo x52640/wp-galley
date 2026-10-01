@@ -25,3 +25,29 @@ export function restoreStateFor(fromState: unknown): JobState {
 export function isOpenJobState(state: JobState): boolean {
   return state !== 'PUBLISHED' && state !== 'CANCELLED' && state !== 'SUPERSEDED';
 }
+
+/**
+ * 能取消的狀態：狀態機（`core/state-machine.ts` 的 `TRANSITIONS`）裡有 `→ CANCELLED` 的那幾列。
+ * 示範資料不能 import core，所以抄在這裡；`tests/state-machine.test.ts` 對著轉移表逐一比對，抄錯就紅（P5-T033）。
+ */
+export const CANCELLABLE_STATES: readonly JobState[] = ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED', 'APPROVED'];
+
+export function canCancel(state: JobState): boolean {
+  return CANCELLABLE_STATES.includes(state);
+}
+
+/**
+ * 不能取消時講的話，跟後端 `InvalidTransitionError(state, 'CANCELLED')` 一字不差（同一個測試守著）。
+ * 還有下一步的狀態要列出能變成什麼，所以這兩列也抄了轉移表。
+ */
+export function cancelRejectedMessage(state: JobState): string {
+  const next: Partial<Record<JobState, readonly JobState[]>> = {
+    PUBLISHING: ['PUBLISHED', 'FAILED'],
+    PUBLISHED: ['SUPERSEDED'],
+    CANCELLED: RESTORABLE_STATES,
+  };
+  const allowed = next[state];
+  return allowed === undefined
+    ? `工作項目已經是 ${state}，不能再變成 CANCELLED`
+    : `不能從 ${state} 變成 CANCELLED；${state} 只能變成 ${allowed.join('、')}`;
+}
