@@ -485,6 +485,36 @@ describe('預設傳輸（本機測試伺服器）', () => {
     }
   }, 30_000);
 
+  describe('NODE_TLS_REJECT_UNAUTHORIZED=0 時照樣驗憑證', () => {
+    beforeEach(() => {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    });
+
+    const request = (host: string, transport: Transport) =>
+      transport({
+        url: new URL(`https://${host}:${serverPort}/`),
+        headers: {},
+        signal: AbortSignal.timeout(5_000),
+        lookup: toLocal,
+      });
+
+    it('不受信任的憑證（沒給測試 CA）→ 失敗、伺服器沒收到請求', async () => {
+      await expect(request('example.test', createHttpsTransport())).rejects.toThrow();
+      expect(serverHits).toBe(0);
+    });
+
+    it('憑證主機名對不上 → 失敗、伺服器沒收到請求', async () => {
+      await expect(request('other.test', createHttpsTransport({ ca: cert }))).rejects.toThrow(/other\.test|altnames|Hostname/i);
+      expect(serverHits).toBe(0);
+    });
+
+    it('對照：主機名對、CA 對就連得上', async () => {
+      const res = await request('example.test', createHttpsTransport({ ca: cert }));
+      res.discard();
+      expect(res.status).toBe(200);
+    });
+  });
+
   it('真實傳輸也走位址檢查：解析到 127.0.0.1 就不連線', async () => {
     const f = createSourceFetcher({
       articleText: '',

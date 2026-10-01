@@ -53,6 +53,9 @@ export function createHttpsTransport(options: HttpsTransportOptions = {}): Trans
           agent,
           lookup,
           signal: request.signal,
+          // 明寫：不管 NODE_TLS_REJECT_UNAUTHORIZED 設成什麼都驗憑證；SNI 與主機名驗證用目標主機名（預設的 checkServerIdentity）。
+          rejectUnauthorized: true,
+          servername: request.url.hostname,
           ...(options.ca !== undefined ? { ca: options.ca } : {}),
         },
         (res) => {

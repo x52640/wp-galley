@@ -68,8 +68,8 @@ D-034。AI 查證要由我們的程式代抓網頁（Agent 不能在使用者機
 - [x] CURRENT_TASK 已更新（由主 session）
 
 ## 中斷／接手紀錄
-- 最後完成：審查修正（抽文字移進 worker＋時間上限、非遞迴走訪、同主機去結尾點、密碼與文章片段比對去掉看不見的字元；2026-10-01）。之前：`src/fetch/` 九個檔＋四個測試檔＋`tests/fixtures/fetch/`；security.md「取回器」補實作細節、factcheck.md 維基與抽文字、architecture.md 模組表與依賴規則（2026-10-01）
-- 已通過驗證：`npm run verify` 綠，77 檔／1655（基準 73／1497，新增 4 檔／158）；`npm run build` 後從 dist 載入 worker 實測可用；代理測試另做過變異驗證（改用 `https.globalAgent` 時測試會紅）
+- 最後完成：Codex 審查修正（網址解碼失敗直接拒絕、密碼另比只解 ASCII 的版本；TLS 明寫驗憑證；抽文字 worker 並行上限 2、結束後才釋放；2026-10-01）。之前：審查修正（抽文字移進 worker＋時間上限、非遞迴走訪、同主機去結尾點、密碼與文章片段比對去掉看不見的字元；2026-10-01）。之前：`src/fetch/` 九個檔＋四個測試檔＋`tests/fixtures/fetch/`；security.md「取回器」補實作細節、factcheck.md 維基與抽文字、architecture.md 模組表與依賴規則（2026-10-01）
+- 已通過驗證：`npm run verify` 綠，77 檔／1665（基準 73／1497，新增 4 檔／168）；`npm run build` 後從 dist 載入 worker 實測可用；代理測試另做過變異驗證（改用 `https.globalAgent` 時測試會紅）
 - 下一步：主 session 審查 → 另派審查 → commit；殘餘併入 known-issues；P6-T004 接進流程
 - Blocker：無
 
@@ -84,5 +84,6 @@ D-034。AI 查證要由我們的程式代抓網頁（Agent 不能在使用者機
   - 中文繁體變體（`Accept-Language` 與 `variant=zh-tw`）哪個有效未證實，P6-T005 手動驗證時看。
   - 維基 fixture 不是錄的真實回應，P6-T005 手動驗證時順便對一次格式。
   - 外洩檢查的密碼比對不分大小寫沒做（要動 `src/config` 的遮蔽器，超出本 Task）：把密碼換成全小寫夾帶擋不住。
+  - 網址解碼失敗一律拒絕：查詢字串用非 UTF-8 編碼（例如舊站的 Big5）的網址抓不到。
   - 測試用的自簽憑證與私鑰（`tests/fixtures/fetch/test-*.pem`，只給 example.test）進版控，秘密掃描工具可能會報。
 - 資安審查（2026-10-01）：網路層（SSRF 各種 IP 寫法、DNS rebinding、跳轉、代理、資源耗盡）全部擋得住。high 已修：抽文字移到 worker（10 秒上限、超時終止）、`walk` 非遞迴、例外一律轉結構化原因。low 已修：主機名結尾點、密碼 NFKC＋去非英數比對、片段比對先去不可見字元。殘餘已併入 known-issues.md。

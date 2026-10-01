@@ -2,7 +2,7 @@
  * 抽文字與截斷（factcheck.md「抽文字」）。
  */
 import { describe, expect, it } from 'vitest';
-import { extractTextIsolated } from '../src/fetch/extract-runner.js';
+import { ExtractPool, extractTextIsolated, sharedExtractPool } from '../src/fetch/extract-runner.js';
 import { extractText, extractTextFromHtml, truncateSources } from '../src/fetch/extract-text.js';
 
 describe('HTML → 純文字', () => {
@@ -77,5 +77,33 @@ describe('在 worker 裡抽文字（深層巢狀不卡後端）', () => {
 
   it('text/plain 不開 worker，直接處理', async () => {
     expect(await extractTextIsolated(' a ', 'text/plain', 1)).toEqual({ ok: true, text: 'a' });
+  });
+});
+
+describe('抽文字 worker 的並行上限', () => {
+  it('同時 6 個大頁面：存活的 worker 不超過 2 個，全部完成時是 0', async () => {
+    const pool = new ExtractPool(2);
+    const samples: number[] = [];
+    const sampler = setInterval(() => samples.push(pool.stats.live), 5);
+    const big = '<div>'.repeat(400_000);
+    const results = await Promise.all(Array.from({ length: 6 }, () => pool.run(big, 'text/html', 300)));
+    clearInterval(sampler);
+    expect(results.every((r) => !r.ok && r.code === 'too-complex')).toBe(true);
+    expect(pool.stats.maxLive).toBe(2);
+    expect(Math.max(...samples)).toBeLessThanOrEqual(2);
+    expect(pool.stats).toMatchObject({ live: 0, queued: 0 });
+  }, 20_000);
+
+  it('正常結束的 worker 也是退出後才交回結果', async () => {
+    const pool = new ExtractPool(2);
+    const out = await Promise.all([1, 2, 3].map((i) => pool.run(`<p>${i}</p>`, 'text/html', 10_000)));
+    expect(out).toEqual([1, 2, 3].map((i) => ({ ok: true, text: String(i) })));
+    expect(pool.stats.live).toBe(0);
+  });
+
+  it('取回器共用的 pool 上限是 2', async () => {
+    await Promise.all([1, 2, 3, 4].map(() => extractTextIsolated('<p>x</p>', 'text/html', 10_000)));
+    expect(sharedExtractPool.stats.maxLive).toBeLessThanOrEqual(2);
+    expect(sharedExtractPool.stats.live).toBe(0);
   });
 });

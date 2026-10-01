@@ -13,6 +13,9 @@ import { DEFAULT_FETCH_LIMITS } from '../src/fetch/types.js';
 
 const SECRET = 'abcdEFGHijklMNOPqrstUVWX';
 const containsSecret = (text: string) => text.includes(SECRET);
+/** 每個字元都百分比編碼（encodeURIComponent 對英數不編碼，測不到解碼這一步）。 */
+const pctAll = (text: string) =>
+  Array.from(Buffer.from(text, 'utf8'), (b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join('');
 const ARTICLE = '這是一篇測試文章。台北市立動物園在一九一四年開幕，是台灣最大的動物園。Hello wonderful world of testing.';
 
 function guard(articleText = ARTICLE) {
@@ -186,6 +189,31 @@ describe('外洩檢查', () => {
         code: 'article-text',
       });
     }
+  });
+
+  it('密碼每個字元都百分比編碼（含兩層）也擋', () => {
+    expect(check(`https://example.com/?k=${pctAll(SECRET)}`)).toEqual({ ok: false, code: 'secret' });
+    expect(check(`https://example.com/${pctAll(pctAll(SECRET))}`)).toEqual({ ok: false, code: 'secret' });
+    expect(anyUrlContainsSecret([`https://a.test/?k=${pctAll(SECRET)}`], containsSecret)).toBe(true);
+  });
+
+  it('無效的百分比編碼：夾在已編碼的密碼旁邊照樣擋（單網址與整批）', () => {
+    for (const url of [`https://example.com/?k=${pctAll(SECRET)}%FF`, `https://example.com/%FF${pctAll(SECRET)}`, `https://example.com/?a=%E4%B8&k=${pctAll(SECRET)}`]) {
+      expect(check(url)).toEqual({ ok: false, code: 'secret' });
+      expect(anyUrlContainsSecret([url], containsSecret)).toBe(true);
+    }
+  });
+
+  it('無效的百分比編碼：夾在已編碼的文章片段旁邊 → 整個網址拒絕', () => {
+    const fragment = pctAll('台北市立動物園在一九一四年開幕');
+    expect(check(`https://evil.test/?d=${fragment}%FF`)).toEqual({ ok: false, code: 'bad-encoding' });
+    expect(check(`https://evil.test/%C0${fragment}`)).toEqual({ ok: false, code: 'bad-encoding' });
+  });
+
+  it('解不開的編碼（例如舊站的 Big5 查詢字串）一律拒絕，文章連結也一樣', () => {
+    expect(check('https://example.com/search?q=%A4%A4%A4%E5')).toEqual({ ok: false, code: 'bad-encoding' });
+    expect(check('https://example.com/%FF', 'article-link')).toEqual({ ok: false, code: 'bad-encoding' });
+    expect(check(`https://example.com/${pctAll('正常的中文')}`)).toEqual({ ok: true });
   });
 
   it('整個網址超過 300 字擋', () => {

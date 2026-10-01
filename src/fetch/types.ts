@@ -29,6 +29,8 @@ export interface FetchLimits {
   readonly maxWikipediaCalls: number;
   /** 抽文字（worker 裡跑）的時間上限，超過就 terminate()。 */
   readonly extractTimeoutMs: number;
+  /** 同時幾個抽文字 worker。整個行程共用一個 pool（extract-runner.ts），用的是預設值，不吃 createSourceFetcher 的覆寫。 */
+  readonly maxConcurrentExtracts: number;
 }
 
 export const DEFAULT_FETCH_LIMITS: FetchLimits = Object.freeze({
@@ -43,6 +45,7 @@ export const DEFAULT_FETCH_LIMITS: FetchLimits = Object.freeze({
   maxPerHost: 3,
   maxWikipediaCalls: 30,
   extractTimeoutMs: 10_000,
+  maxConcurrentExtracts: 2,
 });
 
 /** 網址從哪來；決定外洩檢查做哪些項目（security.md「外洩檢查」）。 */
@@ -56,6 +59,7 @@ export type UrlOrigin =
 
 export type FetchFailureCode =
   | 'invalid-url'
+  | 'bad-encoding'
   | 'protocol'
   | 'port'
   | 'credentials'
@@ -141,6 +145,7 @@ export class BlockedAddressError extends Error {
 
 const REASONS: Record<FetchFailureCode, string> = {
   'invalid-url': '網址格式不對，沒抓',
+  'bad-encoding': '網址編碼不正常，沒抓',
   protocol: '不是 https 網址，沒抓',
   port: '網址指定了 443 以外的連接埠，沒抓',
   credentials: '網址裡帶帳號密碼，沒抓',
@@ -189,6 +194,7 @@ export function failure(
 function isUrlCheck(code: FetchFailureCode): boolean {
   return [
     'invalid-url',
+    'bad-encoding',
     'protocol',
     'port',
     'credentials',

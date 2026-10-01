@@ -64,14 +64,19 @@ export function normalizeForMatch(text: string): string {
     .trim();
 }
 
-/** 把網址解碼成人看的樣子：主機名 punycode 解回 Unicode，路徑與查詢字串做 percent-decode（最多三層）。 */
-export function decodedUrlForms(url: URL): string[] {
+/**
+ * 把網址解碼成人看的樣子：主機名 punycode 解回 Unicode，路徑與查詢字串做 percent-decode（最多三層）。
+ * 任何一層解不開（無效的百分比編碼）回 null：呼叫方要直接拒絕這個網址——
+ * 保留原樣的話，同一段裡其他已編碼的內容就躲過比對了。
+ */
+export function decodedUrlForms(url: URL): string[] | null {
   const host = domainToUnicode(url.hostname) || url.hostname;
   const rest = url.pathname + url.search;
   const forms = new Set<string>([url.href, `${host}${rest}`]);
   let current = rest;
   for (let i = 0; i < 3; i += 1) {
-    const next = safeDecode(current.replace(/\+/g, ' '));
+    const next = strictDecode(current.replace(/\+/g, ' '));
+    if (next === null) return null;
     if (next === current) break;
     current = next;
     forms.add(`${host}${current}`);
@@ -79,19 +84,28 @@ export function decodedUrlForms(url: URL): string[] {
   return [...forms];
 }
 
-function safeDecode(text: string): string {
+function strictDecode(text: string): string | null {
   try {
     return decodeURIComponent(text);
   } catch {
-    // 有不合法的 % 序列：逐段解，解不了的保留原樣。
-    return text.replace(/(%[0-9a-f]{2})+/gi, (m) => {
-      try {
-        return decodeURIComponent(m);
-      } catch {
-        return m;
-      }
-    });
+    return null;
   }
+}
+
+/**
+ * 只解 ASCII 的百分比編碼（`%00`～`%7F`），其他原樣留著，一定不會失敗；連解三層。
+ * 給密碼比對用：應用程式密碼只有英數，這樣不管同一段裡有沒有無效編碼都還原得出來。
+ */
+function asciiDecodedLayers(text: string): string[] {
+  const layers = [text];
+  let current = text;
+  for (let i = 0; i < 3; i += 1) {
+    const next = current.replace(/%([0-7][0-9a-f])/gi, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    if (next === current) break;
+    layers.push(next);
+    current = next;
+  }
+  return layers;
 }
 
 export function createExfiltrationGuard(options: ExfiltrationGuardOptions): ExfiltrationGuard {
@@ -115,9 +129,12 @@ export function createExfiltrationGuard(options: ExfiltrationGuardOptions): Exfi
     check(url, origin) {
       const forms = decodedUrlForms(url);
       // 密碼：原樣、解碼後、去掉所有空白、只留英數都要比（containsSecret 本身也會去空白再比一次）。
-      if (forms.some((f) => matchesSecret(f, containsSecret))) {
+      // 只解 ASCII 的那份一定解得開，網址編碼不正常時也照樣比得到。
+      const secretTexts = [...(forms ?? []), ...asciiDecodedLayers(url.href)];
+      if (secretTexts.some((f) => matchesSecret(f, containsSecret))) {
         return { ok: false, code: 'secret' };
       }
+      if (forms === null) return { ok: false, code: 'bad-encoding' };
       if (origin === 'wikipedia-api') {
         // 我們組的網址：中文標題 percent-encode 後很長，用解碼後的字數算。
         const decoded = forms[forms.length - 1] ?? url.href;
@@ -143,9 +160,10 @@ export function anyUrlContainsSecret(
   containsSecret: (text: string) => boolean,
 ): boolean {
   return urls.some((raw) => {
-    const forms = [raw, safeDecode(raw), safeDecode(safeDecode(raw))];
+    const forms = asciiDecodedLayers(raw);
     try {
-      forms.push(...decodedUrlForms(new URL(raw)));
+      const url = new URL(raw);
+      forms.push(...(decodedUrlForms(url) ?? []), ...asciiDecodedLayers(url.href));
     } catch {
       // 不是合法網址也照樣比原字串
     }
