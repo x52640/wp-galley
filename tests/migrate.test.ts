@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { createTestDatabase, type TestDatabase } from './helpers/test-db.js';
 import { runMigrations, listAppliedMigrations } from '../src/db/migrate.js';
 import { migrations } from '../src/db/migrations/index.js';
+import { migration009 } from '../src/db/migrations/009-factcheck.js';
 import { openDatabase, type DatabaseSync } from '../src/db/index.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -210,6 +211,68 @@ describe('008：使用者在文章上請 AI 配的圖（P5-T018）', () => {
     } finally {
       handle.close();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('009：AI 查證的紀錄與結果（P6-T004）', () => {
+  function at008(): { handle: DatabaseSync; cleanup: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-publisher-m009-'));
+    const handle = openDatabase(join(dir, 'test.sqlite'));
+    runMigrations(handle, migrations.slice(0, 8));
+    handle.exec(`
+      INSERT INTO jobs (id, uuid, state) VALUES (1, 'j', 'SOURCE');
+      INSERT INTO revisions (id, job_id, revision_number, origin, content_hash) VALUES (1, 1, 1, 'source', 'c1');
+      INSERT INTO agent_runs (id, job_id, provider, purpose, status) VALUES (1, 1, 'claude', 'review', 'succeeded');
+    `);
+    return { handle, cleanup: () => { handle.close(); rmSync(dir, { recursive: true, force: true }); } };
+  }
+  const list = (): readonly (typeof migrations)[number][] => [...migrations.slice(0, 8), migration009];
+
+  it('從 008 升上來：舊資料不動、兩張表建好，重跑不重複套用', () => {
+    const { handle, cleanup } = at008();
+    try {
+      const before = handle.prepare('SELECT * FROM agent_runs').all();
+      runMigrations(handle, list());
+      const applied = listAppliedMigrations(handle);
+      expect(applied.map((row) => row.id)).toContain('009');
+      runMigrations(handle, list());
+      expect(listAppliedMigrations(handle)).toEqual(applied);
+      expect(handle.prepare('SELECT * FROM agent_runs').all()).toEqual(before);
+      const names = (handle.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(
+        (row) => row.name,
+      );
+      expect(names).toEqual(expect.arrayContaining(['factcheck_runs', 'factcheck_findings']));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('CHECK 擋掉契約外的值；刪稿件連帶刪掉查證', () => {
+    const { handle, cleanup } = at008();
+    try {
+      runMigrations(handle, list());
+      const run = handle.prepare(
+        'INSERT INTO factcheck_runs (job_id, revision_id, scope, provider, status, stage, find_agent_run_id) VALUES (1, 1, ?, ?, ?, ?, 1)',
+      );
+      expect(() => run.run('article', 'claude', 'running', 'find')).not.toThrow();
+      expect(() => run.run('whole', 'claude', 'running', 'find')).toThrow();
+      expect(() => run.run('article', 'gpt', 'running', 'find')).toThrow();
+      expect(() => run.run('article', 'claude', 'timeout', 'find')).toThrow();
+      expect(() => run.run('article', 'claude', 'running', 'search')).toThrow();
+
+      const finding = handle.prepare(
+        'INSERT INTO factcheck_findings (run_id, job_id, ordinal, excerpt, claim, verdict, agent_verdict, evidence, sources_json, status) VALUES (1, 1, 0, ?, ?, ?, ?, ?, ?, ?)',
+      );
+      expect(() => finding.run('e', 'c', 'contradicted', 'contradicted', 'x', '[]', 'open')).not.toThrow();
+      expect(() => finding.run('e', 'c', 'wrong', 'contradicted', 'x', '[]', 'open')).toThrow();
+      expect(() => finding.run('e', 'c', 'supported', 'contradicted', 'x', '[]', 'closed')).toThrow();
+
+      handle.prepare('DELETE FROM jobs WHERE id = 1').run();
+      expect(handle.prepare('SELECT COUNT(*) AS n FROM factcheck_runs').get()).toEqual({ n: 0 });
+      expect(handle.prepare('SELECT COUNT(*) AS n FROM factcheck_findings').get()).toEqual({ n: 0 });
+    } finally {
+      cleanup();
     }
   });
 });

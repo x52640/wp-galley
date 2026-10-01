@@ -16,6 +16,8 @@ import type {
   ReviewProposal as ReviewProposalView,
   ReviewResolveResult,
   SlugSuggestionResponse,
+  FactCheckListResponse,
+  FactCheckRunResult,
 } from '../contract/api.js';
 import type { ProofMark } from './diff.js';
 import type { JobState } from './state-machine.js';
@@ -33,6 +35,7 @@ import { MediaModule } from './service/media.js';
 import { ApprovalModule } from './service/approval.js';
 import { PublishModule } from './service/publish.js';
 import { AuthorsModule } from './service/authors.js';
+import { FactCheckModule } from './service/factcheck.js';
 import type {
   AddMediaInput,
   AgentReviewInput,
@@ -44,6 +47,8 @@ import type {
   PublishInput,
   ResolveReviewInput,
   SlugSuggestionInput,
+  FactCheckInput,
+  FactCheckFetcherFactory,
 } from './service/types.js';
 
 /**
@@ -106,6 +111,8 @@ export type {
   PublishInput,
   ResolveReviewInput,
   SlugSuggestionInput,
+  FactCheckInput,
+  FactCheckFetcherFactory,
 };
 export { APP_PASSWORD_IN_CONTENT_MESSAGE } from './service/context.js';
 export { buildFigureHtml } from './service/media.js';
@@ -126,6 +133,7 @@ export class CoreService {
     ctx.approval = new ApprovalModule(ctx);
     ctx.publish = new PublishModule(ctx);
     ctx.authors = new AuthorsModule(ctx);
+    ctx.factcheck = new FactCheckModule(ctx);
     this.ctx = ctx;
   }
 
@@ -226,6 +234,20 @@ export class CoreService {
 
   cancelAgentRun(uuid: string): void {
     return this.ctx.agent.cancelAgentRun(uuid);
+  }
+
+  // --- factcheck.ts（AI 查證，D-034，P6-T004）---
+
+  runFactCheck(uuid: string, input: FactCheckInput): Promise<FactCheckRunResult> {
+    return this.ctx.factcheck.runFactCheck(uuid, input);
+  }
+
+  listFactChecks(uuid: string): FactCheckListResponse {
+    return this.ctx.factcheck.listFactChecks(uuid);
+  }
+
+  dismissFactCheck(uuid: string, findingId: number): void {
+    return this.ctx.factcheck.dismissFactCheck(uuid, findingId);
   }
 
   // --- review.ts ---

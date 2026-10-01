@@ -15,7 +15,7 @@
 
 | 檔 | 負責 | 公開方法（門面轉出） | 給別的模組用的 |
 | --- | --- | --- | --- |
-| `context.ts` | 共用狀態（repo、目前的站、`activeRuns`、`publishing`、`mediaUploads`、設定精靈旗標）、啟動清理、內部小工具（`requireJob`、`payloadOf`、`renderPayload`、`toMedia`、`trackWordPress`、`assertNoAppPassword`…） | — | 全部 |
+| `context.ts` | 共用狀態（repo、目前的站、`activeRuns`（查證多帶 `factCheck`：查證紀錄、中止抓取用的 AbortController、此刻有沒有 CLI 在跑）、查證的取回器 `factCheckFetcher`、`publishing`、`mediaUploads`、設定精靈旗標）、啟動清理、內部小工具（`requireJob`、`payloadOf`、`renderPayload`、`toMedia`、`trackWordPress`、`assertNoAppPassword`…） | — | 全部 |
 | `types.ts` | 方法的輸入型別（`CreateJobInput`、`CreateRevisionInput`、`AddMediaInput`、`PublishInput`…）與 `CoreServiceOptions` | — | — |
 | `setup.ts` | 設定精靈要問的事、換連線與發布目標 | `isPublishing`、`tryBeginReconfigure`、`endReconfigure`、`currentSiteUsage`、`openJobCountsByTarget`、`reconfigure` | — |
 | `jobs.ts` | 建立與讀取稿件、取消與恢復、發布前的 blocker、稽核紀錄 | `createJob`、`getJob`、`listJobs`、`cancelJob`、`restoreJob`、`listEvents` | `getJob` |
@@ -28,6 +28,7 @@
 | `approval.ts` | 核准、撤銷；**核准失效的唯一入口 `invalidateApproval`** | `approve`、`revokeApproval` | `invalidateApproval`、`assertApprovalUnchanged` |
 | `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
 | `authors.ts` | 作者清單、預設作者檢查、發布時送哪位 | `listAuthors`、`assertAuthorChoosable` | `resolvePublishAuthor` |
+| `factcheck.ts` | AI 查證（D-034，P6-T004）：兩趟 Agent＋抓網頁＋核對、存結果、讀取與結案、跑的期間鎖內容；純函式在 `src/core/factcheck.ts` | `runFactCheck`、`listFactChecks`、`dismissFactCheck` | `cancelActive`、`cancelOrphan`（`agent.ts` 的取消轉過來）、`assertNotRunning`、`requireOpenFinding`、`resolveByEdit`（`content.ts`）、`agentRunView`、`openContradictionCount`（`jobs.ts`） |
 
 **內容修改造成的核准失效**只走 `approval.ts` 的 `invalidateApproval`（`content.ts` 的 `createRevision` 與 `media.ts` 的換圖呼叫它），
 規則見 [state-machine.md](state-machine.md)「核准失效的實作點」。其他模組不准為了內容修改自己撤銷核准。
@@ -38,8 +39,9 @@
 測試要攔模組之間的呼叫（例如媒體模組裡呼叫的 `setFeaturedMedia`）時，spy `coreInternals(core).media`
 （`tests/helpers/core-fixture.ts`）；spy 門面攔不到，因為門面只是轉呼叫。
 
-**啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖、建議網址都算）結成
+**啟動清理（P5-T020）**：建構時把 `agent_runs` 裡所有 `running` 的紀錄（校稿、配圖、生圖、建議網址、查證都算）結成
 `failed`，原因「後端重啟，這次沒有完成」，每筆記一條 `agent_interrupted` 事件（actor `system`）。
+`factcheck_runs` 裡 `running` 的查證紀錄（P6-T004）同樣結成 `failed`、同一句原因，記 `factcheck_interrupted` 事件。
 進行中的執行只記在記憶體（`activeRuns`），子行程也隨舊行程結束，所以這些不可能再完成。只動那幾筆，
 不刪資料、不動其他表。前提：**一個 DB 只有一個 CoreService 行程**；將來若 MCP 另起行程共用同一個 DB，
 這條要改（否則後啟動的會把前一個正在跑的結掉）。
@@ -86,6 +88,9 @@ interface CoreService {
    * 標題跟目前的只差在空白（連續空格、NBSP、全形空格，`sameTitle`）算沒改，沿用目前的標題（P5-T031）。
    * `resolveItemId`（P5-T012）：從哪張卡片進去改的，存成新版本時那一項一起結案；只能跟 `editedBody` 或 `editedTitle`
    * 一起給（講標題的建議只改標題也算，P5-T031）。沒有實質改動（沒建新版本）就不結案。
+   * `resolveFactCheckId`（P6-T004）：同一套規則，從查證卡片「去原文改」：那條查證結果標成 `resolved-by-edit`（記下結案的版本）；
+   * 不屬於這篇或不是 open 的整個拒絕。
+   * AI 查證正在跑（含抓網頁、核對兩段）時一律 AgentError「查證正在跑，內容先鎖住…」（P6-T004）：放圖、設封面、套用建議都經過這裡。
    */
   createRevision(uuid: string, input: CreateRevisionInput): Revision;
   listRevisions(uuid: string): Revision[];
@@ -109,6 +114,23 @@ interface CoreService {
    * 也把 DB 那筆結成 cancelled（P5-T020）。
    */
   cancelAgentRun(uuid: string): void;
+  // 查證跑的時候（含抓網頁、核對兩段）取消轉給 factcheck.ts 的 cancelActive：停 CLI、中止抓取、查證紀錄結成 cancelled，不存結果。
+
+  // --- AI 查證（factcheck.ts。D-034，P6-T004；規格 factcheck.md）---
+  /**
+   * 發起查證，等它跑完才回。派工前擋（InvalidInputError，一個請求都不發）：稿件不能改、正文空的、範圍輸入不對
+   * （選字 4～300 字且在目前的標題或正文裡找得到；觀察卡片要屬於這篇、種類是三種之一、excerpt 還在文章裡）、
+   * 選字或第一趟組好的 prompt 含 WordPress 密碼。另一個 Agent 動作在跑 AgentError；沒有取回器 AgentUnavailableError。
+   * 第一趟產出的候選網址任一含密碼：整次失敗（AgentError）、一個網址都不抓、記 `factcheck_secret_in_urls` 事件。
+   * 第二趟組好的 prompt 含密碼 InvalidInputError（整次失敗）。結果**永不自動套用**、不建版本、不動核准、不寫 review_items；
+   * 同一句（忽略空白）已有 open 的舊結果標成 superseded。被停止丟 AgentError「查證已停止，沒有留下任何結果」。
+   * 跑的期間佔 `activeRuns`（跟其他 Agent 動作互斥），`createRevision` 一律 AgentError（`FACTCHECK_LOCKED_MESSAGE`）。
+   */
+  runFactCheck(uuid: string, input: FactCheckInput): Promise<FactCheckRunResult>;
+  /** 這篇的查證結果（不含 superseded），依段落順序；blockIndex 與 excerptGone（原句已經改了）讀取時算。 */
+  listFactChecks(uuid: string): FactCheckListResponse;
+  /** 「知道了」：只收 open 的（其他 InvalidInputError）。不是內容改動。 */
+  dismissFactCheck(uuid: string, findingId: number): void;
 
   // --- 生圖（images.ts；updateImageBrief 在 briefs.ts。D-017，見 agent-tasks.md）---
   imageGenerationStatus(): Promise<ImageGenerationStatus>;

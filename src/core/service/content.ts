@@ -4,7 +4,7 @@ import type { RenderOutcome, Revision } from '../../contract/api.js';
 import { computeProofMarks, type ProofMark } from '../diff.js';
 import { ContentChangedError, InvalidInputError } from '../errors.js';
 import { normalizeEditedBody, wrapBareTopLevelText } from '../html-blocks.js';
-import type { ReviewItemRow } from '../repository.js';
+import type { FactCheckFindingRow, ReviewItemRow } from '../repository.js';
 import { EMPTY_BODY_HTML } from '../../contract/empty-body.js';
 import { checkPlainTitle, sameTitle, titleMaxLengthFromSchema } from '../../contract/plain-title.js';
 import { canTransition, isContentMutable } from '../state-machine.js';
@@ -40,6 +40,8 @@ export class ContentModule {
   createRevision(uuid: string, input: CreateRevisionInput = {}): Revision {
     const job = this.ctx.requireJob(uuid);
     this.ctx.assertMutable(job);
+    // AI 查證跑的期間鎖住內容（P6-T004）：在文章上改、放圖、套用建議都經過這裡。
+    this.ctx.factcheck.assertNotRunning(job);
 
     const template = this.ctx.requireTemplate(job);
     const baseRow = this.ctx.repo.latestRevision(job.id);
@@ -89,6 +91,14 @@ export class ContentModule {
       resolveRow =
         (proposal ? this.ctx.repo.listReviewItems(proposal.id) : []).find((row) => row.id === input.resolveItemId) ?? null;
       if (!resolveRow) throw new InvalidInputError(`這一項不屬於目前的校稿提案：${input.resolveItemId}`);
+    }
+    // 從查證卡片「去原文改」（P6-T004）：規則同 resolveItemId，寫入任何東西之前先驗。
+    let resolveFactCheck: FactCheckFindingRow | null = null;
+    if (input.resolveFactCheckId !== undefined) {
+      if (input.editedBody === undefined && input.editedTitle === undefined) {
+        throw new InvalidInputError('resolveFactCheckId 只能跟 editedBody 或 editedTitle 一起用（從查證卡片進去直接改文章）');
+      }
+      resolveFactCheck = this.ctx.factcheck.requireOpenFinding(job, input.resolveFactCheckId);
     }
     const bodyData =
       input.editedBody === undefined
@@ -175,6 +185,7 @@ export class ContentModule {
       });
       this.ctx.review.closeProposalIfDone(resolveRow.proposal_id);
     }
+    if (resolveFactCheck) this.ctx.factcheck.resolveByEdit(job, resolveFactCheck, revisionRow.id);
 
     return this.ctx.toRevision(revisionRow);
   }

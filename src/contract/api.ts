@@ -21,3 +21,4 @@ export * from './api-job.js';
 export * from './api-requests.js';
 export * from './api-responses.js';
 export * from './api-setup.js';
+export * from './api-factcheck.js';

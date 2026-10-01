@@ -1,7 +1,7 @@
 ---
 id: P6-T004
 phase: 6
-status: ready
+status: in_progress
 depends_on: [P6-T002, P6-T003]
 specs: [factcheck.md, security.md, architecture.md, core-service.md, http-api.md, review-proposals.md]
 write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
@@ -78,9 +78,65 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 - [ ] CURRENT_TASK 已更新（由主 session；migration head 改 009）
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01，P6-T001）
-- 已通過驗證：—
-- 下一步：等 P6-T002、P6-T003 合併後派 subagent 實作
-- Blocker：無（P6-T002、P6-T003 已合併）
+- 最後完成：流程、儲存、API、測試、spec 更新（2026-10-01，subagent）；migration 009 已在副本驗過並註冊
+- 已通過驗證：`npx vitest run` 1812/1813（83 檔；唯一失敗是 `tests/jobs-api.test.ts` 的 JobDetail 欄位清單）；`tsc` 只剩 `src/ui/components/AgentProgress.tsx` 一個錯
+- 下一步：主 session 決定兩處範圍外的一行修改（見完成結果「範圍外」），之後 `npm run verify` 應全綠；審查 → commit
+- Blocker：兩個範圍外檔案（`src/ui/components/AgentProgress.tsx`、`tests/jobs-api.test.ts`）不在 write_paths
 
 ## 完成結果
+
+### 範圍外（需要主 session 裁定，未動）
+Task 要求的兩個新增欄位會碰到 write_paths 以外的既有檔，各一行：
+- `src/ui/components/AgentProgress.tsx` 的 `TASK_VERB: Record<AgentRun['task'], string>`：`AgentRunTask` 加了 `factcheck`，要補 `factcheck: '正在查證',`（否則 typecheck 失敗）。
+- `tests/jobs-api.test.ts`「job 詳情一次給齊前端要的欄位」的欄位清單：補 `'openFactCheckContradictions'`。
+
+### 新檔
+`src/core/service/factcheck.ts`（流程、停止、鎖、讀取與結案）、`src/core/factcheck.ts`（純函式：挑主張、候選規劃、輪流分配、核對與降級、`sameExcerpt`）、
+`src/contract/api-factcheck.ts`（型別）、`src/contract/factcheck.ts`（共用規則：選字長度、觀察卡片種類、`isExcerptGone`、`countOpenContradictions`）、
+`src/db/migrations/009-factcheck.ts`、`tests/factcheck-{service,api,verify}.test.ts`、`tests/helpers/fake-fetcher.ts`。
+
+### 資料表（migration 009）
+- `factcheck_runs`：稿件、發起時的 revision、scope、provider、hosted_search、status（running／succeeded／failed／cancelled）、stage（find／fetch／judge／verify）、
+  四個計數、judged（第二趟有沒有跑）、兩趟各自的 `agent_runs` id、開始／結束時間、失敗原因。
+- `factcheck_findings`：run、稿件、序號、excerpt、claim、verdict、agent_verdict、evidence、correction、sources_json（給畫面的來源清單，不存全文）、
+  status（open／dismissed／resolved-by-edit／superseded）、resolved_revision_id、建立／結案時間。blockIndex 與「原句已經改了」讀取時算。
+
+### migration 驗證
+1. 先寫 `tests/migrate.test.ts` 的 009 測試（從 008 升上來、重跑不重複、CHECK、刪稿件連帶刪），用 `migrations.slice(0, 8)` 加 `migration009` 在暫存 DB 跑，綠。
+2. 唯讀複製 `data/publisher.sqlite`（沒有 -wal／-shm）到系統暫存目錄，對副本套 001–009：之前 001–008，之後 001–009；jobs 15、revisions 83、agent_runs 21、
+   review_items 186、image_briefs 11、publish_events 279 前後一樣；重跑不重複套用；`foreign_key_check` 空、`integrity_check` ok。
+3. SQL 定稿後才註冊到 `index.ts`；註冊後再拿新的副本用正式清單跑一次，結果相同。`data/publisher.sqlite` 的 sha256 前後不變（72d40c41…）；dev server 全程沒開。
+4. **主 session：真的 DB 下次啟動會套 009（migration head 改 009）。**
+
+### 流程與失敗處理
+- 派工前（400 `INVALID_INPUT`，不建任何紀錄）：稿件不能改、正文空、選字長度／找不到、觀察卡片不存在／不屬於這篇／種類不對／引的句子已不在文章裡、選字或第一趟 prompt 含密碼。另一個 Agent 動作在跑 502；沒有取回器 503。
+- ① 找來源：做得到的帶 `hostedSearch`。回來後先對 AI 給的**全部**候選網址整批查密碼：命中就整次 failed、一個都不抓、記 `factcheck_secret_in_urls`（rejected，不含網址）、502。
+  excerpt 拿 `articleTextForAgent` 的輸出比，找不到的丟掉並計數；先丟再截到範圍上限。
+- ② 抓：候選＝段落裡的連結 → Agent 網址 → 維基百科；輪流分配（8／3）；每次抓完更新計數。全部沒抓到不跑第二趟。
+- ③ 判斷：截斷後編 S1…；第二趟 prompt 再查密碼；`strictNoTools`。
+- ④ 核對：拿 `sourceTextForAgent(截短後)` 比；8 字以下不算；降級留 agentVerdict、拿掉 correction。
+- 存：同一句的舊 open 結果標 superseded；結果不碰 `review_items`、不建版本、不動核准；事件 `factcheck_completed`。
+- 停止：`DELETE /agent` → 停 CLI（有在跑的話）、abort 取回器的 signal（正式的取回器把 signal 接進傳輸層）、兩邊紀錄結成 cancelled；等著的請求拿到 502「查證已停止，沒有留下任何結果」。
+- 任何其他失敗：查證紀錄 failed＋`factcheck_failed` 事件。啟動清理：running 的查證紀錄結成 failed＋`factcheck_interrupted`。
+- 鎖：查證佔 `activeRuns` 全程（抓網頁時指向第一趟那筆 `agent_runs`，purpose `factcheck`），`createRevision` 一律 502；`JobDetail.agentRun` 由查證紀錄組出來（running、`factCheck.stage`）。
+
+### API
+`POST /api/jobs/:uuid/factchecks`（等跑完）、`GET /api/jobs/:uuid/factchecks`、`DELETE /api/jobs/:uuid/factchecks/:id`；`POST /revisions` 多 `resolveFactCheckId`。
+契約新增：`AgentRunTask` 多 `factcheck`、`AgentRun.factCheck?`、`JobDetail.openFactCheckContradictions?`（選填，舊的示範資料不用改）。
+
+### 給功能地圖（architecture.md，主 session 加一列）
+| AI 查證（選字、觀察卡片、一鍵查證；停止；知道了；去原文改） | （P6-T005） | `POST`／`GET …/factchecks`、`DELETE …/factchecks/:id`、`DELETE …/agent`、`POST …/revisions`（`resolveFactCheckId`） | `factcheck.ts`（純函式 `src/core/factcheck.ts`、取回器 `src/fetch/`） | factcheck、security（取回器） | factcheck-service、factcheck-api、factcheck-verify、factcheck-prompts、factcheck-schema、safe-fetch |
+模組表 `src/fetch` 那列的「P6-T004 接進流程」可改成已接上（`server/app.ts` 的 `realFactCheckFetcher`）。
+
+### 給 known-issues
+- 查證跑的時候「換一張圖」（`replaceMedia`）會先把新圖傳上 WordPress，建版本時才被鎖擋下，媒體庫多一張孤兒圖（`media.ts` 不在本 Task 範圍；畫面會鎖住按鈕，只有直接打 API 才碰得到）。
+- 網頁來源的標題用 Agent 給的（或連結文字、網域）：取回器沒有回頁面 `<title>`。
+- 停止時抽文字的 worker 不會被中止（上限 10 秒，結果丟掉）。
+- 查證跑的期間取消稿件（`cancelJob`）不會停掉查證，跑完照樣存結果（無害，但會用掉額度）。
+
+### 偏離與不確定
+- 被降級的結果不留 `correction`（spec 沒講；已寫進 factcheck.md）。
+- 觀察卡片引的句子已不在文章裡 → 400（spec 沒講；已寫進 factcheck.md）。
+- 同一網址出現在好幾條主張只給前面那條（spec 只說「只抓一次」）。
+- 維基百科搜尋沒找到也列成 fetch-failed 來源，網址記成搜尋頁。
+- 鎖內容的錯誤用 502 `AGENT_ERROR`（跟「另一個 Agent 動作在跑」同一類），不是 409。

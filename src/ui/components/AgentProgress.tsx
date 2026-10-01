@@ -22,6 +22,7 @@ const TASK_VERB: Record<AgentRun['task'], string> = {
   images: '正在想該配什麼圖',
   'generate-image': '正在生圖',
   'suggest-slug': '正在想英文網址',
+  factcheck: '正在查證',
 };
 
 /**

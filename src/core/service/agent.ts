@@ -1,4 +1,4 @@
-/** Agent：校稿、一鍵配圖、建議英文網址、取消正在跑的 Agent。 */
+/** Agent：校稿、一鍵配圖、建議英文網址、取消正在跑的 Agent（AI 查證的取消轉給 factcheck.ts）。 */
 
 import type { AgentRunResult, AgentTask, SlugSuggestionResponse } from '../../contract/api.js';
 import { AgentError, ContentChangedError, InvalidInputError } from '../errors.js';
@@ -395,10 +395,28 @@ export class AgentModule {
   cancelAgentRun(uuid: string): void {
     const job = this.ctx.requireJob(uuid);
     const active = this.ctx.activeRuns.get(job.uuid);
+    // AI 查證（P6-T004）：抓網頁、核對兩段沒有 CLI 在跑，停止要中止抓取、結掉查證紀錄，交給查證模組。
+    if (active?.factCheck) {
+      this.ctx.factcheck.cancelActive(job, active);
+      return;
+    }
     // 記憶體裡沒有、DB 卻還是 running（上一個行程留下的孤兒）：沒有子行程可停，但 DB 那筆要結掉，
-    // 否則畫面會一直顯示在跑、按取消也沒用（P5-T020）。
+    // 否則畫面會一直顯示在跑、按取消也沒用（P5-T020）。查證紀錄也一樣。
+    const orphanFactCheck = active === undefined && this.ctx.factcheck.cancelOrphan(job);
     const rowId = active?.rowId ?? this.ctx.repo.runningAgentRun(job.id)?.id;
-    if (rowId === undefined) return;
+    if (rowId === undefined) {
+      if (orphanFactCheck) {
+        this.ctx.repo.insertEvent({
+          jobId: job.id,
+          revisionId: null,
+          approvalId: null,
+          actor: 'ui',
+          eventType: 'agent_cancelled',
+          status: 'succeeded',
+        });
+      }
+      return;
+    }
     if (active) void this.ctx.agents.cancel(active.provider, active.runId);
     this.ctx.repo.finishAgentRun(rowId, {
       status: 'cancelled',
