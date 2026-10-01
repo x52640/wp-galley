@@ -7,6 +7,7 @@ import { DIARY_TARGET, LONGFORM_TARGET, PAGE_TARGET, POST_TARGET, revision } fro
 import { baseArticle, baseDiary, baseLongform, store } from './store.js';
 import { clone, delay, escapeText, mustGet, nextHash, syncEmptyBody, syncPlacement } from './context.js';
 import { fixtureTargets } from './setup.js';
+import { openContradictionsFor } from './factcheck.js';
 
 export const jobsApi: Pick<PublisherApi, 'listJobs' | 'createJob' | 'getJob' | 'cancelJob' | 'restoreJob'> = {
   async listJobs(filter) {
@@ -73,7 +74,8 @@ export const jobsApi: Pick<PublisherApi, 'listJobs' | 'createJob' | 'getJob' | '
     const job = mustGet(uuid);
     syncPlacement(job);
     syncEmptyBody(job);
-    return clone(job);
+    // 發布面板提醒「有 N 條查證說法不同」（不是 blocker），跟後端一樣每次讀取時算。
+    return { ...clone(job), openFactCheckContradictions: openContradictionsFor(uuid) };
   },
 
   async cancelJob(uuid: string) {

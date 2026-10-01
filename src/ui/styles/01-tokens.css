@@ -61,6 +61,9 @@
   --kind-source-bg:  #F6EDCF;
   --kind-style:      #3F5B4F;
   --kind-style-bg:   #E4EDE8;
+  /* AI 查證（D-034）：靛藍，跟「事實」的藍分得開；文章上是虛線底線（ProofView 的 HIGHLIGHT_COLORS.factcheck） */
+  --kind-check:      #3730A3;
+  --kind-check-bg:   #F0EFFB;
 
   --focus:           #1E4F8A;
 
@@ -103,6 +106,8 @@
     --kind-source-bg:  #3D3419;
     --kind-style:      #9CC7B5;
     --kind-style-bg:   #26372F;
+    --kind-check:      #B4B6F5;
+    --kind-check-bg:   #29284A;
 
     --focus:           #8FB6E8;
   }

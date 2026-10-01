@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
-import { isLoaded, type JobDetail, type ReviewItem } from '../service/types.js';
+import {
+  isLoaded,
+  type AgentProvider,
+  type FactCheckFinding,
+  type FactCheckListResponse,
+  type FactCheckRequest,
+  type JobDetail,
+  type ReviewItem,
+} from '../service/types.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
-import { canInsertImages, stageDisplay, type StageView } from '../lib/stage-view.js';
+import { canInsertImages, canSelectToFactCheck, stageDisplay, type StageView } from '../lib/stage-view.js';
+import { factCheckBlockedReason, hostedSearchNote, isNewCancelledRun, isOpenFinding } from '../lib/factcheck-view.js';
+import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
 import { useConfirm } from './ConfirmDialog.js';
@@ -13,7 +23,7 @@ import { typeLabel } from './JobList.js';
 import { InsertImagePanel } from './InsertImagePanel.js';
 import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
-import { SuggestionColumn } from './SuggestionColumn.js';
+import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
 import { MediaPanel } from './panels/MediaPanel.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
@@ -57,8 +67,24 @@ export function Workspace({
   const [previewHash, setPreviewHash] = useState<string | null>(null);
   /** 文章或對照。成品不在這裡：它跟著發布面板走。 */
   const [view, setView] = useState<StageView>('article');
-  /** 亮起來的那一項建議（校樣上的標記與右欄卡片同步）。 */
-  const [activeId, setActiveId] = useState<number | null>(null);
+  /** 亮起來的那一張卡片（校樣上的標記與右欄卡片同步）：校稿 `r<id>`、查證 `f<id>`。 */
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  /** 這篇的查證結果（`GET …/factchecks`，D-034）。讀不到（舊後端）就是 null，右欄照樣只有校稿。 */
+  const [factChecks, setFactChecks] = useState<FactCheckListResponse | null>(null);
+  /** 按了查證、請求剛送出但 agentRun 還沒出現在稿件上：這段時間也不給再按。 */
+  const [factCheckSending, setFactCheckSending] = useState(false);
+  /**
+   * 交給哪一家（記在 localStorage）。放在工作區而不是 AgentButton 裡：三個查證入口與它們旁邊的
+   * Antigravity 說明都要跟著選單上換的那一家走。
+   */
+  const [provider, setProviderState] = useState<AgentProvider>(loadProvider);
+  const setProvider = useCallback((next: AgentProvider) => {
+    setProviderState(next);
+    saveProvider(next);
+  }, []);
+  /** 最近一次查證的 id（送出前記下來，分得出「這次被停止」與「這次在開紀錄之前就失敗」）。 */
+  const latestRunId = useRef<number | null>(null);
+  latestRunId.current = factChecks?.latestRun?.id ?? null;
   /** 要框起來的段落。建議定位不到字（例如要自己改的那種）時，至少框出那一段。 */
   const [focusBlock, setFocusBlock] = useState<number | null>(null);
   /** 每點一次卡片加一：同一張卡片再點一次，對照也要再展開、再捲過去（D-019）。 */
@@ -100,9 +126,11 @@ export function Workspace({
     const mine = ++generation.current;
     const isCurrent = (): boolean => alive.current && mine === generation.current;
     try {
-      const next = await api.getJob(uuid);
+      // 查證結果另一條路讀（GET …/factchecks）；讀不到不擋整個工作區，留著上一次的。
+      const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
       if (isCurrent()) {
         setJob(next);
+        if (checks !== undefined) setFactChecks(checks);
         setError(null);
       }
     } catch (cause) {
@@ -117,7 +145,8 @@ export function Workspace({
     setError(null);
     setBlocks([]);
     setPreviewHash(null);
-    setActiveId(null);
+    setActiveKey(null);
+    setFactChecks(null);
     setFocusBlock(null);
     setSheet(null);
     setEditing(null);
@@ -159,29 +188,75 @@ export function Workspace({
   const closeSheet = useCallback(() => setSheet(null), []);
 
   const items = useMemo(() => job?.review?.items ?? [], [job?.review]);
+  const openFindings = useMemo(() => (factChecks?.findings ?? []).filter(isOpenFinding), [factChecks]);
   const highlights = useMemo<ProofHighlight[]>(
-    () =>
-      items.flatMap((item) => {
+    () => [
+      // 校稿先包（維持原本標得出來的樣子）；查證後包。查證跟校稿部分重疊、包不進去的就不標字，
+      // 點卡片時照樣框出那一段（ProofView 的 wrapFirst 只在單一文字節點裡找）。完全同一段字時查證包在校稿裡面。
+      ...items.flatMap((item) => {
         const text = highlightText(item);
         return text === null
           ? []
-          : [{ id: item.id, kind: kindOf(item), text, blockIndex: item.blockIndex, skipInside: item.change?.after ?? null }];
+          : [{ id: reviewKey(item), kind: kindOf(item), text, blockIndex: item.blockIndex, skipInside: item.change?.after ?? null }];
       }),
-    [items],
+      ...openFindings.map((finding) => ({
+        id: findingKey(finding),
+        kind: 'factcheck' as const,
+        text: finding.excerpt,
+        blockIndex: finding.blockIndex,
+      })),
+    ],
+    [items, openFindings],
   );
 
-  const activate = useCallback((item: ReviewItem | null) => {
-    setActiveId(item?.id ?? null);
-    setFocusBlock(item?.blockIndex ?? null);
+  const activate = useCallback((entry: { key: string; blockIndex: number | null } | null) => {
+    setActiveKey(entry?.key ?? null);
+    setFocusBlock(entry?.blockIndex ?? null);
     setFocusSeq((seq) => seq + 1);
   }, []);
 
   const onHighlight = useCallback(
-    (id: number) => {
-      const item = items.find((candidate) => candidate.id === id);
-      if (item) activate(item);
+    (key: string) => {
+      const item = items.find((candidate) => reviewKey(candidate) === key);
+      if (item) {
+        activate({ key, blockIndex: item.blockIndex });
+        return;
+      }
+      const finding = openFindings.find((candidate) => findingKey(candidate) === key);
+      if (finding) activate({ key, blockIndex: finding.blockIndex });
     },
-    [items, activate],
+    [items, openFindings, activate],
+  );
+
+  /**
+   * 發起查證（D-034）。三個入口共用：觀察卡片、選字、一鍵查證。請求要等整次查證跑完才回（1～3 分鐘）；
+   * 先重讀一次讓頂端長條與分段進度出現、開始輪詢。按了停止的不當錯誤講（右欄會中性地說「已停止」）。
+   */
+  const startFactCheck = useCallback(
+    (request: Omit<FactCheckRequest, 'provider'>) => {
+      const previousRunId = latestRunId.current;
+      setAgentError(null);
+      setFactCheckSending(true);
+      void (async () => {
+        let created: FactCheckFinding[] = [];
+        try {
+          const pending = api.runFactCheck(uuid, { provider, ...request });
+          window.setTimeout(() => void refresh(), 500);
+          created = (await pending).findings;
+        } catch (cause) {
+          const latest = await api.listFactChecks(uuid).catch(() => null);
+          // 只有「這次新開的那一筆被停止」才不當錯誤講；在開紀錄之前就失敗的（選字找不到、含密碼、另一個動作在跑…）照講。
+          if (alive.current && !isNewCancelledRun(latest?.latestRun ?? null, previousRunId)) setAgentError(describeError(cause));
+        } finally {
+          if (alive.current) setFactCheckSending(false);
+          await refresh();
+        }
+        // 查一句（選字、觀察卡片）的結果只有一張：直接亮起來、右欄捲到它，不用自己找。
+        const only = created.length === 1 ? created[0] : undefined;
+        if (only !== undefined && alive.current) activate({ key: findingKey(only), blockIndex: only.blockIndex });
+      })();
+    },
+    [uuid, refresh, activate, provider],
   );
 
   const startEdit = useCallback((item: ReviewItem | null) => {
@@ -203,12 +278,31 @@ export function Workspace({
     setSheet(null);
     setEditing({
       itemId: item?.id ?? null,
+      factCheckId: null,
       caret: item === null || lost ? null : (highlightText(item) ?? quoted),
       caretSkipInside: item?.change?.after ?? null,
       blockIndex: item?.blockIndex ?? null,
       nonce: Date.now(),
     });
   }, []);
+  /** 查證卡片的「去原文改」：游標停在那句前面（找不到就停在那一段開頭），存檔後那條結案（resolved-by-edit）。 */
+  const startFactCheckEdit = useCallback((finding: FactCheckFinding) => {
+    if (workingRef.current) {
+      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+      return;
+    }
+    setEditNotice(null);
+    setView('article');
+    setSheet(null);
+    setEditing({
+      itemId: null,
+      factCheckId: finding.id,
+      caret: finding.excerpt,
+      blockIndex: finding.blockIndex,
+      nonce: Date.now(),
+    });
+  }, []);
+
   // 新稿件建好直接進打字模式。等稿件讀到了才進（startEdit 要看有沒有 AI 在跑）；
   // 校樣還沒載入也沒關係，ProofView 會等 iframe 載入完再把游標放進去。
   const loadedUuid = job !== null && isLoaded(job) ? job.uuid : null;
@@ -277,6 +371,18 @@ export function Workspace({
     (job.target.requireFeaturedImage && job.featuredMediaId === null);
   const showImages = imagesOpen ?? imagesAttention;
   const display = stageDisplay(view, sheet === 'publish');
+  // 查證三個入口共用的反灰條件（跟其他 Agent 動作同一套）；查證跑的期間內容鎖住（D-034）。
+  const factCheckBlocked = factCheckBlockedReason({
+    running: working === true || factCheckSending,
+    editing: editing !== null,
+    comparing: display.compare,
+    bodyEmpty: job.bodyEmpty,
+    finished: isFinished(job.state),
+  });
+  const contentLocked =
+    factCheckSending || (job.agentRun?.status === 'running' && job.agentRun.task === 'factcheck')
+      ? '正在查證，內容先鎖住；等它跑完（或按停止）再改'
+      : null;
   // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
   const insertable = canInsertImages(display, {
     editing: editing !== null,
@@ -323,7 +429,18 @@ export function Workspace({
               先寫點內容，才能請 AI 看、發布
             </span>
           )}
-          {!isFinished(job.state) && <AgentButton job={job} refresh={refresh} onError={setAgentError} />}
+          {!isFinished(job.state) && (
+            <AgentButton
+              job={job}
+              refresh={refresh}
+              onError={setAgentError}
+              provider={provider}
+              onProvider={setProvider}
+              sending={factCheckSending}
+              factCheckBlocked={factCheckBlocked}
+              onFactCheck={() => startFactCheck({ scope: 'article' })}
+            />
+          )}
           {job.published ? (
             <a className="btn" href={job.published.link} target="_blank" rel="noreferrer">
               <Icon name="external-link" size={15} />
@@ -392,7 +509,7 @@ export function Workspace({
             job={job}
             mode={display.proof}
             highlights={highlights}
-            activeHighlight={activeId}
+            activeHighlight={activeKey}
             onHighlight={onHighlight}
             focusBlock={display.proof === 'final' ? null : focusBlock}
             onBlocks={onBlocks}
@@ -400,6 +517,15 @@ export function Workspace({
             onPreviewHash={onPreviewHash}
             editing={editing}
             onEndEdit={endEdit}
+            selectionCheck={
+              canSelectToFactCheck(display, { editing: editing !== null, finished: isFinished(job.state) })
+                ? {
+                    blockedReason: factCheckBlocked,
+                    note: hostedSearchNote(provider),
+                    onCheck: (text) => startFactCheck({ scope: 'selection', selection: text }),
+                  }
+                : null
+            }
             insertImage={
               insertable
                 ? (afterBlockIndex, close) => (
@@ -437,6 +563,10 @@ export function Workspace({
                 ...(editing?.itemId == null || (editedBody === undefined && editedTitle === undefined)
                   ? {}
                   : { resolveItemId: editing.itemId }),
+                // 從查證卡片「去原文改」進來的：那條查證結果一起結案（resolved-by-edit）。
+                ...(editing?.factCheckId == null || (editedBody === undefined && editedTitle === undefined)
+                  ? {}
+                  : { resolveFactCheckId: editing.factCheckId }),
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
@@ -481,12 +611,18 @@ export function Workspace({
         <aside className="margin" aria-label="修改建議與圖片" inert={editing !== null} data-locked={editing !== null ? 'yes' : 'no'}>
           <SuggestionColumn
             job={job}
+            factChecks={factChecks}
             refresh={refresh}
-            activeId={activeId}
+            activeKey={activeKey}
             // 在對照中按卡片就留在對照，CompareView 會捲到那一段並框起來；
             // 同一時間底下的校樣也標亮，回到文章時就停在那一項。
             onActivate={activate}
             onEditSource={startEdit}
+            onEditFinding={startFactCheckEdit}
+            onFactCheckObservation={(item) => startFactCheck({ scope: 'observation', observationItemId: item.id })}
+            factCheckBlocked={factCheckBlocked}
+            factCheckNote={hostedSearchNote(provider)}
+            contentLocked={contentLocked}
           />
 
           <section className="margin-section" data-open={showImages ? 'yes' : 'no'}>

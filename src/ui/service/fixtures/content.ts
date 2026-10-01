@@ -6,6 +6,7 @@ import type { CreateRevisionInput, JobDetail, PublisherApi, RenderOutcome } from
 import { countOpenReviewItems, pendingReviewBlocker } from '../../../contract/review-state.js';
 import { revision } from './data.js';
 import { clone, delay, escapeText, invalidateApproval, mustGet, nextHash } from './context.js';
+import { resolveFactCheckByEdit } from './factcheck.js';
 
 /** 模擬 buildPreviewDocument 的輸出：自成一份文件、樣式內嵌、正文在 .preview-body。 */
 function previewDocument(job: JobDetail): string {
@@ -60,6 +61,13 @@ export const contentApi: Pick<PublisherApi, 'createRevision' | 'listRevisions' |
     if (input.resolveItemId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
       throw new Error('resolveItemId 只能跟 editedBody 或 editedTitle 一起用（從卡片進去直接改文章）');
     }
+    if (input.resolveFactCheckId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
+      throw new Error('resolveFactCheckId 只能跟 editedBody 或 editedTitle 一起用（從查證卡片進去直接改文章）');
+    }
+    // 查證跑的期間鎖住內容（D-034）：跟後端一樣，任何會建新版本的動作都拒絕。
+    if (job.agentRun?.status === 'running' && job.agentRun.task === 'factcheck') {
+      throw new Error('正在查證，內容先鎖住；等它跑完（或按停止）再改');
+    }
     // 在文章上改的標題（P5-T029）：跟後端同一條規則。
     let editedTitle: string | undefined;
     if (input.editedTitle !== undefined) {
@@ -76,7 +84,9 @@ export const contentApi: Pick<PublisherApi, 'createRevision' | 'listRevisions' |
     if (editedTitle !== undefined && typeof currentTitle === 'string' && sameTitle(editedTitle, currentTitle)) {
       editedTitle = undefined;
     }
-    const onlyTitle = Object.keys(input).every((key) => ['editedTitle', 'resolveItemId', 'origin', 'reason', 'expectedContentHash'].includes(key));
+    const onlyTitle = Object.keys(input).every((key) =>
+      ['editedTitle', 'resolveItemId', 'resolveFactCheckId', 'origin', 'reason', 'expectedContentHash'].includes(key),
+    );
     if (current && input.editedTitle !== undefined && editedTitle === undefined && onlyTitle) {
       return clone(current);
     }
@@ -98,6 +108,8 @@ export const contentApi: Pick<PublisherApi, 'createRevision' | 'listRevisions' |
     );
     job.currentRevision = next;
     if (input.sourceText !== undefined) job.sourceText = input.sourceText;
+    // 從查證卡片「去原文改」進來的：那條跟著結案（resolved-by-edit）。
+    if (input.resolveFactCheckId !== undefined) resolveFactCheckByEdit(uuid, input.resolveFactCheckId);
     // 從卡片進去改的：那一項跟著結案（後端 createRevision 的 resolveItemId）；只改標題也算（P5-T031）。
     if (input.resolveItemId !== undefined && job.review) {
       job.review = {

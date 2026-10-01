@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { api } from '../service/client.js';
 import type { AgentProvider, LoadedJob } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { PRESETS, PROVIDERS, QUICK_TASKS, loadProvider, saveProvider } from '../lib/agent-tasks.js';
+import { FACTCHECK_QUICK, PRESETS, PROVIDERS, QUICK_TASKS } from '../lib/agent-tasks.js';
+import { hostedSearchNote } from '../lib/factcheck-view.js';
 import { Spinner, useAction } from './panels/shared.js';
+import { FcIcon } from './FactcheckIcon.js';
 
 /**
  * 「請 AI 看一遍」（B1 頂列）。
@@ -17,16 +19,36 @@ import { Spinner, useAction } from './panels/shared.js';
 
 const CHECK = QUICK_TASKS.find((task) => task.key === 'check')!;
 
+/** 跑的時候主按鈕上寫什麼：照這一趟在做的事講。 */
+const RUNNING_LABEL: Record<string, string> = {
+  factcheck: 'AI 查證中…',
+  'generate-image': 'AI 生圖中…',
+  'suggest-slug': 'AI 想網址中…',
+};
+
 export function AgentButton({
   job,
   refresh,
   onError,
+  provider,
+  onProvider,
+  sending,
+  factCheckBlocked,
+  onFactCheck,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
   onError: (message: string | null) => void;
+  /** 交給哪一家（工作區管，三個查證入口跟著同一家）。 */
+  provider: AgentProvider;
+  onProvider: (provider: AgentProvider) => void;
+  /** 查證剛送出、輪詢還沒看到 agentRun：這段時間主按鈕也反灰。 */
+  sending: boolean;
+  /** 「一鍵查證」現在不能按的原因（改字中、對照中…）；能按是 null。 */
+  factCheckBlocked: string | null;
+  /** 「一鍵查證」（D-034）：用選單裡選的那一家查整篇。 */
+  onFactCheck: () => void;
 }): JSX.Element {
-  const [provider, setProvider] = useState<AgentProvider>(loadProvider);
   const [menuOpen, setMenuOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
   const send = useAction();
@@ -35,7 +57,7 @@ export function AgentButton({
   const running = job.agentRun?.status === 'running';
   // 正文是空的（新稿件剛建好，P5-T029）：AI 沒東西可看，後端也會擋。停用並說明，不讓人按了才報錯。
   const empty = job.bodyEmpty;
-  const disabled = send.busy || running || job.currentRevision === null || empty;
+  const disabled = send.busy || sending || running || job.currentRevision === null || empty;
 
   useEffect(() => onError(send.error), [send.error, onError]);
 
@@ -79,8 +101,8 @@ export function AgentButton({
         onClick={() => run(CHECK.task, CHECK.instruction)}
         title={empty ? '正文是空的，先寫點內容再請 AI 看' : `交給 ${providerLabel}：錯字加疑點一起跑`}
       >
-        {send.busy || running ? <Spinner /> : <Icon name="sparkles" size={16} />}
-        {running ? 'AI 看稿中…' : '請 AI 看一遍'}
+        {send.busy || sending || running ? <Spinner /> : <Icon name="sparkles" size={16} />}
+        {running ? (RUNNING_LABEL[job.agentRun?.task ?? ''] ?? 'AI 看稿中…') : sending ? RUNNING_LABEL['factcheck'] : '請 AI 看一遍'}
       </button>
       <button
         type="button"
@@ -112,6 +134,26 @@ export function AgentButton({
             </button>
           ))}
 
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={factCheckBlocked !== null}
+            onClick={() => {
+              setMenuOpen(false);
+              onFactCheck();
+            }}
+          >
+            <FcIcon name="search-check" size={16} />
+            <span className="menu-item-text">
+              <span className="menu-item-label">{FACTCHECK_QUICK.label}</span>
+              <span className="menu-item-hint">{factCheckBlocked ?? FACTCHECK_QUICK.hint}</span>
+              {hostedSearchNote(provider) !== null && (
+                <span className="menu-item-hint menu-item-warn">{hostedSearchNote(provider)}</span>
+              )}
+            </span>
+          </button>
+
           <div className="menu-sep" role="separator" />
 
           <div className="menu-block">
@@ -125,10 +167,7 @@ export function AgentButton({
                   aria-checked={provider === option.id}
                   className="segmented-item"
                   data-active={provider === option.id ? 'yes' : 'no'}
-                  onClick={() => {
-                    setProvider(option.id);
-                    saveProvider(option.id);
-                  }}
+                  onClick={() => onProvider(option.id)}
                 >
                   {option.label}
                 </button>

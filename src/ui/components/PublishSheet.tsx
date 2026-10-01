@@ -3,6 +3,7 @@ import { api } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { shortHash } from '../lib/format.js';
+import { openContradictionNotice } from '../../contract/factcheck.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
 import { ErrorNote, Spinner, useAction } from './panels/shared.js';
@@ -85,6 +86,8 @@ export function PublishSheet({
   const needsCover = job.target.requireFeaturedImage && job.featuredMediaId === null;
   const otherBlockers = job.blockers.filter((blocker) => !HANDLED_BLOCKER.test(blocker));
   const cover = job.media.find((asset) => asset.id === job.featuredMediaId) ?? null;
+  // AI 查證「說法不同」還沒處理的（D-034）：只提醒、不擋，跟校稿建議一樣（Q-1 現況）。
+  const factNotice = openContradictionNotice(job.openFactCheckContradictions ?? 0);
 
   const approvedNow = job.state === 'APPROVED' && job.approval?.valid === true;
   const seen = job.state === 'PREVIEWED' || approvedNow;
@@ -145,7 +148,7 @@ export function PublishSheet({
         <AuthorPicker state={authors} chosen={authorId} onChoose={setAuthorId} />
       </section>
 
-      {(pending > 0 || briefsLeft > 0 || needsCover || otherBlockers.length > 0) && (
+      {(pending > 0 || factNotice !== null || briefsLeft > 0 || needsCover || otherBlockers.length > 0) && (
         <section className="p-section">
           <h3 className="p-label">
             <span className="p-num">2</span>還沒處理的
@@ -154,6 +157,14 @@ export function PublishSheet({
             {pending > 0 && (
               <li data-tone="warn">
                 <span>還有 {pending} 項修改建議沒看</span>
+                <button type="button" className="btn btn-quiet btn-tiny" onClick={() => onGoTo('review')}>
+                  回去看
+                </button>
+              </li>
+            )}
+            {factNotice !== null && (
+              <li data-tone="warn">
+                <span>{factNotice}</span>
                 <button type="button" className="btn btn-quiet btn-tiny" onClick={() => onGoTo('review')}>
                   回去看
                 </button>
@@ -181,8 +192,8 @@ export function PublishSheet({
               </li>
             ))}
           </ul>
-          {pending > 0 && !needsCover && (
-            <p className="field-hint">沒看完也能發：建議只是提醒，不會擋住你。</p>
+          {(pending > 0 || factNotice !== null) && !needsCover && (
+            <p className="field-hint">沒看完也能發：建議與查證只是提醒，不會擋住你。</p>
           )}
         </section>
       )}

@@ -37,3 +37,16 @@ export function canInsertImages(
 ): boolean {
   return display.proof === 'edit' && !display.compare && !state.editing && !state.finished && !state.working;
 }
+
+/**
+ * 文章上選字時要不要浮出「查證這句」的膠囊（P6-T005）。
+ *
+ * 跟「在這裡插圖」一樣只在**看文章**的時候：對照、發布面板的成品、直接在文章上改的時候不出現，稿件結束也不出現。
+ * AI 在跑的時候**照樣出現**，但反灰並講原因（`factCheckBlockedReason`）——選了字卻什麼都沒有，會以為功能壞了。
+ */
+export function canSelectToFactCheck(
+  display: StageDisplay,
+  state: { editing: boolean; finished: boolean },
+): boolean {
+  return display.proof === 'edit' && !display.compare && !state.editing && !state.finished;
+}

@@ -1,5 +1,8 @@
 import type {
   ApprovalResponse,
+  FactCheckListResponse,
+  FactCheckRequest,
+  FactCheckRunResult,
   AuthorsResponse,
   ImageAtPositionRequest,
   ImageBriefResponse,
@@ -252,6 +255,15 @@ const httpApi: PublisherApi = {
 
   suggestSlugs: (uuid: string, input: SlugSuggestionRequest) =>
     sendJson<SlugSuggestionResponse>(`/api/jobs/${uuid}/slug-suggestions`, 'POST', input),
+
+  runFactCheck: (uuid: string, input: FactCheckRequest) =>
+    sendJson<FactCheckRunResult>(`/api/jobs/${uuid}/factchecks`, 'POST', input),
+
+  listFactChecks: (uuid: string) => getJson<FactCheckListResponse>(`/api/jobs/${uuid}/factchecks`),
+
+  async dismissFactCheck(uuid: string, findingId: number) {
+    await sendJson<unknown>(`/api/jobs/${uuid}/factchecks/${findingId}`, 'DELETE');
+  },
 
   resolveReview: (uuid: string, input: { itemIds: number[]; decision: 'apply' | 'skip' }) =>
     sendJson<ReviewResolveResult>(`/api/jobs/${uuid}/review/resolve`, 'POST', input),
