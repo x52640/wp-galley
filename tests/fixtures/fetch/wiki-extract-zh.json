@@ -1,0 +1,14 @@
+{
+  "batchcomplete": true,
+  "query": {
+    "normalized": [{ "fromencoded": false, "from": "臺北市立動物園", "to": "臺北市立動物園" }],
+    "pages": [
+      {
+        "pageid": 189453,
+        "ns": 0,
+        "title": "臺北市立動物園",
+        "extract": "臺北市立動物園是位於臺灣臺北市文山區的動物園，前身為1914年開幕的圓山動物園。\n\n\n== 歷史 ==\n1986年遷至木柵現址。"
+      }
+    ]
+  }
+}

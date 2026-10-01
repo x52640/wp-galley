@@ -1,0 +1,6 @@
+{
+  "batchcomplete": true,
+  "query": {
+    "pages": [{ "ns": 0, "title": "不存在的條目名稱", "missing": true }]
+  }
+}

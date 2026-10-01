@@ -39,6 +39,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `src/preview` | 校樣 HTML 文件 | [templates.md](templates.md) |
 | `src/agents` | CLI 適配器、輸出契約與解析 | [agent-cli.md](agent-cli.md)、[agent-tasks.md](agent-tasks.md) |
 | `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
+| `src/fetch` | AI 查證的取回器：安全抓取（DNS 前檢查、在連線用的解析裡查位址、跳轉、不經代理、大小與逾時）、外洩檢查、這次查證的額度、維基百科、抽文字（P6-T002；P6-T004 接進流程） | [security.md](security.md)「取回器」、[factcheck.md](factcheck.md) |
 | `src/media` | 圖片驗證（`validate.ts`，上傳與生圖候選圖共用）與上傳 | [agent-tasks.md](agent-tasks.md) |
 | `src/server` | Fastify、路由、守門；設定換掉後就地生效（`reconfigure.ts`） | [http-api.md](http-api.md)、[security.md](security.md) |
 | `src/ui` | React 發布台；示範資料（`?fixtures=1`）在 `service/fixtures/`，照後端 `service/` 的領域拆檔、同名對應，只放假資料、規則用 `src/contract`（D-033，P5-T033） | [design-system.md](design-system.md) |
@@ -51,6 +52,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 - `db/templates/core/preview` 全部不得 import Fastify 或 HTTP。
 - `src/contract` 只准 import 同資料夾的檔（`./xxx.js`；`api.ts` 拆成 `api-*.ts` 後互相引用型別，P5-T004），
   其他模組一律不准（`tests/contract.test.ts` 守著），否則會把後端拖進瀏覽器 bundle。`ui` 只能從 `contract` 拿後端的型別，不得 import `src/core`。
+- `src/fetch` 只准 import Node 內建、`parse5` 與同資料夾的檔：文章文字、`containsSecret`、User-Agent 版本由呼叫方傳入，
+  不 import `src/config`、`src/core`、`src/agents`、`src/server`（`tests/safe-fetch.test.ts`「依賴方向」守著）。DNS 解析與傳輸可注入，預設實作只在正式啟動時用。
 - 改動前先跑一次依賴檢查。
 
 ## 程式慣例

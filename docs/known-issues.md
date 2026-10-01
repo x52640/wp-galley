@@ -38,6 +38,12 @@
   Claude 工具限制是黑名單，名單外的 `Artifact`、`ArtifactData`、`Skill`、`Monitor`、`PowerShell` 等在 `--print` 是否載入未證實（手動驗證加測 `--tools ""`＋`--json-schema`）；
   `--strict-mcp-config` 是否也擋 claude.ai 帳號層級連接器未證實；agy 沒有停用工具／忽略 MCP 的參數，只靠 `--sandbox` 與 prompt 提示。
 
+- P6-T002 取回器（2026-10-01）：外洩檢查「連續 12 字」對英文文章偏嚴，網址含文章裡的專有名詞（如 `united states`）就不抓（寧可多擋，看實際使用再調）；
+  WordPress 密碼比對不分大小寫沒做（要動 `src/config` 的遮蔽器），全小寫夾帶擋不住（密碼本來就不會進 prompt，這是第二層）；
+  繁體中文維基同時送 `Accept-Language: zh-TW` 與 `variant=zh-tw`，哪個生效未證實（P6-T005 真跑時看）；
+  查詢字串用非 UTF-8 編碼（如 Big5）的舊站網址會被當成編碼不正常而不抓；
+  測試用的自簽憑證與私鑰（`tests/fixtures/fetch/test-*.pem`，只給 `example.test`）進版控，秘密掃描可能告警。
+
 ## 收官紀錄裡的殘餘（原在 CURRENT_TASK「上次停在哪」「更早」）
 
 - P5-T030：取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）。
