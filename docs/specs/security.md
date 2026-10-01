@@ -3,7 +3,7 @@
 > 擁有範圍：信任邊界、三條分界線、硬性禁令、秘密處理、本機守門、已接受的限制。
 > 違反本檔任何一條即為錯誤，不論 Task 怎麼寫。
 > 程式：`src/server/plugins/`（local-only guard）、`src/config/secrets.ts`、
-> `src/agents/process-runner.ts`、migration 001（`approvals.created_by`）。
+> `src/agents/process-runner.ts`、migration 001（`approvals.created_by`）；取回器 `src/fetch/`（P6-T002，尚未建立）。
 
 ## 三條無法繞過的分界線
 
@@ -20,6 +20,10 @@
 
 模板檔案是**受信任**的本機設定；使用者貼入的文章與任何外部網頁內容是**不受信任資料**，
 不能覆蓋系統規則或模板規則。
+
+**取回器抓回的網頁（AI 查證，D-034，P6-T002／P6-T004 實作）**：一律是不受信任資料，只能進兩個地方——
+**沒有任何工具**的那一趟 Agent（查證的「判斷」，prompt 裡明講是不受信任資料），以及畫面上的**純文字**（不當 HTML 渲染）。
+不進校稿、不進 templateData、不存全文（只存引文前後文）。規則見下方「取回器」。
 
 **直接在文章上改時貼上的 HTML（P5-T028）**：剪貼簿的 `text/html` 在外層用 `DOMParser` 解析（惰性文件，
 script 不跑、圖片不載），只保留模板 `allowedTags` 內的標籤、連結只留 `href` 且要通過下面的連結網址規則，其餘屬性、`style`、`class`、`script`
@@ -57,9 +61,11 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
 - 不得在測試期間寫入正式首頁；WordPress 整合先用 staging 或 mock。
 - 不得修改 WordPress 的 PHP／Theme／Plugin 原始碼。CPT 沒開 `show_in_rest` 就顯示
   設定錯誤，不要去改 PHP。
-- 校稿工作不授權 Agent 使用 shell、檔案寫入、網路或 WordPress 工具。每次執行要有
-  timeout、取消機制、最大輸出、concurrency 1，工作目錄設為隔離的 job workspace。
-  （Agent 為什麼不能連外：[ADR-0001](../adr/0001-agent-no-network.md)。）
+- 任何一趟 Agent 都不授權**在使用者機器上執行**的網路能力（抓網頁、shell 連外、本機 MCP、瀏覽器控制），
+  也不授權 shell、檔案寫入或 WordPress 工具。**唯一例外**：AI 查證的「找來源」那一趟可以開廠商伺服器上執行的搜尋
+  （Codex 只准 `web_search="cached"`、Claude 只准 `WebSearch`，不含 `WebFetch`；agy 不開），其餘各趟連廠商端搜尋也明確關掉。
+  理由與仍然禁止的清單：[ADR-0001](../adr/0001-agent-no-network.md)「修訂」；各趟實際參數：[agent-cli.md](agent-cli.md)。
+  每次執行要有 timeout、取消機制、最大輸出、concurrency 1，工作目錄設為隔離的 job workspace。
 - `data/`、`drafts/`、`generated-images/`、`backups/`、`.env`、SQLite 全部進 `.gitignore`。
 - 進到需要 WordPress 網址、Application Password 等資料時向使用者索取，不要預先寫進
   任何檔案。使用者自己在設定精靈填的，照下方「設定精靈寫入的秘密」存進 `.env`。
@@ -92,7 +98,7 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   任何派工之前**；錯誤訊息、details、log 都不含密碼。
   - 涵蓋：`createJob`（原稿、標題、templateData）、`createRevision`（整份新內容、editedBody、editedTitle、sourceText、reason
     ——放圖、設封面、套用校稿都經過它）、上傳／換圖／「用這張」的替代文字與說明、派校稿（指示＋**組好的
-    prompt**）、請 AI 配一張（那句話＋組好的 prompt）、在卡片上改配圖描述（改的 prompt 或那句話＋重組好的 prompt，P5-T025）、生圖（組好的 prompt）。派工檢查組好的 prompt，所以密碼
+    prompt**）、請 AI 配一張（那句話＋組好的 prompt）、在卡片上改配圖描述（改的 prompt 或那句話＋重組好的 prompt，P5-T025）、生圖（組好的 prompt）、AI 查證（選的那段字、兩趟組好的 prompt、取回器要抓的每個網址，P6-T004 實作）。派工檢查組好的 prompt，所以密碼
     設定之前就存進去的舊內容也送不出去。
   - 舊內容（密碼設定之前存的）另外在三處擋：**核准**（`approve`，`InvalidInputError`）、**發布**（前置檢查 4a，
     `PublishBlockedError`，同一句訊息，一個請求都不送）、**上傳／換圖／用這張**（送到 WordPress 之前先看目前
@@ -173,6 +179,28 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   [wordpress-site.md](wordpress-site.md)「設定精靈」。
 - 測試一律注入暫存路徑；`buildApp` 沒拿到路徑時寫入路由回 503，不會退回專案裡真的 `.env`。
 
+## 取回器（AI 查證，D-034）
+
+> P6-T002 實作，尚未上線。查證的資料流、來源怎麼挑、抽文字見 [factcheck.md](factcheck.md)；這裡只放安全硬性要求。
+> 為什麼由我們的程式抓、不讓 Agent 抓：[ADR-0001](../adr/0001-agent-no-network.md)。
+
+取回器是整個專案唯一**照 Agent 給的網址**對外發請求的地方。它要擋兩件事：打到使用者的本機或內網（SSRF），
+以及被當成把草稿送出去的通道（外洩）。
+
+| 項目 | 規則 |
+| --- | --- |
+| 協定與埠 | 只收 `https:`、埠 443；網址裡不准有帳密（`user@`）；主機是 IP 字面值、`localhost`、沒有點的主機名一律拒絕 |
+| 位址 | **在連線用的 DNS 解析（`lookup`）裡**檢查解析出的每個位址，檢查過的就是實際連線的位址——不准「查一次、連另一次」（擋 DNS rebinding）。至少擋：`0.0.0.0/8`、`10/8`、`100.64/10`、`127/8`、`169.254/16`、`172.16/12`、`192.0.0/24`、`192.168/16`、`198.18/15`、`224/4`、`240/4`、`::`、`::1`、`fc00::/7`、`fe80::/10`、`ff00::/8`；IPv4 映射（`::ffff:x.x.x.x`）、NAT64（`64:ff9b::/96`）、6to4（`2002::/16`）取出內含的 IPv4 再查一次。任何一個位址不合格就整個拒絕 |
+| 跳轉 | 最多 3 跳，每一跳重新走整套檢查（協定、位址、外洩檢查）；換主機可以，但照樣檢查 |
+| 代理 | 不經任何代理（不讀 `HTTP(S)_PROXY`，也不吃 Node 依環境變數自動套用的代理）：走代理就檢查不到真正連的位址 |
+| 請求 | 只有 GET；不帶 Cookie、不帶任何認證標頭 |
+| 回應 | `Content-Type` 只收 `text/html`、`text/plain`、`application/xhtml+xml`、`application/json`；壓縮前與解壓後都算大小，上限 2 MB；單次逾時 10 秒，**涵蓋本體讀完**（同 WordPressClient 的做法） |
+| 數量 | 一次查證最多嘗試 12 個網址、同時 3 個、同一主機最多 3 個；維基百科 API 最多 20 次（主機固定、網址由我們組） |
+| 外洩檢查 | 對 **Agent 給的網址與每一跳跳轉**：整個網址最長 300 字、查詢字串最長 120 字；解碼後不准出現文章（目前內容的純文字）連續 12 字以上的片段；過 `containsSecret`（WordPress 密碼）。文章裡本來就有的連結是使用者寫的，不做「文章片段」那一項，其餘照做；我們自己組的維基百科網址只過 `containsSecret` 與長度 |
+| 失敗 | 任何一項不合格就不抓、記成「抓不到」，不重試 |
+
+測試一律注入假的 DNS 解析與假的傳輸，**不連真實網路**；預設傳輸不吃代理環境變數也要有測試。
+
 ## 發布的外部副作用
 
 把草稿改成公開的瞬間，MailPoet／Jetpack 可能寄出電子報或自動分享，**之後刪文章救不回來**。
@@ -187,3 +215,9 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   空隙只能縮小、不能消除。
 - `wordpress_objects` 沒做多站台 scoping；目前只有一個站台。
 - 校樣預覽的 CSP 允許任意 loopback 埠嵌入。
+- **取回器的外洩殘餘風險（D-034，使用者 2026-10-01 接受）**：取回器照 Agent 給的網址發 GET，網址本身可以夾帶文字。
+  文章裡若有惡意指令，查證第一趟可能被帶去給一個把草稿藏在網址裡的連結。上面的外洩檢查擋得住直接夾帶原文、
+  **擋不住編碼過的**（base64、拆字、換同義字）。緩解：外洩檢查、數量上限、WordPress 密碼一律擋死；所以只影響**還沒發布的草稿內容**。
+  不採用「只准抓白名單網域」：那樣第一趟的搜尋就白開了。
+- **廠商端搜尋字串會含文章內容**：查證第一趟的搜尋字串送到 OpenAI／Anthropic 的搜尋後端。prompt（含整篇文章）本來就已經送給廠商，
+  沒有多送出什麼；`web_search="live"`／`WebFetch` 這類會去抓任意網址的仍然禁止（ADR-0001「修訂」）。

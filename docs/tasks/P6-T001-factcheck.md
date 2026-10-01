@@ -1,7 +1,7 @@
 ---
 id: P6-T001
 phase: 6
-status: ready
+status: in_progress
 depends_on: []
 specs: [factcheck.md, security.md]
 write_paths: ["docs/specs/factcheck.md", "docs/specs/security.md", "docs/specs/README.md", "docs/specs/architecture.md", "docs/adr/0001-agent-no-network.md", "docs/adr/README.md", "docs/tasks/P6-T001-factcheck.md", "docs/tasks/P6-T002-*.md", "docs/tasks/P6-T003-*.md", "docs/tasks/P6-T004-*.md", "docs/tasks/P6-T005-*.md", "docs/CURRENT_TASK.md", "plan.md"]
@@ -44,9 +44,15 @@ D-034（修訂 D-009）。設計研究的提案在 `/private/tmp/claude-501/fact
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01，原佔位檔重寫）
-- 已通過驗證：—
-- 下一步：派 subagent 實作
-- Blocker：無（原本等 P5-T001，已解除）
+- 最後完成：文件全部寫完（2026-10-01）：factcheck.md 定稿、ADR-0001 修訂、security.md（信任邊界、硬性禁令、新節「取回器」、
+  刻意接受的限制）、specs／adr 索引、P6-T002～P6-T005 Task 檔、plan.md（D-009 註記、D-034 連結、範圍、階段 6）、CURRENT_TASK
+- 已通過驗證：`npm run verify`（見完成結果）
+- 下一步：主 session 審查 → 另派審查 → commit／PR；使用者看 factcheck.md「資料流」與 security.md「取回器」「刻意接受的限制」
+- Blocker：無。D-034 連到的 P5-T036 Task 檔在另一個 PR，合併前那個連結是斷的
 
 ## 完成結果
+- `npm run verify` 綠：typecheck 通過、Vitest 72 檔／1494 測試（2026-10-01，沒改程式，跟主樹基準相同）。
+- 跟提案不同的地方：取回器硬性要求的家放 security.md（提案建議 factcheck.md）；CLI 參數只寫進 agent-cli.md（提案要 security.md 也列參數表）；
+  停止沿用 `DELETE …/agent`、進度沿用 `JobDetail.agentRun`（提案另開 `DELETE …/factcheck`）；新增：嘗試上限 12（留 8 份）、
+  引文少於 8 字不算核對、同一句再查舊結果變 `superseded`、維基 API 上限 20、Agent 給的網址才做「文章片段」外洩檢查。
+- 留給 known-issues：無新殘餘。P5-T036 Task 檔在另一個 PR，plan.md／CURRENT_TASK／factcheck.md 連過去的連結合併前是斷的。

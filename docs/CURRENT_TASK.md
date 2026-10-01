@@ -11,14 +11,12 @@
 
 ## 進行中
 
-D-033 健檢後的瘦身與拆分（[P0-T002](tasks/P0-T002-slim-docs.md) 已合併）；以下各一個 PR，重構不改行為：
+D-034 AI 查證（設計已裁定）。D-033 那批（P0-T002、P5-T004、P5-T033～T035）全部合併（#12～#15）。
 
 | Task | 內容 | 狀態 |
 | --- | --- | --- |
-| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService（含 `api.ts`） | PR #14 已合併 |
-| [P5-T034](tasks/P5-T034-split-styles.md) | 樣式表照畫面拆檔 | PR #12 已合併 |
-| [P5-T035](tasks/P5-T035-proofview-edit-logic.md) | 抽出 ProofView 編輯邏輯 | PR #13 已合併 |
-| [P5-T033](tasks/P5-T033-split-fixtures.md) | 拆分示範資料，規則改用 contract（疊在 P5-T004 上） | PR 審查中（D-033 最後一個） |
+| [P6-T001](tasks/P6-T001-factcheck.md) | 查證規格定稿、ADR-0001 修訂、拆出 P6-T002～T005（只改文件） | 分支 `docs/P6-T001-factcheck-spec`，待審查 |
+| [P5-T036](tasks/P5-T036-lock-agent-tools.md) | 現有各趟 Codex 明確關搜尋、Claude 不載入使用者的 MCP | 另一個 PR（`fix/P5-T036-lock-agent-tools`）；合併後要使用者真跑一次 Codex、Claude 校稿 |
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -48,7 +46,12 @@ D-033 健檢後的瘦身與拆分（[P0-T002](tasks/P0-T002-slim-docs.md) 已合
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | |
+| [P6-T002](tasks/P6-T002-safe-fetcher.md) | 安全取回器＋維基百科查詢（`src/fetch/`） | 等 P6-T001 合併；可跟 P6-T003 平行 |
+| [P6-T003](tasks/P6-T003-factcheck-contract.md) | 查證兩趟的 schema、prompt、adapter 只開廠商端搜尋 | 等 P6-T001、P5-T036 合併 |
+| [P6-T004](tasks/P6-T004-factcheck-service.md) | 查證流程、migration 009、API | 等 P6-T002、P6-T003 |
+| [P6-T005](tasks/P6-T005-factcheck-ui.md) | 查證畫面；使用者真跑一次查證 | 等 P6-T004 |
+
+順序：P6-T001 →（P6-T002 ∥ P5-T036 → P6-T003）→ P6-T004 → P6-T005。
 
 ## Blocked
 

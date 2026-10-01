@@ -1,0 +1,73 @@
+---
+id: P6-T003
+phase: 6
+status: ready
+depends_on: [P6-T001, P5-T036]
+specs: [factcheck.md, agent-cli.md, security.md]
+write_paths: ["src/agents/output-contract.ts", "src/agents/types.ts", "src/agents/registry.ts", "src/agents/adapters/base.ts", "src/agents/adapters/codex.ts", "src/agents/adapters/claude.ts", "src/agents/adapters/google.ts", "src/core/factcheck-prompts.ts", "tests/factcheck-schema.test.ts", "tests/factcheck-prompts.test.ts", "tests/agent-hosted-search.test.ts", "tests/helpers/fake-adapter.ts", "docs/specs/agent-cli.md", "docs/specs/factcheck.md", "docs/tasks/P6-T003-factcheck-contract.md"]
+contract_change: none
+expected_commit: "feat(P6-T003): 查證兩趟的 schema 與 prompt，adapter 可只開廠商端搜尋"
+---
+
+# 查證的輸出契約與「只開搜尋」
+
+## 目標
+D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行**的搜尋，第二趟「判斷」跟校稿一樣什麼都不開；
+兩趟各有自己的輸出 schema（都沒有 templateData）。本 Task 只做 Agent 這一層，不接流程。
+
+疊在 P5-T036 之上：P5-T036 讓現有各趟 Codex 明確 `web_search="disabled"`、Claude 一律 `--strict-mcp-config`；
+本 Task 只在明確要求時把第一趟的搜尋打開。P5-T036 沒合併前不准開工（兩邊都改 adapter 參數）。
+
+## 範圍
+### 包含
+- `output-contract.ts`：`FACTCHECK_FIND_SCHEMA`、`FACTCHECK_JUDGE_SCHEMA`（形狀與上限照 factcheck.md），能過 openai-strict 轉換。
+- `src/core/factcheck-prompts.ts`：兩趟的 system／user prompt（照 `src/core/slug-suggestion.ts` 的放法）。第一趟依「有沒有開搜尋」換說法；
+  第二趟把來源包成 `S1`、`S2`… 並明講不受信任。
+- `AgentRequest` 加 `hostedSearch?: boolean`（預設 false）；adapter 各自決定怎麼開，做不到的（agy）回報能力為 false、
+  收到 `hostedSearch: true` 直接拒絕（不默默降級成沒搜尋）。registry 能問「這家能不能只開搜尋」。
+- 各家參數（照 factcheck.md「P6-T003 要加進 agent-cli.md 的參數」）並寫進 `agent-cli.md`。
+- 假 adapter 支援 `hostedSearch` 與兩份 schema，給 P6-T004 用。
+### 不包含
+- 取回器（P6-T002）、查證流程與 API（P6-T004）、畫面（P6-T005）。
+- 改現有校稿、配圖、生圖、建議網址任何一趟的參數或 prompt。
+
+## 工作區與 Context
+### 必讀入口
+`docs/specs/factcheck.md`「① 找來源」「③ 判斷」、`docs/specs/agent-cli.md`（P5-T036 改過的版本）、`docs/specs/security.md`「硬性禁令」、
+`src/agents/adapters/openai-strict.ts`、`tests/codex-image.test.ts`（假執行檔記錄參數的做法）。
+### 不應載入
+`src/ui/`、`src/fetch/`、`docs/archive/`。
+### 驗證命令
+`npx vitest run tests/factcheck-schema.test.ts tests/factcheck-prompts.test.ts tests/agent-hosted-search.test.ts`、`npm run verify`
+
+## 實作要求
+- **測試絕不呼叫真實 CLI**：用假執行檔記錄收到的參數；確認旗標存在只能看 `--help` 這類不送 prompt 的指令。
+- 參數陣列傳遞，不得 `shell: true`。
+- Codex：只准 `cached`，程式裡不得出現 `live`／`indexed` 的路徑。Claude：可用工具只有 `WebSearch`，任何情況都不含 `WebFetch`。
+- `hostedSearch` 沒給或 false 時，產生的參數必須跟 P5-T036 之後完全一樣（有測試逐項比對）。
+- 先寫測試再實作。
+
+## 驗證
+### 自動驗證
+`npm run verify` 綠。至少：
+- 兩份 schema 的正反例（含 openai-strict 轉換後仍合格、超過上限被拒）。
+- 假執行檔斷言：Codex 第一趟帶 `web_search="cached"` 且沒有 `live`／`indexed`、其餘 P5-T036 的關閉參數都在；Claude 第一趟是
+  `--tools WebSearch --allowed-tools WebSearch`、有 `--strict-mcp-config`、整串參數沒有 `WebFetch`；agy 收到 `hostedSearch` 被拒；
+  三家 `hostedSearch` 為 false 時參數不變。
+- prompt：第二趟每份來源有編號與不受信任標示；第一趟開搜尋時不出現「你沒有網路」。
+### 手動驗證
+無（未證實的兩件——Codex `-c` 在 `--ignore-user-config` 下是否生效、Claude `-p` 下 `WebSearch` 能不能用——在 P6-T005 使用者真跑時確認）。
+
+## 完成定義
+- [ ] `npm run verify` 綠
+- [ ] 擁有這些行為的 spec 已更新（agent-cli.md 參數；factcheck.md 若實作時發現跟規格不同）
+- [ ] 留下的殘餘寫進完成結果（由主 session 併入 `docs/known-issues.md`）
+- [ ] CURRENT_TASK 已更新（由主 session）
+
+## 中斷／接手紀錄
+- 最後完成：開 Task（2026-10-01，P6-T001）
+- 已通過驗證：—
+- 下一步：等 P6-T001、P5-T036 合併後派 subagent 實作（可跟 P6-T002 平行）
+- Blocker：P5-T036 未合併
+
+## 完成結果
