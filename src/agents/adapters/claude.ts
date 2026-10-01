@@ -35,8 +35,23 @@ const DISALLOWED_TOOLS = [
   'WebFetch',
   'WebSearch',
   'Task',
+  // 新版的子代理工具叫 Agent；舊名 Task 留著給舊版。
+  'Agent',
   'NotebookEdit',
 ];
+
+/**
+ * 外部工具一律不載入（P5-T036，D-034；依據見 docs/specs/agent-cli.md「Claude 不連外參數」）：
+ * - `--strict-mcp-config`：只用 `--mcp-config` 給的 MCP server；我們不給，所以一個都沒有。
+ *   不帶的話，使用者自己設定的 MCP server（瀏覽器控制、雲端硬碟…）會被載入。
+ * - `--no-chrome`：關掉 Claude in Chrome 整合（使用者設定可能預設開著）。
+ */
+export const CLAUDE_NO_EXTERNAL_TOOLS_ARGS: readonly string[] = ['--strict-mcp-config', '--no-chrome'];
+
+export interface ClaudeAdapterOptions {
+  /** 測試用：換成假的執行檔。正式環境一律是 PATH 上的 `claude`。 */
+  readonly command?: string;
+}
 
 interface AuthStatus {
   loggedIn?: boolean;
@@ -48,15 +63,20 @@ export class ClaudeAdapter implements AgentAdapter {
   readonly id = 'claude' as const;
   readonly displayName = DISPLAY_NAME;
   private readonly runs = new RunRegistry();
+  private readonly command: string;
+
+  constructor(options: ClaudeAdapterOptions = {}) {
+    this.command = options.command ?? COMMAND;
+  }
 
   async detect(): Promise<AgentStatus> {
-    const executablePath = await whichExecutable(COMMAND);
-    if (!executablePath) return notInstalledStatus(this.id, DISPLAY_NAME, COMMAND);
+    const executablePath = await whichExecutable(this.command);
+    if (!executablePath) return notInstalledStatus(this.id, DISPLAY_NAME, this.command);
 
-    const versionProbe = await probe(COMMAND, ['--version']);
+    const versionProbe = await probe(this.command, ['--version']);
     const version = versionProbe.ok ? versionProbe.stdout.split('\n')[0]!.trim() : null;
 
-    const authProbe = await probe(COMMAND, ['auth', 'status', '--json']);
+    const authProbe = await probe(this.command, ['auth', 'status', '--json']);
     const auth = parseAuthStatus(authProbe.stdout);
 
     const loginState = auth === null ? 'unknown' : auth.loggedIn ? 'logged-in' : 'logged-out';
@@ -105,13 +125,14 @@ export class ClaudeAdapter implements AgentAdapter {
         JSON.stringify(schemaForCli(schema)),
         '--disallowed-tools',
         ...DISALLOWED_TOOLS,
+        ...CLAUDE_NO_EXTERNAL_TOOLS_ARGS,
         '--append-system-prompt',
         request.systemPrompt,
       ];
       if (request.model) args.push('--model', request.model);
 
       const result = await runProcess({
-        command: COMMAND,
+        command: this.command,
         args,
         // 只有不受信任的使用者原稿走 stdin；系統規則走 --append-system-prompt。
         stdin: request.userPrompt,

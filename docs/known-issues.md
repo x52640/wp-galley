@@ -32,6 +32,11 @@
 - 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
   `docs/specs/review-proposals.md` 的逐項套用定位規則。
 
+- P5-T036 Agent 不連外參數（2026-10-01）：未證實——Codex `-c`／`--disable` 在 `--ignore-user-config` 下是否生效、`--disable apps` 是否影響生圖、
+  不認得的 feature 名稱會不會報錯（使用者手動真跑時確認）；Claude 工具限制是黑名單，新版新增的工具不會自動被擋（`--tools ""` 與
+  `--json-schema` 相容性未驗證）；`--strict-mcp-config` 是否也擋 claude.ai 帳號層級連接器未證實；agy 沒有停用工具／忽略 MCP 的參數，
+  只靠 `--sandbox` 與 prompt 提示。
+
 ## 收官紀錄裡的殘餘（原在 CURRENT_TASK「上次停在哪」「更早」）
 
 - P5-T030：取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）。
