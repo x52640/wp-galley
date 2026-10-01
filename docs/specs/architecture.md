@@ -85,7 +85,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 一列一個使用者看得到的功能：從畫面一路查到測試。2026-10-01 對著程式查證（P0-T002）。
 畫面元件在 `src/ui/components/`；路由在 `src/server/routes/`，沒寫檔名的是 `jobs.ts`（前綴 `/api/jobs/:uuid`，表中寫成 `…`）；
 後端欄是 `src/core/service/` 底下的檔（P5-T004；`service.ts` 是門面，只轉呼叫）。
-測試在 `tests/`，省略 `.test.ts`。示範資料（`?fixtures=1`）的對應實作在 `src/ui/service/fixtures/` 下跟後端欄同名的檔；
+測試在 `tests/`，省略 `.test.ts`。示範資料（`?fixtures=1`）的對應實作在 `src/ui/service/fixtures/` 下跟後端欄同名的檔，例外：分類（查詢、建立）在 `fixtures/terms.ts`，
+發布目標清單與精靈（含連線測試）在 `fixtures/setup.ts`；假資料本身在 `data.ts`、`store.ts`；
 前後端共用規則的單元測試在 `contract-rules`。
 
 | 功能 | 畫面 | API 路由 | 後端 | 規格 | 主要測試 |
