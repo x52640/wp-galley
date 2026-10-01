@@ -1,7 +1,7 @@
 import { delimiter, join } from 'node:path';
 import { access, constants } from 'node:fs/promises';
 import { runProcess } from '../process-runner.js';
-import type { AgentAdapter, AgentId, AgentRunMeta, AgentStatus } from '../types.js';
+import type { AgentAdapter, AgentId, AgentRequest, AgentResult, AgentRunMeta, AgentStatus } from '../types.js';
 
 /**
  * adapter 共用的小工具。
@@ -120,6 +120,33 @@ export function buildMeta(
   stderr: string,
 ): AgentRunMeta {
   return { runId, agentId, model, durationMs, stderrTail: tailOf(stderr) };
+}
+
+/**
+ * 查證兩趟的工具選項（`hostedSearch`、`strictNoTools`）做不到時的拒絕結果；做得到回 null。
+ * 在啟動 CLI 之前呼叫——拒絕就一個子行程都不開、不花額度。
+ *
+ * 兩個同時為 true 是自相矛盾（一個要開搜尋、一個要全關），一律拒絕。
+ */
+export function rejectToolOptions(
+  request: AgentRequest,
+  adapter: { readonly id: AgentId; readonly displayName: string; readonly supportsHostedSearch?: boolean },
+  runId: string,
+): AgentResult<never> | null {
+  let message: string | null = null;
+  if (request.hostedSearch === true && request.strictNoTools === true) {
+    message = 'hostedSearch 與 strictNoTools 不能同時開';
+  } else if (request.hostedSearch === true && adapter.supportsHostedSearch !== true) {
+    message = `${adapter.displayName} 不能只開搜尋`;
+  }
+  if (message === null) return null;
+  return {
+    ok: false,
+    reason: 'not-available',
+    message,
+    issues: [],
+    meta: buildMeta(adapter.id, runId, request.model ?? null, 0, ''),
+  };
 }
 
 /** 進行中的執行，供 cancel() 使用。 */

@@ -212,3 +212,162 @@ export const SLUG_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
   },
 };
+
+/**
+ * AI 查證（D-034，docs/specs/factcheck.md）的兩趟輸出。**兩份都沒有 `templateData`**：結構上改不了文章。
+ *
+ * 跟其他 schema 同一套規則：送給 CLI 的可以被放寬（Codex strict 濾掉上限、選填變 nullable），
+ * 回來之後後端用這裡的原始 schema 再驗一次。
+ *
+ * 個別項目的「內容對不對」（excerpt 在文章裡找不找得到、claimIndex／ref 存不存在）**不在 schema 裡驗**：
+ * 一項不合格就整趟重來太浪費，由查證流程（P6-T004）逐項丟掉，規則見 factcheck.md。
+ */
+
+/** 第一趟最多回幾條主張。selection／observation 只留前 2 條，由流程截。 */
+export const FACTCHECK_MAX_CLAIMS = 5;
+
+export interface FactCheckFindClaim {
+  readonly excerpt: string;
+  readonly claim: string;
+  readonly queries: { readonly q: string; readonly lang: 'zh' | 'en' }[];
+  readonly candidateUrls: { readonly url: string; readonly title: string }[];
+}
+
+export interface FactCheckFindOutput {
+  readonly claims: FactCheckFindClaim[];
+}
+
+export const FACTCHECK_FIND_SCHEMA: Record<string, unknown> = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: '查證：找來源',
+  type: 'object',
+  additionalProperties: false,
+  required: ['claims'],
+  properties: {
+    claims: {
+      type: 'array',
+      maxItems: FACTCHECK_MAX_CLAIMS,
+      description: '值得查證的主張，最值得查的放前面。沒有可查的就給空陣列。',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['excerpt', 'claim', 'queries', 'candidateUrls'],
+        properties: {
+          excerpt: {
+            type: 'string',
+            maxLength: 200,
+            description: '從文章裡一字不差地引用這條主張所在的那一小段原文。引用對不上，這條會被丟掉。',
+          },
+          claim: { type: 'string', maxLength: 200, description: '把主張改寫成一句可以查證的話。' },
+          queries: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 3,
+            description: '拿去查百科的搜尋字串，1 到 3 個，短一點（關鍵詞，不是整句）。',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['q', 'lang'],
+              properties: {
+                q: { type: 'string', maxLength: 80 },
+                lang: { type: 'string', enum: ['zh', 'en'] },
+              },
+            },
+          },
+          candidateUrls: {
+            type: 'array',
+            maxItems: 5,
+            description: '可能有答案的網頁，0 到 5 個。只給你真的在搜尋結果裡看到、或確定存在的網址；不確定就不要給。',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['url', 'title'],
+              properties: {
+                url: { type: 'string', maxLength: 300 },
+                title: { type: 'string', maxLength: 200 },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+export type FactCheckVerdict = 'supported' | 'contradicted' | 'unverifiable' | 'needs-context';
+
+export interface FactCheckJudgeFinding {
+  readonly claimIndex: number;
+  readonly verdict: FactCheckVerdict;
+  readonly evidence: string;
+  /** 選填、不接受 null（Codex 回的 null 由 `stripNulls` 拿掉）。讀的時候用 `correctionOf`。 */
+  readonly correction?: string;
+  readonly citations: { readonly ref: string; readonly quote: string }[];
+}
+
+export interface FactCheckJudgeOutput {
+  readonly findings: FactCheckJudgeFinding[];
+}
+
+/**
+ * 判斷趟最多回幾條。主張最多 5 條；留一點空間給「同一條回兩次」（流程留第一個），
+ * 不要因為多回一條就整份被拒。factcheck.md 沒定這個數，這裡定 10。
+ */
+export const FACTCHECK_MAX_FINDINGS = 10;
+
+export const FACTCHECK_JUDGE_SCHEMA: Record<string, unknown> = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: '查證：判斷',
+  type: 'object',
+  additionalProperties: false,
+  required: ['findings'],
+  properties: {
+    findings: {
+      type: 'array',
+      maxItems: FACTCHECK_MAX_FINDINGS,
+      description: '每條主張一筆判斷。',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['claimIndex', 'verdict', 'evidence', 'citations'],
+        properties: {
+          claimIndex: { type: 'integer', minimum: 0, description: '主張的編號（從 0 起）。' },
+          verdict: {
+            type: 'string',
+            enum: ['supported', 'contradicted', 'unverifiable', 'needs-context'],
+            description:
+              'supported：來源支持。contradicted：來源說法不同。unverifiable：給你的來源裡查不到。' +
+              'needs-context：要看前後文才能判斷。',
+          },
+          evidence: { type: 'string', maxLength: 400, description: '白話說明在來源裡查到什麼。' },
+          // 選填（不列 required）：Codex 的 strict schema 會把它轉成 nullable，回來的 null 在驗證前被拿掉。
+          correction: {
+            type: 'string',
+            maxLength: 200,
+            description: '來源說法不同時，建議怎麼改（一句話，例如「應該是 1994 年」）。沒有建議就不要給。',
+          },
+          citations: {
+            type: 'array',
+            maxItems: 3,
+            description: '支持你判斷的原句，0 到 3 條。',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['ref', 'quote'],
+              properties: {
+                ref: { type: 'string', maxLength: 20, description: '來源編號，只能是給你的 S1、S2…。' },
+                quote: { type: 'string', maxLength: 200, description: '從那份來源一字不差地抄出來的原句。' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+/** `correction` 沒給（或只有空白）就是 null（factcheck.md：程式把「沒有」存成 null）。 */
+export function correctionOf(finding: Pick<FactCheckJudgeFinding, 'correction'>): string | null {
+  const value = finding.correction;
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}

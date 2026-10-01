@@ -13,7 +13,15 @@ import type {
   ImageRequest,
   ModelOption,
 } from '../types.js';
-import { buildMeta, notInstalledStatus, probe, RunRegistry, schemaForCli, whichExecutable } from './base.js';
+import {
+  buildMeta,
+  notInstalledStatus,
+  probe,
+  rejectToolOptions,
+  RunRegistry,
+  schemaForCli,
+  whichExecutable,
+} from './base.js';
 import { stripNulls, toOpenAiStrictSchema } from './openai-strict.js';
 
 /**
@@ -24,7 +32,8 @@ import { stripNulls, toOpenAiStrictSchema } from './openai-strict.js';
  * - `--output-schema FILE` 吃 JSON Schema 檔案，強制最終回應的形狀
  * - `-o FILE` 把最終訊息寫進檔案，比解析 JSONL 事件流可靠
  * - `-s read-only` 沙箱；`--cd DIR` 指定工作根目錄
- * - 每一趟都帶 `CODEX_NO_NETWORK_ARGS`：關掉預設開著的網路搜尋與瀏覽器類功能（P5-T036）
+ * - 每一趟都帶 `CODEX_NO_NETWORK_ARGS`：關掉預設開著的網路搜尋與瀏覽器類功能（P5-T036）；
+ *   唯一例外是查證「找來源」那一趟（`hostedSearch`）改帶 `CODEX_HOSTED_SEARCH_ARGS`（P6-T003）
  * - `codex login status` 回報登入狀態（exit code 非 0 代表未登入）
  *
  * ⚠️ `codex exec` **不接受** `--ask-for-approval`，那是互動模式的參數；
@@ -64,11 +73,21 @@ const CODEX_DISABLED_FEATURES = [
   'apps',
 ] as const;
 
-export const CODEX_NO_NETWORK_ARGS: readonly string[] = [
+const CODEX_FEATURES_OFF_ARGS: readonly string[] = CODEX_DISABLED_FEATURES.flatMap((name) => [
   '-c',
-  'web_search="disabled"',
-  ...CODEX_DISABLED_FEATURES.flatMap((name) => ['-c', `features.${name}=false`]),
-];
+  `features.${name}=false`,
+]);
+
+export const CODEX_NO_NETWORK_ARGS: readonly string[] = ['-c', 'web_search="disabled"', ...CODEX_FEATURES_OFF_ARGS];
+
+/**
+ * AI 查證「找來源」那一趟（`hostedSearch: true`，D-034，P6-T003）：只把 `web_search` 換成 `cached`
+ * ——OpenAI 維護的索引、不對外抓網頁；其餘跟 `CODEX_NO_NETWORK_ARGS` 一字不差。
+ * **只准 cached**：其他會讓 OpenAI 伺服器去抓任意網址的值等於開外洩通道（ADR-0001「修訂」）。
+ *
+ * ⚠️ 未證實：`-c web_search="cached"` 在 `--ignore-user-config` 下是否生效（P6-T005 使用者真跑時確認）。
+ */
+export const CODEX_HOSTED_SEARCH_ARGS: readonly string[] = ['-c', 'web_search="cached"', ...CODEX_FEATURES_OFF_ARGS];
 
 export interface CodexAdapterOptions {
   /** 測試用：換成假的執行檔。正式環境一律是 PATH 上的 `codex`。 */
@@ -82,6 +101,8 @@ export interface CodexAdapterOptions {
 export class CodexAdapter implements AgentAdapter {
   readonly id = 'codex' as const;
   readonly displayName = DISPLAY_NAME;
+  /** 有 `web_search="cached"`（D-034）。 */
+  readonly supportsHostedSearch = true;
   private readonly runs = new RunRegistry();
   private readonly command: string;
   private readonly codexHome: string;
@@ -129,6 +150,9 @@ export class CodexAdapter implements AgentAdapter {
     schema: Record<string, unknown>,
     runId: string,
   ): Promise<AgentResult<T>> {
+    const rejected = rejectToolOptions(request, this, runId);
+    if (rejected) return rejected;
+
     const controller = this.runs.register(runId);
     const schemaFile = join(request.workspaceDir, `.codex-schema-${runId}.json`);
     const outputFile = join(request.workspaceDir, `.codex-output-${runId}.txt`);
@@ -153,7 +177,8 @@ export class CodexAdapter implements AgentAdapter {
         // 不載入 ~/.codex/config.toml：避免使用者設定的模型、指令或 MCP
         // 工具影響校稿結果。官方說明指出登入狀態仍走 CODEX_HOME，不受影響。
         '--ignore-user-config',
-        ...CODEX_NO_NETWORK_ARGS,
+        // 判斷那一趟（strictNoTools）跟校稿一樣，Codex 這組已經是它做得到的最嚴格。
+        ...(request.hostedSearch === true ? CODEX_HOSTED_SEARCH_ARGS : CODEX_NO_NETWORK_ARGS),
         '--color',
         'never',
         '--cd',

@@ -44,6 +44,17 @@ export interface AgentRequest {
   readonly timeoutMs: number;
   /** stdout 上限；超過就中止並判定失敗，避免記憶體被吃光。 */
   readonly maxOutputBytes: number;
+  /**
+   * 只開**廠商伺服器上執行**的搜尋（AI 查證「找來源」那一趟，D-034）。預設 false。
+   * 做不到的 adapter（`supportsHostedSearch` 不是 true）收到 true 直接拒絕，不默默降級成沒搜尋。
+   * 各家實際參數見 docs/specs/agent-cli.md「查證兩趟的參數」。
+   */
+  readonly hostedSearch?: boolean | undefined;
+  /**
+   * 用該 CLI 做得到的最嚴格無工具模式（AI 查證「判斷」那一趟：讀的是不受信任的網頁）。預設 false。
+   * 跟 `hostedSearch` 同時為 true 是自相矛盾，adapter 拒絕。
+   */
+  readonly strictNoTools?: boolean | undefined;
 }
 
 export interface ModelOption {
@@ -109,6 +120,11 @@ export interface GeneratedImage {
 export interface AgentAdapter {
   readonly id: AgentId;
   readonly displayName: string;
+  /**
+   * 能不能只開廠商伺服器上的搜尋（`AgentRequest.hostedSearch`）。沒有或 false 就是不能。
+   * 是固定的能力，不跑任何指令。
+   */
+  readonly supportsHostedSearch?: boolean;
   /** 唯讀偵測：安裝、版本、登入狀態。不得取出憑證。 */
   detect(): Promise<AgentStatus>;
   listModels(): Promise<ModelOption[]>;

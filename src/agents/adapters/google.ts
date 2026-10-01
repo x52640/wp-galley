@@ -1,7 +1,15 @@
 import { runProcess } from '../process-runner.js';
 import { parseAndValidate } from '../output-parser.js';
 import type { AgentAdapter, AgentRequest, AgentResult, AgentStatus, ModelOption } from '../types.js';
-import { buildMeta, notInstalledStatus, probe, RunRegistry, schemaForCli, whichExecutable } from './base.js';
+import {
+  buildMeta,
+  notInstalledStatus,
+  probe,
+  rejectToolOptions,
+  RunRegistry,
+  schemaForCli,
+  whichExecutable,
+} from './base.js';
 
 /**
  * Antigravity CLI（`agy`）適配器 —— 計畫 §6.2 指名的 Google Agent。
@@ -44,20 +52,36 @@ const NO_TOOLS_NOTICE = [
   '',
 ].join('\n');
 
+export interface GoogleAdapterOptions {
+  /** 測試用：換成假的執行檔。正式環境一律是 PATH 上的 `agy`。 */
+  readonly command?: string;
+}
+
 export class GoogleAdapter implements AgentAdapter {
   readonly id = 'google' as const;
   readonly displayName = DISPLAY_NAME;
+  /**
+   * agy 沒有「只開搜尋」的參數（D-034）：收到 `hostedSearch: true` 直接拒絕，不默默降級。
+   * `strictNoTools` 照常跑：參數跟校稿一樣（`--sandbox`＋`NO_TOOLS_NOTICE`），agy 做不到參數保證，
+   * 見 security.md「刻意接受的限制」。
+   */
+  readonly supportsHostedSearch = false;
   private readonly runs = new RunRegistry();
+  private readonly command: string;
+
+  constructor(options: GoogleAdapterOptions = {}) {
+    this.command = options.command ?? COMMAND;
+  }
 
   async detect(): Promise<AgentStatus> {
-    const executablePath = await whichExecutable(COMMAND);
-    if (!executablePath) return notInstalledStatus(this.id, DISPLAY_NAME, COMMAND);
+    const executablePath = await whichExecutable(this.command);
+    if (!executablePath) return notInstalledStatus(this.id, DISPLAY_NAME, this.command);
 
-    const versionProbe = await probe(COMMAND, ['--version']);
+    const versionProbe = await probe(this.command, ['--version']);
     const version = versionProbe.ok ? versionProbe.stdout.split('\n')[0]!.trim() : null;
 
     // agy 沒有登入狀態指令；能列出模型就代表登入有效。
-    const modelsProbe = await probe(COMMAND, ['models'], 20_000);
+    const modelsProbe = await probe(this.command, ['models'], 20_000);
     const models = parseModels(modelsProbe.stdout);
     const loginState = modelsProbe.ok && models.length > 0 ? 'logged-in' : 'unknown';
 
@@ -77,7 +101,7 @@ export class GoogleAdapter implements AgentAdapter {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    const result = await probe(COMMAND, ['models'], 20_000);
+    const result = await probe(this.command, ['models'], 20_000);
     return result.ok ? parseModels(result.stdout) : [];
   }
 
@@ -86,6 +110,9 @@ export class GoogleAdapter implements AgentAdapter {
     schema: Record<string, unknown>,
     runId: string,
   ): Promise<AgentResult<T>> {
+    const rejected = rejectToolOptions(request, this, runId);
+    if (rejected) return rejected;
+
     const controller = this.runs.register(runId);
 
     try {
@@ -107,7 +134,7 @@ export class GoogleAdapter implements AgentAdapter {
       if (request.model) args.push('--model', request.model);
 
       const result = await runProcess({
-        command: COMMAND,
+        command: this.command,
         args,
         // agy 沒有獨立的系統提示參數，規則與原稿一起從 stdin 進去，
         // 中間用明確的分隔線標示哪一段是不受信任的使用者內容。
