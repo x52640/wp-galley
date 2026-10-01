@@ -1,7 +1,15 @@
 import { runProcess } from '../process-runner.js';
 import { parseAndValidate } from '../output-parser.js';
 import type { AgentAdapter, AgentRequest, AgentResult, AgentStatus, ModelOption } from '../types.js';
-import { buildMeta, notInstalledStatus, probe, RunRegistry, schemaForCli, whichExecutable } from './base.js';
+import {
+  buildMeta,
+  notInstalledStatus,
+  probe,
+  rejectToolOptions,
+  RunRegistry,
+  schemaForCli,
+  whichExecutable,
+} from './base.js';
 
 /**
  * Claude Code 適配器。
@@ -48,6 +56,36 @@ const DISALLOWED_TOOLS = [
  */
 export const CLAUDE_NO_EXTERNAL_TOOLS_ARGS: readonly string[] = ['--strict-mcp-config', '--no-chrome'];
 
+/** 查證「找來源」那一趟唯一打開的工具：Anthropic 伺服器上的搜尋，只回標題與網址（D-034）。 */
+const HOSTED_SEARCH_TOOL = 'WebSearch';
+
+/**
+ * 工具相關參數（P6-T003；依據見 docs/specs/agent-cli.md「查證兩趟的參數」）。
+ *
+ * - 預設（校稿、配圖、建議網址）：P5-T036 的禁用名單，一字不改。
+ * - `hostedSearch`：`--disallowed-tools` 優先於允許，所以名單**拿掉 `WebSearch`**（`WebFetch` 照舊禁用：它在使用者機器上抓網頁），
+ *   再用 `--tools WebSearch` 把可用的內建工具限縮成它一個、`--allowed-tools WebSearch` 讓它不跳權限詢問。
+ * - `strictNoTools`：`--tools ""`（參數陣列裡的空字串）一個內建工具都不給；禁用名單照留，多一層保險。
+ *
+ * `--strict-mcp-config`、`--no-chrome` 三種都帶（`CLAUDE_NO_EXTERNAL_TOOLS_ARGS`，放在這組之後）。
+ */
+function toolArgs(request: AgentRequest): string[] {
+  if (request.hostedSearch === true) {
+    return [
+      '--disallowed-tools',
+      ...DISALLOWED_TOOLS.filter((tool) => tool !== HOSTED_SEARCH_TOOL),
+      '--tools',
+      HOSTED_SEARCH_TOOL,
+      '--allowed-tools',
+      HOSTED_SEARCH_TOOL,
+    ];
+  }
+  if (request.strictNoTools === true) {
+    return ['--disallowed-tools', ...DISALLOWED_TOOLS, '--tools', ''];
+  }
+  return ['--disallowed-tools', ...DISALLOWED_TOOLS];
+}
+
 export interface ClaudeAdapterOptions {
   /** 測試用：換成假的執行檔。正式環境一律是 PATH 上的 `claude`。 */
   readonly command?: string;
@@ -62,6 +100,8 @@ interface AuthStatus {
 export class ClaudeAdapter implements AgentAdapter {
   readonly id = 'claude' as const;
   readonly displayName = DISPLAY_NAME;
+  /** 有 `WebSearch`（D-034）。 */
+  readonly supportsHostedSearch = true;
   private readonly runs = new RunRegistry();
   private readonly command: string;
 
@@ -114,6 +154,9 @@ export class ClaudeAdapter implements AgentAdapter {
     schema: Record<string, unknown>,
     runId: string,
   ): Promise<AgentResult<T>> {
+    const rejected = rejectToolOptions(request, this, runId);
+    if (rejected) return rejected;
+
     const controller = this.runs.register(runId);
 
     try {
@@ -123,8 +166,7 @@ export class ClaudeAdapter implements AgentAdapter {
         'json',
         '--json-schema',
         JSON.stringify(schemaForCli(schema)),
-        '--disallowed-tools',
-        ...DISALLOWED_TOOLS,
+        ...toolArgs(request),
         ...CLAUDE_NO_EXTERNAL_TOOLS_ARGS,
         '--append-system-prompt',
         request.systemPrompt,

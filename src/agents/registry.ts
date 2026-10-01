@@ -138,6 +138,14 @@ export class AgentRegistry {
   }
 
   /**
+   * 這一家能不能只開廠商伺服器上的搜尋（AI 查證「找來源」，D-034）。固定的能力，不跑指令、不看登入。
+   * 畫面據此講明「Antigravity 不能只開搜尋」，流程據此決定第一趟要不要帶 `hostedSearch`。
+   */
+  supportsHostedSearch(id: AgentId): boolean {
+    return this.get(id).supportsHostedSearch === true;
+  }
+
+  /**
    * 執行一次結構化請求。
    *
    * 會先確認 Agent 可用，再排入佇列。同一時間只有一個 Agent 在跑，
@@ -150,6 +158,10 @@ export class AgentRegistry {
     runId: string,
   ): Promise<AgentResult<T>> {
     const adapter = this.get(id);
+    // 做不到只開搜尋的那一家，在排隊前就擋（adapter 自己也會拒絕，這裡是不讓它佔佇列）。
+    if (request.hostedSearch === true && adapter.supportsHostedSearch !== true) {
+      throw new AgentUnavailableError(`${adapter.displayName} 不能只開搜尋`);
+    }
     const status = await this.detect(id);
     if (!status.available) {
       throw new AgentUnavailableError(status.unavailableReason ?? `${adapter.displayName} 目前無法使用`);

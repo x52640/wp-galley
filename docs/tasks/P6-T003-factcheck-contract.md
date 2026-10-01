@@ -1,7 +1,7 @@
 ---
 id: P6-T003
 phase: 6
-status: ready
+status: in_progress
 depends_on: [P6-T001, P5-T036]
 specs: [factcheck.md, agent-cli.md, security.md]
 write_paths: ["src/agents/output-contract.ts", "src/agents/types.ts", "src/agents/registry.ts", "src/agents/adapters/base.ts", "src/agents/adapters/codex.ts", "src/agents/adapters/claude.ts", "src/agents/adapters/google.ts", "src/core/factcheck-prompts.ts", "tests/factcheck-schema.test.ts", "tests/factcheck-prompts.test.ts", "tests/agent-hosted-search.test.ts", "tests/helpers/fake-adapter.ts", "docs/specs/agent-cli.md", "docs/specs/factcheck.md", "docs/tasks/P6-T003-factcheck-contract.md"]
@@ -74,9 +74,25 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 - [ ] CURRENT_TASK 已更新（由主 session）
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01，P6-T001）
-- 已通過驗證：—
-- 下一步：等 P6-T001、P5-T036 合併後派 subagent 實作（可跟 P6-T002 平行）
-- Blocker：P5-T036、P6-T001 未合併（合併後 status 改回 ready）
+- 最後完成：實作完成（2026-10-01）：兩份 schema、兩趟 prompt、`hostedSearch`／`strictNoTools`、registry `supportsHostedSearch`、假 adapter、agent-cli.md／factcheck.md
+- 已通過驗證：`npm run verify` 綠（76 檔／1545 個測試；基準 73／1497）
+- 下一步：主 session 審查與 commit；使用者做手動必驗（Claude 判斷趟 `--tools ""`＋`--json-schema`）
+- Blocker：無（P5-T036、P6-T001 已合併）
 
 ## 完成結果
+- `output-contract.ts`：`FACTCHECK_FIND_SCHEMA`、`FACTCHECK_JUDGE_SCHEMA`（形狀與上限照 factcheck.md；判斷趟 findings 另定最多 10 筆）、
+  `correctionOf()`（沒給或空白 → null）。`correction` 選填、不接受 null，`stripNulls` 沒改。
+- `src/core/factcheck-prompts.ts`：第一趟依 `hostedSearch` 換說法（開搜尋時沒有「你沒有網路」）；第二趟每份來源標 `S` 編號、
+  包在標明不受信任的分隔區塊，內容過 `neutralize`、標題網址攤成一行；編號格式不對或重複丟錯。
+- `AgentRequest.hostedSearch`／`strictNoTools`；`AgentAdapter.supportsHostedSearch`（Codex、Claude true，agy false）；
+  `AgentRegistry.supportsHostedSearch(id)`，`runStructured` 排隊前擋不支援的。兩個同時 true 三家都拒絕。
+- `GoogleAdapter` 多一個測試用的 `command` 選項（跟另外兩家一樣），正式環境不變。
+- 假 adapter：`hostedSearch` 能力、`respond` 依 schema 回結果、預設依兩份查證 schema 回示範輸出、`calls` 多記 `schema`。
+- 測試：`tests/factcheck-schema.test.ts`、`tests/factcheck-prompts.test.ts`、`tests/agent-hosted-search.test.ts`（三家沒給選項時整串 argv 逐項鎖住）。
+
+**殘餘（給 known-issues）：**
+- 必驗未做：Claude 判斷趟 `--tools ""`＋`--json-schema` 是否回得出結構化輸出（subagent 不能送 prompt 給真實 CLI）。
+  不相容就把 `claude.ts` `toolArgs` 的 strictNoTools 分支拿掉 `'--tools', ''`，並改 agent-cli.md「查證兩趟的參數」與 factcheck.md「③ 判斷」。
+- 未證實（P6-T005 真跑時確認）：Codex `-c web_search="cached"` 在 `--ignore-user-config` 下是否生效；Claude `-p` 下 `--tools WebSearch`
+  能不能用、搭 `--json-schema` 是否仍有結構化輸出。
+- Claude 判斷趟另外照留禁用名單（規格只要求 `--tools ""`），多一層保險；退回方案因此只要拿掉 `--tools ""`。

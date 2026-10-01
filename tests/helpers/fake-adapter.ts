@@ -8,6 +8,40 @@ import type {
   ImageRequest,
   ModelOption,
 } from '../../src/agents/types.js';
+import { rejectToolOptions } from '../../src/agents/adapters/base.js';
+import {
+  FACTCHECK_FIND_SCHEMA,
+  FACTCHECK_JUDGE_SCHEMA,
+  type FactCheckFindOutput,
+  type FactCheckJudgeOutput,
+} from '../../src/agents/output-contract.js';
+
+/** 查證第一趟的示範輸出（P6-T004 用）。excerpt 要對得上測試文章才會被留下，請自己給 `respond`。 */
+export const FAKE_FACTCHECK_FIND_OUTPUT: FactCheckFindOutput = {
+  claims: [
+    {
+      excerpt: '這部片 1995 年上映',
+      claim: '《刺激1995》在 1995 年上映。',
+      queries: [
+        { q: '刺激1995', lang: 'zh' },
+        { q: 'The Shawshank Redemption', lang: 'en' },
+      ],
+      candidateUrls: [{ url: 'https://www.imdb.com/title/tt0111161/', title: 'The Shawshank Redemption (1994)' }],
+    },
+  ],
+};
+
+/** 查證第二趟的示範輸出。沒有 `correction`（選填）——跟 Codex 回 null 經 stripNulls 之後同一個樣子。 */
+export const FAKE_FACTCHECK_JUDGE_OUTPUT: FactCheckJudgeOutput = {
+  findings: [
+    {
+      claimIndex: 0,
+      verdict: 'contradicted',
+      evidence: '來源寫 1994 年 9 月首映。',
+      citations: [{ ref: 'S1', quote: '本片於1994年9月10日在多倫多國際電影節首映' }],
+    },
+  ],
+};
 
 /** 1×1 的 PNG。假的生圖結果。 */
 export const FAKE_GENERATED_PNG = new Uint8Array(
@@ -31,7 +65,7 @@ export interface FakeImageBehaviour {
  * 所有 registry 與流程測試都跑這個，不碰真實 CLI。
  */
 export class FakeAdapter implements AgentAdapter {
-  readonly calls: { runId: string; request: AgentRequest }[] = [];
+  readonly calls: { runId: string; request: AgentRequest; schema: unknown }[] = [];
   readonly cancelled: string[] = [];
   readonly imageCalls: { runId: string; request: ImageRequest }[] = [];
   detectCount = 0;
@@ -40,6 +74,8 @@ export class FakeAdapter implements AgentAdapter {
    * 只有給了 `image` 的假 adapter 才會生圖——跟真實世界一樣，不是每一家都有這個方法。
    */
   readonly generateImage?: NonNullable<AgentAdapter['generateImage']>;
+  /** 跟真的一樣：沒給 `hostedSearch: true` 的假 adapter 收到 `hostedSearch` 會拒絕。 */
+  readonly supportsHostedSearch: boolean;
 
   constructor(
     readonly id: AgentId,
@@ -60,8 +96,16 @@ export class FakeAdapter implements AgentAdapter {
       onRun?: (runId: string) => void | Promise<void>;
       /** 給了才會有 `generateImage`。 */
       image?: FakeImageBehaviour;
+      /** 能不能只開搜尋（AI 查證第一趟）。預設 false。 */
+      hostedSearch?: boolean;
+      /**
+       * 依這一趟的請求與 schema 決定結果（查證兩趟用不同 schema）。給了就優先於 `result`。
+       * 只回 data 也可以，會包成成功的結果。
+       */
+      respond?: (call: { request: AgentRequest; schema: unknown; runId: string }) => AgentResult<unknown> | { data: unknown };
     } = {},
   ) {
+    this.supportsHostedSearch = behaviour.hostedSearch === true;
     const image = behaviour.image;
     if (image) {
       this.generateImage = async (request, runId) => {
@@ -102,17 +146,29 @@ export class FakeAdapter implements AgentAdapter {
     return this.behaviour.models ?? [];
   }
 
-  async runStructured<T>(request: AgentRequest, _schema: unknown, runId: string): Promise<AgentResult<T>> {
-    this.calls.push({ runId, request });
+  async runStructured<T>(request: AgentRequest, schema: unknown, runId: string): Promise<AgentResult<T>> {
+    // 做不到的工具選項：跟真的 adapter 一樣直接拒絕，不記成一次呼叫（真的也不會啟動 CLI）。
+    const rejected = rejectToolOptions(request, this, runId);
+    if (rejected) return rejected as AgentResult<T>;
+
+    this.calls.push({ runId, request, schema });
     if (this.behaviour.delayMs) {
       await new Promise((resolve) => setTimeout(resolve, this.behaviour.delayMs));
     }
     if (this.behaviour.onRun) await this.behaviour.onRun(runId);
-    return (this.behaviour.result ?? {
-      ok: true,
-      data: { title: '假結果' },
-      meta: { runId, agentId: this.id, model: null, durationMs: 1, stderrTail: '' },
-    }) as AgentResult<T>;
+    const meta = { runId, agentId: this.id, model: null, durationMs: 1, stderrTail: '' };
+    if (this.behaviour.respond) {
+      const response = this.behaviour.respond({ request, schema, runId });
+      return ('ok' in response ? response : { ok: true, data: response.data, meta }) as AgentResult<T>;
+    }
+    if (this.behaviour.result) return this.behaviour.result as AgentResult<T>;
+    const data =
+      schema === FACTCHECK_FIND_SCHEMA
+        ? FAKE_FACTCHECK_FIND_OUTPUT
+        : schema === FACTCHECK_JUDGE_SCHEMA
+          ? FAKE_FACTCHECK_JUDGE_OUTPUT
+          : { title: '假結果' };
+    return { ok: true, data, meta } as AgentResult<T>;
   }
 
   async cancel(runId: string): Promise<void> {

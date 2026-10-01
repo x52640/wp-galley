@@ -13,7 +13,9 @@
 - 輸出不是合法 JSON、schema 不合格、漏掉必要欄位或嘗試加入不允許 HTML，後端拒絕
   該結果並允許重試，不得直接發布。輸出契約本身的唯一權威是
   `src/agents/output-contract.ts`（校稿與配圖：`REVIEW_OUTPUT_SCHEMA`；建議英文網址：`SLUG_OUTPUT_SCHEMA`，
-  P5-T026，只有一個必填的 `slugs` 字串陣列，三家不用特別轉換——Codex strict 只濾掉 `maxItems`／`maxLength`）。
+  P5-T026，只有一個必填的 `slugs` 字串陣列，三家不用特別轉換——Codex strict 只濾掉 `maxItems`／`maxLength`；
+  AI 查證：`FACTCHECK_FIND_SCHEMA`、`FACTCHECK_JUDGE_SCHEMA`，P6-T003，形狀見 [factcheck.md](factcheck.md)，
+  判斷趟的選填 `correction` 在 Codex strict 下變成可 null、驗證前 `stripNulls` 拿掉，讀的時候用 `correctionOf` 當 null）。
 
 ## Adapter 介面與執行規則
 
@@ -28,6 +30,12 @@ interface AgentAdapter {
   generateImage?(request: ImageRequest, runId: string): Promise<AgentResult<GeneratedImage>>;
 }
 ```
+
+`AgentRequest` 另有兩個選項（P6-T003，只給 AI 查證用；沒給或 false 時參數跟原本一字不差）：
+`hostedSearch`（只開廠商伺服器上的搜尋）、`strictNoTools`（最嚴格無工具）。兩個同時為 true 一律拒絕。
+adapter 用 `supportsHostedSearch` 宣告做不做得到；做不到的（agy）收到 `hostedSearch: true` 直接回
+`not-available`、不啟動 CLI，不默默降級。`AgentRegistry.supportsHostedSearch(id)` 問得到這件事，
+`runStructured` 在排隊前就擋。實際參數見下方「查證兩趟的參數」。
 
 `AgentRegistry.imageGeneratorId()` 找有 `generateImage` 的那一家，不寫死名字；`generateImage` 跟
 `runStructured` 排同一條佇列（concurrency 1）。校稿或生圖排在佇列裡就被取消的話，輪到它時直接回 `cancelled`，
@@ -127,7 +135,8 @@ adapter，介面不變。
 | Antigravity（1.2.14） | 不變 | `agy --help` **沒有**停用工具或忽略 MCP 的參數（只有 `--sandbox`、`--disable-slash-commands`、`--dangerously-skip-permissions`） | `agy --help`；見下方已知限制 |
 
 程式：`CODEX_NO_NETWORK_ARGS`（`adapters/codex.ts`）、`CLAUDE_NO_EXTERNAL_TOOLS_ARGS`（`adapters/claude.ts`）；
-測試 `tests/agent-cli-args.test.ts` 用假執行檔以字面值斷言。
+測試 `tests/agent-cli-args.test.ts` 用假執行檔以字面值斷言；`tests/agent-hosted-search.test.ts` 再把三家沒給查證選項時的
+**整串 argv** 逐項鎖住（P6-T003）。
 
 **為什麼不用 `--disable`（2026-10-01 實測，codex-cli 0.159.3，只跑 `features list`，不送 prompt）：**
 
@@ -147,7 +156,7 @@ adapter，介面不變。
 - `features.apps=false` 不影響生圖（`image_generation` 是另一個 feature，推論不受影響）。
 - Claude `--strict-mcp-config` 是否也擋掉 claude.ai 帳號層級的連接器（help 只說「all other MCP configurations」）。
 - Claude 的工具限制是**黑名單**：新版若加了沒列到的工具（例如會連外的新工具）不會被擋。`--tools ""` 能整個關掉內建工具，
-  但沒驗證它會不會連帶讓 `--json-schema` 的結構化輸出失效，所以沒換。黑名單外的工具（例如 `Artifact`、`ArtifactData`、
+  但沒驗證它會不會連帶讓 `--json-schema` 的結構化輸出失效，所以現有各趟沒換（查證判斷趟已改帶，見「查證兩趟的參數」的必驗項）。黑名單外的工具（例如 `Artifact`、`ArtifactData`、
   `Skill`、`Monitor`、`PowerShell`）在 `--print` 模式會不會載入**未證實**。手動驗證時加測一次 `--tools ""` 搭配 `--json-schema`，
   能用就改成整個關掉。
 - Codex 其他預設開著的功能：`plugins`、`remote_plugin`、`skill_mcp_dependency_install`、`tool_suggest`、`multi_agent`
@@ -158,6 +167,31 @@ adapter，介面不變。
 headless 模式下需要權限的工具會被自動拒絕、以及 prompt 開頭的 `NO_TOOLS_NOTICE`。不需要權限的工具（例如搜尋）
 在哪裡執行、會不會被呼叫，**未證實**。另外 1.2.14 的 `--print-timeout` 預設變成 `0s`（等到回合結束），
 我們本來就自己控制逾時，不受影響。
+
+#### 查證兩趟的參數（P6-T003，2026-10-01）
+
+[factcheck.md](factcheck.md)：第一趟「找來源」只開廠商伺服器上的搜尋（`hostedSearch: true`），第二趟「判斷」用最嚴格無工具模式
+（`strictNoTools: true`）。下表只列**跟上一節不同**的地方；沒列的參數照上一節。旗標存在與否只看 `--help`（claude 2.1.286、
+codex-cli 0.159.3），**沒有送任何 prompt**。
+
+| CLI | 第一趟（`hostedSearch`） | 第二趟（`strictNoTools`） |
+| --- | --- | --- |
+| Codex | `-c web_search="disabled"` 換成 `-c web_search="cached"`（`CODEX_HOSTED_SEARCH_ARGS`），features 照關。**只准 `cached`**，程式裡沒有其他值的路徑 | 跟校稿一樣（`CODEX_NO_NETWORK_ARGS`）：Codex 這組已經是它做得到的最嚴格 |
+| Claude Code | `--disallowed-tools` 名單**拿掉 `WebSearch`**（`WebFetch` 照舊禁用），再加 `--tools WebSearch --allowed-tools WebSearch`；`--strict-mcp-config --no-chrome` 照帶 | `--tools ""`（參數陣列裡的空字串，`--help`：「Use "" to disable all tools」），禁用名單照留（多一層），`--strict-mcp-config --no-chrome` 照帶，**不帶** `--allowed-tools` |
+| Antigravity | 不支援：`supportsHostedSearch = false`，收到就回 `not-available`、不啟動 | 跟校稿一樣（`--sandbox`＋`NO_TOOLS_NOTICE`），做不到參數保證 |
+
+Claude 第一趟實際的參數順序：`… --disallowed-tools Bash Read Write Edit Glob Grep WebFetch Task Agent NotebookEdit --tools WebSearch
+--allowed-tools WebSearch --strict-mcp-config --no-chrome --append-system-prompt …`。三個都是可變長度參數，值到下一個 `--` 參數為止，
+所以 `--tools` 一定要接在名單後面、不能把名單放在最後。
+
+**為什麼 Claude 要拿掉名單裡的 `WebSearch`**：`--disallowed-tools` 優先於允許，留在名單裡 `--tools WebSearch` 也打不開。
+
+**未證實（手動驗證）：**
+
+- **必驗（P6-T003）**：Claude 判斷趟 `--tools ""`＋`--json-schema` 能不能回出結構化輸出。不相容就把 `strictNoTools` 的 `--tools ""` 拿掉
+  （退回只有禁用名單，跟校稿一樣），結果寫回本節與 factcheck.md「③ 判斷」。
+- Codex `-c web_search="cached"` 在 `--ignore-user-config` 下是否生效（P6-T005）。
+- Claude `-p` 模式下 `--tools WebSearch` 在訂閱帳號能不能用、搭配 `--json-schema` 是否仍有結構化輸出（P6-T005）。
 
 #### Codex 生圖（2026-09-23 實測，codex-cli 0.153.4）
 
