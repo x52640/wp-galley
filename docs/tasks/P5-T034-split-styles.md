@@ -45,7 +45,7 @@ D-033。`src/ui/styles.css` 2152 行，改一個畫面要翻全部。
   08-drawer-panels、09-media、10-jobs、11-setup-wizard、12-confirm、13-diagnostics、14-stage、15-compare、
   16-agent、17-image-briefs、18-workspace、19-drawer、20-publish、21-responsive、22-insert-image、
   23-ai-image-request、24-slug-suggest。入口 `styles/index.css` 依序 `@import`；`main.tsx` 改引入它。
-- 逐字比對：`git show HEAD:src/ui/styles.css > orig.css`；照 `index.css` 的 `@import` 順序把各檔 `cat` 起來成
+- 逐字比對：`git show 9df04db:src/ui/styles.css > orig.css`；照 `index.css` 的 `@import` 順序把各檔 `cat` 起來成
   `joined.css`；兩者 `tr -d ' \t\n\r' | shasum` 相同，`diff` 去掉空行後也完全一樣。唯一差別是每個切點原本的尾端空行。
 - 打包比對：拆前、拆後各跑 `vite build`，產出的 CSS 檔 `cmp` 位元組完全相同（同一個 hash `index-D_cvkXo3.css`）。
 - 截圖比對：純前端 Vite（5174）`?fixtures=1`，`scripts/ui-drive.mjs` 拍 14 張（總覽、新稿件、設定精靈、診斷、
