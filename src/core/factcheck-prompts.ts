@@ -213,30 +213,37 @@ export function buildFactCheckJudgeUserPrompt(claims: readonly FactCheckJudgeCla
 }
 
 /**
- * 看不見、會夾在分隔字元中間讓 `neutralize` 認不出來的字：combining grapheme joiner、variation selectors、
- * 蒙古文 variation selectors、tag 字元。零寬字元由 `neutralize` 自己刪。
+ * 看不見、會夾在分隔字元中間讓 `neutralize` 認不出來的字。**依 Unicode 屬性整類刪**，不逐一列字元
+ * （逐一列一定會漏，例如補充區的 variation selectors U+E0100–U+E01EF）：
+ * - `Default_Ignorable_Code_Point`：各區 variation selectors、CGJ、tag 字元、零寬字元、ZWJ…
+ * - `Cf`（格式字元）：bidi 控制、soft hyphen、BOM…
+ * 代價：emoji 的 VS16（U+FE0F）與 ZWJ 也會被刪，組合 emoji 會拆成幾個單獨的 emoji。可接受——
+ * 核對與定位都拿處理後這一份比（見 `sourceTextForAgent`），不會因此對不上。
  */
-const INVISIBLE_MODIFIERS = /[\u034F\uFE00-\uFE0F\u180B-\u180D\u{E0000}-\u{E007F}]/gu;
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu;
 /** `neutralize` 認得的分隔字元。 */
 const SEPARATOR_ONLY = /^[=＝━─═]+$/u;
+/** 黏在分隔字元後面的組合記號（例如 `≠`），刪掉，讓連在一起的分隔字元露出來。 */
+const MARKS_AFTER_SEPARATOR = /([=＝━─═])\p{M}+/gu;
 
 /**
  * 查證用的不受信任文字放進 prompt 前的前處理（共用的 `neutralize` 不動，它也給其他趟用）：
- * 1. NEL（U+0085）換成換行，刪掉 `INVISIBLE_MODIFIERS`。
+ * 1. NEL（U+0085）換成換行（它不在 JS 的 `\s` 裡，也不是 Default_Ignorable）；刪掉 `INVISIBLE`。
  * 2. NFKC 之後**整個字**變成分隔字元的（`﹦`、`₌`、`⁼`、`⩵`、`⩶`…）換成正規化後的樣子，讓 `neutralize` 認得。
  *    **只換這種**，不對整段做 NFKC：那會把文章裡的全形數字、全形英文（`２０２４`）也換掉，
  *    Agent 引的 excerpt 就跟文章原文對不上、在文章上標不到字。
- * 3. 交給 `neutralize`（刪零寬字元、把三個以上連在一起的分隔字元換成「…」）。
+ * 3. 刪掉緊跟在分隔字元後面的組合記號（`\p{M}`）。只刪這個位置的，中文、日文、帶重音的字母不受影響。
+ * 4. 交給 `neutralize`（把三個以上連在一起的分隔字元換成「…」）。
  */
 function textForAgent(text: string): string {
   const folded = text
-    // NEL 不在 JS 的 `\s` 裡，`neutralize` 認不出「=NEL=NEL=」；先當成一般換行。
     .replace(/\u0085/gu, '\n')
-    .replace(INVISIBLE_MODIFIERS, '')
+    .replace(INVISIBLE, '')
     .replace(/[^\u0000-\u007F]/gu, (ch) => {
       const normalized = ch.normalize('NFKC');
       return normalized !== ch && SEPARATOR_ONLY.test(normalized) ? normalized : ch;
-    });
+    })
+    .replace(MARKS_AFTER_SEPARATOR, '$1');
   return neutralize(folded.trim());
 }
 

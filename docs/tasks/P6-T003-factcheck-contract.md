@@ -75,7 +75,7 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 
 ## 中斷／接手紀錄
 - 最後完成：實作完成（2026-10-01）：兩份 schema、兩趟 prompt、`hostedSearch`／`strictNoTools`、registry `supportsHostedSearch`、假 adapter、agent-cli.md／factcheck.md
-- 已通過驗證：`npm run verify` 綠（76 檔／1564 個測試；基準 73／1497）
+- 已通過驗證：`npm run verify` 綠（76 檔／1580 個測試；基準 73／1497）
 - 下一步：主 session 審查與 commit；使用者做手動必驗（Claude 判斷趟 `--tools ""`＋`--json-schema`）
 - Blocker：無（P5-T036、P6-T001 已合併）
 
@@ -85,7 +85,8 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 - `src/core/factcheck-prompts.ts`：第一趟依 `hostedSearch` 換說法（開搜尋時沒有「你沒有網路」）；第二趟每份來源標 `S` 編號、
   包在標明不受信任的分隔區塊，內容過 `neutralize`、標題網址攤成一行；編號格式不對或重複丟錯。
 - 審查修正：匯出 `sourceTextForAgent`／`articleTextForAgent`＝prompt 裡實際放的文字，**P6-T004 核對引文、檢查 excerpt、組「看原文」前後文都要用它們的輸出**；
-  前處理擋掉 variation selector／CGJ／tag 字元夾在 `=` 中間、`﹦` 等 NFKC 後是分隔字元的字、NEL，`oneLine` 另把 NEL、U+2028、U+2029 當換行。
+  前處理依 Unicode 屬性整類刪 `Default_Ignorable_Code_Point`＋`Cf`、刪分隔字元後的組合記號、`﹦` 等 NFKC 後是分隔字元的字換成正規化樣子、NEL 當換行；
+  `oneLine` 另把 NEL、U+2028、U+2029 當換行。emoji 的 VS16／ZWJ 會被刪（可接受）。
 - `AgentRequest.hostedSearch`／`strictNoTools`；`AgentAdapter.supportsHostedSearch`（Codex、Claude true，agy false）；
   `AgentRegistry.supportsHostedSearch(id)`，`runStructured` 排隊前擋不支援的。兩個同時 true 三家都拒絕。
 - `GoogleAdapter` 多一個測試用的 `command` 選項（跟另外兩家一樣），正式環境不變。
