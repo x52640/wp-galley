@@ -169,6 +169,25 @@ describe('外洩檢查', () => {
     expect(check(`https://example.com/${encodeURIComponent(SECRET)}`)).toEqual({ ok: false, code: 'secret' });
   });
 
+  it('密碼：全形、夾零寬字元、中間插 / 都擋', () => {
+    const fullwidth = Array.from(SECRET, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0)).join('');
+    expect(check(`https://example.com/${encodeURIComponent(fullwidth)}`)).toEqual({ ok: false, code: 'secret' });
+    const zw = SECRET.match(/.{4}/g)!.join('\u200b');
+    expect(check(`https://example.com/?k=${encodeURIComponent(zw)}`)).toEqual({ ok: false, code: 'secret' });
+    expect(check(`https://example.com/${SECRET.match(/.{4}/g)!.join('/')}`)).toEqual({ ok: false, code: 'secret' });
+    expect(anyUrlContainsSecret([`https://a.test/${SECRET.match(/.{6}/g)!.join('/')}`], containsSecret)).toBe(true);
+  });
+
+  it('文章片段：夾零寬字元、軟連字號、方向控制字元也擋', () => {
+    const hide = (t: string, ch: string) => Array.from(t).join(ch);
+    for (const ch of ['\u200b', '\u200d', '\u00ad', '\u2060', '\u202e', '\ufeff']) {
+      expect(check(`https://evil.test/${encodeURIComponent(hide('台北市立動物園在一九一四', ch))}`)).toEqual({
+        ok: false,
+        code: 'article-text',
+      });
+    }
+  });
+
   it('整個網址超過 300 字擋', () => {
     const url = `https://example.com/${'a'.repeat(281)}`;
     expect(url.length).toBe(301);

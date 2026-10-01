@@ -25,7 +25,8 @@ export class FetchBudget {
 
   /** 扣一次網址嘗試（含同主機計數）。超過就不扣、回原因。 */
   takeUrlAttempt(hostname: string): BudgetCheck {
-    const host = hostname.toLowerCase();
+    // `e.com.`（結尾的點）與 `e.com` 是同一台。
+    const host = hostname.toLowerCase().replace(/\.+$/, '');
     if (this.attempts >= this.limits.maxAttempts) return { ok: false, code: 'budget-attempts' };
     const used = this.perHost.get(host) ?? 0;
     if (used >= this.limits.maxPerHost) return { ok: false, code: 'budget-host' };

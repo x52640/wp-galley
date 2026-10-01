@@ -35,31 +35,45 @@ const BLOCK = new Set([
   'br', 'hr', 'body', 'address', 'details', 'summary',
 ]);
 
+/**
+ * 同步、會吃 CPU（parse5 處理深層巢狀是平方級）：取回器一律經 `extract-runner.ts` 在 worker 裡跑，
+ * 不要在主執行緒直接對抓回來的 HTML 呼叫。走訪不用遞迴（深層巢狀不會爆 stack）。
+ */
 export function extractTextFromHtml(html: string): string {
   const doc = parse(html);
   const parts: string[] = [];
-  const walk = (node: Node, inPre: boolean): void => {
+  type Item = { node: Node; inPre: boolean } | '\n';
+  const stack: Item[] = [{ node: doc as unknown as Node, inPre: false }];
+  while (stack.length > 0) {
+    const item = stack.pop()!;
+    if (item === '\n') {
+      parts.push('\n');
+      continue;
+    }
+    const { node, inPre } = item;
     if (node.nodeName === '#text') {
       const value = (node as DefaultTreeAdapterMap['textNode']).value;
       // HTML 裡原始碼的換行只是空白；只有 <pre> 保留換行。
       parts.push(inPre ? value : value.replace(/\s+/g, ' '));
-      return;
+      continue;
     }
-    if (node.nodeName === '#comment' || node.nodeName === '#documentType') return;
+    if (node.nodeName === '#comment' || node.nodeName === '#documentType') continue;
     const name = node.nodeName.toLowerCase();
-    if (SKIPPED.has(name)) return;
+    if (SKIPPED.has(name)) continue;
     const isBlock = BLOCK.has(name);
-    if (isBlock) parts.push('\n');
+    if (isBlock) {
+      parts.push('\n');
+      stack.push('\n'); // 子節點都處理完才輪到它
+    }
     const children =
       'content' in node && node.content
         ? node.content.childNodes
         : 'childNodes' in node
           ? (node.childNodes as Node[])
           : [];
-    for (const child of children) walk(child, inPre || name === 'pre');
-    if (isBlock) parts.push('\n');
-  };
-  walk(doc as unknown as Node, false);
+    const childInPre = inPre || name === 'pre';
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push({ node: children[i]!, inPre: childInPre });
+  }
   return collapseWhitespace(parts.join(''));
 }
 

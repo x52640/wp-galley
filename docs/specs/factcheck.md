@@ -148,7 +148,7 @@ interface FactCheckFindOutput {
 
 - HTML 用 parse5（已是依賴）解析，拿掉 `script`、`style`、`nav`、`header`、`footer`、`aside`、`form`，取純文字、摺疊空白。
   另外也拿掉本來就不是正文的 `head`、`noscript`、`template`、`svg`、`math`、`iframe`、`object`、`canvas`、`button`、`select`；
-  區塊元素（段落、標題、清單項目…）前後換行，`<pre>` 保留原本的換行。程式：`src/fetch/extract-text.ts`。
+  區塊元素（段落、標題、清單項目…）前後換行，`<pre>` 保留原本的換行。在 worker 裡跑、有時間上限（見 security.md「取回器」實作細節）。程式：`src/fetch/extract-text.ts`、`extract-runner.ts`。
 - `text/plain` 原樣；維基百科用 extracts 的純文字。
 - 每份最多給第二趟 12,000 字；全部加起來最多 40,000 字，超過時各份等比例截短（`truncateSources`；字數以 Unicode 字元算、無條件捨去，不切壞 emoji）。**核對與「看原文」都以截短後、實際給 Agent 的那份文字為準**。
 - 抓回的全文只活在這一次查證的記憶體裡，不存 DB；存下來的只有引文前後文（見「存下來的結果」）。

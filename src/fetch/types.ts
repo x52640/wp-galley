@@ -27,6 +27,8 @@ export interface FetchLimits {
   readonly maxPerHost: number;
   /** 維基百科 API 最多幾次（搜尋與 extracts 各算一次）。 */
   readonly maxWikipediaCalls: number;
+  /** 抽文字（worker 裡跑）的時間上限，超過就 terminate()。 */
+  readonly extractTimeoutMs: number;
 }
 
 export const DEFAULT_FETCH_LIMITS: FetchLimits = Object.freeze({
@@ -40,6 +42,7 @@ export const DEFAULT_FETCH_LIMITS: FetchLimits = Object.freeze({
   maxConcurrent: 3,
   maxPerHost: 3,
   maxWikipediaCalls: 30,
+  extractTimeoutMs: 10_000,
 });
 
 /** 網址從哪來；決定外洩檢查做哪些項目（security.md「外洩檢查」）。 */
@@ -74,6 +77,8 @@ export type FetchFailureCode =
   | 'budget-attempts'
   | 'budget-host'
   | 'budget-wikipedia'
+  | 'too-complex'
+  | 'extract-failed'
   | 'wikipedia-not-found'
   | 'wikipedia-bad-response';
 
@@ -157,6 +162,8 @@ const REASONS: Record<FetchFailureCode, string> = {
   'budget-attempts': '這次查證抓的網址已達上限，沒再抓',
   'budget-host': '同一個網站這次已抓到上限，沒再抓',
   'budget-wikipedia': '這次查證查維基百科已達上限，沒再查',
+  'too-complex': '網頁結構太複雜，沒讀',
+  'extract-failed': '網頁內容讀不出來，沒讀',
   'wikipedia-not-found': '維基百科沒有找到這個條目',
   'wikipedia-bad-response': '維基百科的回應看不懂',
 };

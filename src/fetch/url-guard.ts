@@ -51,11 +51,13 @@ export interface ExfiltrationGuard {
 }
 
 /**
- * 正規化：NFKC、小寫，空白與網址常見的分字符號（`-`、`_`、`+`）視為同一個空白並摺疊。
+ * 正規化：拿掉看不見的字元（\p{Cf}、Default_Ignorable）、NFKC、小寫，空白與網址常見的分字符號（`-`、`_`、`+`）視為同一個空白並摺疊。
  * 文章句子被轉成網址 slug（`台灣-的-選舉`、`hello_world`）時一樣對得上。
  */
 export function normalizeForMatch(text: string): string {
   return text
+    // 零寬字元、方向控制等看不見的字先拿掉，不然插一個 U+200B 就躲過比對。
+    .replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, '')
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[\s\-_+]+/gu, ' ')
@@ -112,8 +114,8 @@ export function createExfiltrationGuard(options: ExfiltrationGuardOptions): Exfi
   return {
     check(url, origin) {
       const forms = decodedUrlForms(url);
-      // 密碼：原樣、解碼後、去掉所有空白都要比（containsSecret 本身也會去空白再比一次）。
-      if (forms.some((f) => containsSecret(f) || containsSecret(f.replace(/\s+/g, '')))) {
+      // 密碼：原樣、解碼後、去掉所有空白、只留英數都要比（containsSecret 本身也會去空白再比一次）。
+      if (forms.some((f) => matchesSecret(f, containsSecret))) {
         return { ok: false, code: 'secret' };
       }
       if (origin === 'wikipedia-api') {
@@ -147,6 +149,18 @@ export function anyUrlContainsSecret(
     } catch {
       // 不是合法網址也照樣比原字串
     }
-    return forms.some((f) => containsSecret(f) || containsSecret(f.replace(/\s+/g, '')));
+    return forms.some((f) => matchesSecret(f, containsSecret));
   });
+}
+
+/**
+ * 應用程式密碼只有英數：另外做一次 NFKC（全形轉半形）並拿掉所有非英數字元（零寬字元、`/`、空白…）再比，
+ * 擋「把密碼拆開或換成全形」的夾帶。大小寫不分要動 src/config 的遮蔽器，不在這裡做。
+ */
+function matchesSecret(text: string, containsSecret: (text: string) => boolean): boolean {
+  return (
+    containsSecret(text) ||
+    containsSecret(text.replace(/\s+/g, '')) ||
+    containsSecret(text.normalize('NFKC').replace(/[^A-Za-z0-9]/g, ''))
+  );
 }

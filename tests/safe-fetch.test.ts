@@ -324,6 +324,15 @@ describe('回應', () => {
     expect(await f.fetchUrl('https://a.test/', 'agent')).toMatchObject({ ok: false, code: 'timeout' });
   });
 
+  it('深層 <div>：抽文字超過時間上限 → too-complex（白話原因），不卡住、不丟例外', async () => {
+    const out = await run({ body: '<div>'.repeat(400_000) }, { extractTimeoutMs: 1_000 });
+    expect(out).toMatchObject({ ok: false, code: 'too-complex', reason: '網頁結構太複雜，沒讀' });
+  }, 10_000);
+
+  it('深層 <span>：正常抽出，不丟例外', async () => {
+    expect(await run({ body: `${'<span>'.repeat(10_000)}深處` })).toMatchObject({ ok: true, text: '深處' });
+  });
+
   it('傳輸丟例外 → 結構化的 network，不丟到呼叫方', async () => {
     const t: Transport = async () => {
       throw new Error('ECONNRESET');
@@ -350,6 +359,13 @@ describe('數量上限（這次查證的額度）', () => {
     for (const p of ['a', 'b', 'c']) expect(await f.fetchUrl(`https://Same.test/${p}`, 'agent')).toMatchObject({ ok: true });
     expect(await f.fetchUrl('https://same.TEST/d', 'agent')).toMatchObject({ ok: false, code: 'budget-host' });
     expect(await f.fetchUrl('https://other.test/', 'agent')).toMatchObject({ ok: true });
+  });
+
+  it('主機名結尾的點視為同一台（e.test. 與 e.test）', async () => {
+    const t = fakeTransport(() => ({}));
+    const f = fetcher({ resolver: countingResolver().resolver, transport: t.transport });
+    for (const h of ['e.test', 'e.test.', 'E.TEST']) expect(await f.fetchUrl(`https://${h}/`, 'agent')).toMatchObject({ ok: true });
+    expect(await f.fetchUrl('https://e.test./x', 'agent')).toMatchObject({ ok: false, code: 'budget-host' });
   });
 
   it('同時不超過 3 個', async () => {

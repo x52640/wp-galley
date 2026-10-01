@@ -6,7 +6,7 @@
  * DNS 解析與傳輸可注入，測試一律注入假的。
  */
 import { FetchBudget } from './budget.js';
-import { extractText } from './extract-text.js';
+import { extractTextIsolated } from './extract-runner.js';
 import { guardedRequest, preflight, type SafeFetchContext } from './safe-fetch.js';
 import { createHttpsTransport, defaultResolver } from './transport.js';
 import { createExfiltrationGuard } from './url-guard.js';
@@ -157,7 +157,15 @@ export function createSourceFetcher(options: SourceFetcherOptions): SourceFetche
         guardedRequest(ctx, checked.url, { origin, acceptJson: false, followRedirects: true }),
       );
       if (!outcome.ok) return outcome;
-      return { ok: true, kind: 'web', url: outcome.finalUrl, text: extractText(outcome.body, outcome.contentType) };
+      // 抽文字在 worker 裡跑、有時間上限；任何例外都回結構化原因，不丟給呼叫方。
+      let extracted;
+      try {
+        extracted = await extractTextIsolated(outcome.body, outcome.contentType, limits.extractTimeoutMs);
+      } catch {
+        return failure('extract-failed');
+      }
+      if (!extracted.ok) return failure(extracted.code);
+      return { ok: true, kind: 'web', url: outcome.finalUrl, text: extracted.text };
     },
   };
 }
