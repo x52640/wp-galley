@@ -1,7 +1,7 @@
 ---
 id: P5-T035
 phase: 5
-status: ready
+status: done
 depends_on: [P5-T034]
 specs: [design-system.md, architecture.md]
 write_paths: ["src/ui/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T035-proofview-edit-logic.md", "docs/CURRENT_TASK.md"]
@@ -30,13 +30,14 @@ D-033。`src/ui/components/ProofView.tsx`（1240 行）同時負責校樣顯示�
 - `?fixtures=1` 用 `scripts/ui-drive.mjs` 走過：改原文、格式工具列、改標題、卡片「自己改／去原文改」、取消、儲存、Enter／貼上在標題裡。
 
 ## 完成定義
-- [ ] `npm run verify` 綠，測試數不減
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠，測試數不減
+- [ ] CURRENT_TASK 已更新（並行 Task，由 P5-T033 的 PR 統一更新；功能地圖同）
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01）
-- 已通過驗證：—
-- 下一步：等 P5-T034
+- 最後完成：抽出 `lib/proof-edit.ts`（按鍵／貼上／拖放規則，純函式）與 `lib/proof-edit-dom.ts`（對 iframe 文件做的事：螢光筆標色、可打字開關、游標定位、事件攔截）；`tests/proof-edit.test.ts`；ProofView 1240 → 1079 行（2026-10-01）
+- 已通過驗證：`npm run verify` 71 檔／1451；`?fixtures=1` 用 ui-drive 走過改原文、格式工具列、⌘I／⌘U、改標題、空標題、卡片「自己改／去原文改」（含講標題那張）、取消、儲存、標題裡 Enter／貼上／⌘B、正文貼上與拖檔，結果與改動前逐行相同
+- 下一步：主 session 更新 `docs/specs/architecture.md` 功能地圖（「在文章上改」那列加 `lib/proof-edit*.ts`、測試加 proof-edit）與 CURRENT_TASK，審查後 commit
 - Blocker：無
 
 ## 完成結果
+- 獨立審查（2026-10-01）：逐段比對搬出的邏輯與原 ProofView（按鍵、貼上、拖放、事件監聽、進出編輯、P5-T031 標題焦點），行為一致，無問題。
