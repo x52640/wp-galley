@@ -12,6 +12,7 @@
 
 ## 進行中
 
+- [P0-T002](tasks/P0-T002-slim-docs.md)：冷啟動文件瘦身、加功能地圖（D-033 第 1 步），分支 `docs/P0-T002-slim-docs`，實作中。
 - [P5-T032](tasks/P5-T032-disable-targets.md)：設定精靈可以停用不要的文章類型（D-032），PR #9 已合併（獨立審查 2 條 low、Codex 3 條都已修），**待使用者手動驗證**。
 - [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題，PR #7＋#8 已合併，**待使用者手動驗證**（只存草稿）。
 - [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6 已合併，**待使用者手動驗證**（只存草稿）。
@@ -43,11 +44,15 @@
 
 ## Ready
 
+D-033 依序：P0-T002 → P5-T004 → P5-T033 → P5-T034 → P5-T035（一次一個，各一個 PR）。
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
-| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
+| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService（含 `api.ts`） | 等 P0-T002 |
+| [P5-T033](tasks/P5-T033-split-fixtures.md) | 拆分示範資料，規則改用 contract | 等 P5-T004 |
+| [P5-T034](tasks/P5-T034-split-styles.md) | 樣式表照畫面拆檔 | |
+| [P5-T035](tasks/P5-T035-proofview-edit-logic.md) | 抽出 ProofView 編輯邏輯 | |
+| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | |
 
 ## Blocked
 

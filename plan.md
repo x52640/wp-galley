@@ -177,6 +177,10 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
   `config/publish-targets.json`，違反「不離開發布台」。做成**停用**（隱藏）而不是刪除：設定檔保留那個 target，只標成停用；
   停用的不出現在新稿件的類型選單，同一個畫面隨時可以再打開。已經用那個類型的舊稿件照常編輯、發布。
   不做真刪：刪掉會讓舊稿件變成「發布目標已經不在」，且 read-think／diary 這類手寫的 target 精靈加不回來。
+- **D-033 健檢後的瘦身與拆分（2026-10-01 Remus 裁定，P0-T002、P5-T004、P5-T033～P5-T035 執行）**：冷啟動文件不大，
+  吃 context 的是大檔（`service.ts` 4000 行、`fixtures.ts` 2233、`styles.css` 2152、`ProofView.tsx` 1240）。依序：
+  文件瘦身＋功能地圖 → 拆 CoreService（含 `api.ts`）→ 拆 fixtures → 拆 styles.css → 抽出 ProofView 編輯邏輯。
+  重構不改行為，各一個 Task、一個 PR。新規矩：**前後端都要的規則一律寫成 `src/contract` 純函式**，fixtures 只放假資料不重寫規則。
 
 ## 待裁定
 
