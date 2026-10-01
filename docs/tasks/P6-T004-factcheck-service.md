@@ -1,7 +1,7 @@
 ---
 id: P6-T004
 phase: 6
-status: blocked
+status: ready
 depends_on: [P6-T002, P6-T003]
 specs: [factcheck.md, security.md, architecture.md, core-service.md, http-api.md, review-proposals.md]
 write_paths: ["src/core/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/context.ts", "src/core/service/agent.ts", "src/core/service/content.ts", "src/core/service/jobs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/core/repository.ts", "src/db/migrations/009-factcheck.ts", "src/db/migrations/index.ts", "src/contract/api-factcheck.ts", "src/contract/factcheck.ts", "src/contract/api.ts", "src/contract/api-enums.ts", "src/contract/api-job.ts", "src/contract/api-requests.ts", "src/server/routes/jobs.ts", "src/server/app.ts", "tests/factcheck-service.test.ts", "tests/factcheck-api.test.ts", "tests/factcheck-verify.test.ts", "tests/migrate.test.ts", "tests/helpers/fake-fetcher.ts", "tests/helpers/core-fixture.ts", "docs/specs/factcheck.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/tasks/P6-T004-factcheck-service.md"]
@@ -81,6 +81,6 @@ D-034。把 P6-T002 的取回器與 P6-T003 的兩趟 Agent 串成一次查證�
 - 最後完成：開 Task（2026-10-01，P6-T001）
 - 已通過驗證：—
 - 下一步：等 P6-T002、P6-T003 合併後派 subagent 實作
-- Blocker：P6-T002、P6-T003 未完成（完成後 status 改回 ready）
+- Blocker：無（P6-T002、P6-T003 已合併）
 
 ## 完成結果
