@@ -5,7 +5,7 @@
 | 檔案 | 擁有 | 狀態 |
 | --- | --- | --- |
 | [security.md](security.md) | 信任邊界、三條分界線、硬性禁令、秘密、守門、刻意接受的限制 | 現行 |
-| [architecture.md](architecture.md) | 技術選型、模組邊界、依賴方向、程式慣例、本機資料 | 現行 |
+| [architecture.md](architecture.md) | 技術選型、模組邊界、依賴方向、程式慣例、本機資料、功能地圖（功能 → 畫面 → 路由 → 後端 → 測試） | 現行 |
 | [state-machine.md](state-machine.md) | 狀態轉移、核准建立與失效、發布前置檢查 | 現行 |
 | [core-service.md](core-service.md) | CoreService 對外方法 | 現行 |
 | [http-api.md](http-api.md) | `/api` 路由與回應形狀 | 現行 |
