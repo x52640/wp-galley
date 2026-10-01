@@ -1,0 +1,18 @@
+/* --- 二次確認 ----------------------------------------------------------- */
+
+.confirm {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 0;
+  border: 1px solid var(--shell-line);
+  border-radius: 10px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+}
+.confirm::backdrop { background: rgba(0, 0, 0, .55); }
+.confirm-inner { padding: 1.1rem 1.2rem 1rem; }
+.confirm-title { display: flex; gap: .45rem; align-items: center; margin: 0 0 .5rem; font-size: 1rem; }
+.confirm-title svg { color: var(--danger-on-shell); }
+.confirm-body { font-size: .86rem; line-height: 1.8; color: var(--shell-text-dim); }
+.confirm-body p { margin: 0 0 .5rem; }
+.confirm-error { margin: .5rem 0 0; font-size: .82rem; color: var(--danger-on-shell); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }

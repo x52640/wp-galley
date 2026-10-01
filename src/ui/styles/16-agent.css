@@ -1,0 +1,55 @@
+/* --- Agent 執行中 --------------------------------------------------------
+   一趟要跑幾十秒到幾分鐘。使用者需要知道「它還活著」與「大概還要多久」，
+   但我們**真的不知道**進度——子行程只在結束時回話。所以是一條不表示進度的
+   長條加上一個一直在跳的計時器，不畫假的百分比。
+   ------------------------------------------------------------------------ */
+
+.agent-bar {
+  position: relative;
+  flex: 1;
+  min-width: 3rem;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--shell-line);
+}
+.agent-bar-run {
+  position: absolute;
+  inset-block: 0;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--mark-on-shell);
+  animation: agent-sweep 1.6s var(--ease) infinite;
+}
+
+@keyframes agent-sweep {
+  from { left: -35%; }
+  to   { left: 100%; }
+}
+
+/*
+  減少動態時不要一條跑來跑去的東西。全域那條 `animation-duration: 0.01ms`
+  會讓它卡在某個位置看起來像壞掉，所以這裡明確換成一條靜止的滿版長條——
+  「還在跑」由旁邊的計時器負責表達，那個本來就是文字。
+*/
+@media (prefers-reduced-motion: reduce) {
+  .agent-bar-run { position: static; width: 100%; animation: none; opacity: .6; }
+}
+
+.agent-banner {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .4rem 1rem;
+  border-bottom: 1px solid var(--shell-line);
+  background: var(--shell-panel);
+  font-size: .8rem;
+  color: var(--shell-text);
+}
+.agent-banner svg { flex: none; }
+.agent-banner-text { flex: none; }
+.agent-banner-time { flex: none; color: var(--mark-on-shell); font-variant-numeric: tabular-nums; }
+.agent-banner-note { flex: none; color: var(--shell-text-dim); font-size: .76rem; }
+
+/* 發布中也用這條（PublishPanel）。 */
+.agent-running { display: flex; gap: .5rem; align-items: center; margin: 0; font-size: .86rem; }

@@ -384,7 +384,7 @@ export function Workspace({
 
       <div className="desk">
         {/*
-          校樣永遠掛在樹上，切到對照時只是被蓋住（見 styles.css 的 .stage）。
+          校樣永遠掛在樹上，切到對照時只是被蓋住（見 styles/14-stage.css 的 .stage）。
           卸載掉的話 iframe 會重載、量到的區塊也會清空，插入圖片的位置就會是空的。
         */}
         <div className="stage" data-mode={display.compare ? 'compare' : 'proof'}>

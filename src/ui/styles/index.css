@@ -1,0 +1,29 @@
+/*
+  發布台樣式的入口（P5-T034 從原本的 styles.css 照區塊註解拆出來）。
+  順序就是原檔的順序：CSS 後寫的蓋前面的，不要調換、不要在中間插新檔而不想清楚覆蓋關係。
+  檔名前的數字就是引入順序；變數（含深色模式）在 01-tokens.css。
+*/
+@import './01-tokens.css';
+@import './02-base.css';
+@import './03-controls.css';
+@import './04-demo-banner.css';
+@import './05-shell.css';
+@import './06-proof.css';
+@import './07-margin-marks.css';
+@import './08-drawer-panels.css';
+@import './09-media.css';
+@import './10-jobs.css';
+@import './11-setup-wizard.css';
+@import './12-confirm.css';
+@import './13-diagnostics.css';
+@import './14-stage.css';
+@import './15-compare.css';
+@import './16-agent.css';
+@import './17-image-briefs.css';
+@import './18-workspace.css';
+@import './19-drawer.css';
+@import './20-publish.css';
+@import './21-responsive.css';
+@import './22-insert-image.css';
+@import './23-ai-image-request.css';
+@import './24-slug-suggest.css';

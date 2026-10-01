@@ -1,0 +1,45 @@
+/* --- 主區：文章、對照、成品共用同一格 ------------------------------------
+   文章與成品是同一張校樣（差在標不標建議；成品只在發布面板打開時出現，D-018），
+   對照蓋在它上面。
+   ------------------------------------------------------------------------ */
+
+.stage { position: relative; display: flex; min-width: 0; min-height: 0; }
+.stage > .proof { flex: 1; min-width: 0; min-height: 0; }
+
+/*
+  切到左右對照時，校樣**不卸載**，只是被蓋住。
+
+  用 visibility 而不是 display:none 是必要的：display:none 會讓 iframe 的版面
+  歸零，ProofView 的 ResizeObserver 隨即把量到的段落位置全部洗成 0，圖片區的
+  「把圖片插在第 n 段後面」就會指到錯的地方，而且要切回校樣才會修好。
+  visibility:hidden 保留版面盒，量測照常正確。
+*/
+.stage[data-mode='compare'] > .proof { visibility: hidden; }
+
+.compare {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--shell-bg);
+}
+
+
+/* 從待處理清單點過來的那一段。框畫在 iframe 外面，不去碰校樣文件的內部。 */
+.proof-focus {
+  position: absolute;
+  left: var(--gutter);
+  right: 0;
+  /* iframe 是不透明的白紙，畫在它下面等於看不見。頁邊符號是 4，要留在框上面。 */
+  z-index: 2;
+  border: 1.5px solid color-mix(in srgb, var(--mark) 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mark) 4%, transparent);
+  pointer-events: none;
+  animation: focus-in var(--slow) var(--ease) both;
+}
+
+@keyframes focus-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

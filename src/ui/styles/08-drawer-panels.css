@@ -1,0 +1,27 @@
+/* --- 抽屜裡沿用的面板內容 ------------------------------------------------ */
+
+
+.disclosure { border-top: 1px solid var(--shell-line); padding-top: .6rem; }
+.disclosure-toggle {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--shell-text-dim);
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+}
+.disclosure-toggle:hover { color: var(--shell-text); }
+.disclosure-body { display: flex; flex-direction: column; gap: .55rem; padding-top: .55rem; }
+.disclosure-body code {
+  font-family: var(--font-num);
+  font-size: .82em;
+  padding: 0 .25em;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.publish-link { margin: 0; font-size: .72rem; color: var(--shell-text-dim); word-break: break-all; }

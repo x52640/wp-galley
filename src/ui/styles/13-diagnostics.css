@@ -1,0 +1,32 @@
+/* --- 診斷頁（階段 4 沿用） ----------------------------------------------- */
+
+.diagnostics { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+.diagnostics .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; }
+.diagnostics h1 { margin: .5rem 0 .25rem; font-size: 1.5rem; }
+.diagnostics .stage { margin: 0; color: var(--shell-text-dim); font-size: .875rem; }
+.diagnostics section { margin-bottom: 2.25rem; }
+.diagnostics h2 {
+  margin: 0 0 .75rem;
+  font-size: .75rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--shell-text-dim);
+}
+.diagnostics dl { display: grid; grid-template-columns: 7rem 1fr; gap: .6rem 1rem; margin: 0; }
+.diagnostics dt { color: var(--shell-text-dim); font-size: .82rem; }
+.diagnostics dd { margin: 0; font-size: .875rem; }
+.diagnostics table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.diagnostics th, .diagnostics td { text-align: left; padding: .4rem .75rem .4rem 0; border-bottom: 1px solid var(--shell-line); }
+.diagnostics th { font-size: .74rem; letter-spacing: .06em; color: var(--shell-text-dim); font-weight: 600; }
+.diagnostics code {
+  font-family: var(--font-num);
+  font-size: .85em;
+  padding: .1em .35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.diagnostics button { font: inherit; padding: .35rem .9rem; border: 1px solid var(--shell-line); border-radius: 6px; background: var(--shell-panel); color: inherit; cursor: pointer; }
+.diagnostics .problem { margin: .5rem 0 0; font-size: .85rem; }
+.good { color: var(--seal-on-shell); }
+.bad { color: var(--danger-on-shell); }
+.pending { color: var(--warn-on-shell); }

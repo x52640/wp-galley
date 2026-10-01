@@ -1,0 +1,109 @@
+/* ==========================================================================
+   發布台的設計系統（docs/specs/design-system.md，版面依 D-013 的 B 版）
+
+   B 版是「文件式」：文章放在中間，像一張紙；修改建議標在字上，右邊的卡片一對一
+   對應。介面外殼是暖灰的桌面，文章是紙白，強調色只有一個墨綠，只出現在「下一步
+   該按的那一顆」。
+
+   變數名沿用舊的 --shell-* 與 --*-on-shell：面板元件寫的是語意（外殼、紙、決定），
+   換一套版面不必動它們。
+
+   字體：介面與正文用黑體；大標題用宋體給一點書卷氣。宋體是中文字體，所以不會有
+   「西文字體套不上中文」的問題（舊規則禁止的是那個）。
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* 外殼：暖灰桌面 */
+  --shell-bg:        #F5F2EC;
+  --shell-panel:     #FFFFFF;
+  --shell-sunken:    #EFEBE3;
+  --shell-line:      #E3DED4;
+  --shell-text:      #1C1B19;
+  --shell-text-dim:  #5E5A53;
+
+  /* 紙 */
+  --proof-bg:        #FFFFFF;
+  --proof-text:      #1A1A1A;
+  --proof-rule:      #E2E0DA;
+  --proof-dim:       #5F5E5A;
+  --proof-sunken:    #F6F5F1;
+
+  /* 對照的刪除／新增（D-019）。印在紙上，紙永遠是淺色，深色模式不換 */
+  --diff-del:        #B91C1C;
+  --diff-del-bg:     #FDE8E8;
+  --diff-add:        #166534;
+  --diff-add-bg:     #DCF5E3;
+
+  /* 唯一的強調色：下一步該按的那一顆 */
+  --accent:          #2D5A4A;
+  --accent-strong:   #1F4337;
+  --accent-soft:     #E4EDE8;
+  --on-accent:       #FFFFFF;
+
+  /* 決定與警示（印在淺色上，對比都 ≥ 4.5:1） */
+  --mark:            #C2410C;
+  --seal:            #15803D;
+  --warn:            #B45309;
+  --danger:          #B91C1C;
+  --mark-on-shell:   #9A3412;
+  --seal-on-shell:   #166534;
+  --warn-on-shell:   #8A4B06;
+  --danger-on-shell: #B91C1C;
+
+  /* 建議的分類色：錯字、事實、出處、寫法。底色標在字上，前景色寫在標籤上。 */
+  --kind-typo:       #9A3412;
+  --kind-typo-bg:    #FCE3D6;
+  --kind-fact:       #1E4F8A;
+  --kind-fact-bg:    #DDE8F5;
+  --kind-source:     #6E5410;
+  --kind-source-bg:  #F6EDCF;
+  --kind-style:      #3F5B4F;
+  --kind-style-bg:   #E4EDE8;
+
+  --focus:           #1E4F8A;
+
+  --font-cjk:   'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  --font-serif: 'Songti TC', 'Noto Serif TC', 'PMingLiU', serif;
+  --font-num:   'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-ui:    var(--font-cjk);
+
+  --radius: 10px;
+  --gutter: 3.25rem;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --fast: 160ms var(--ease);
+  --slow: 260ms var(--ease);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shell-bg:        #1C1B19;
+    --shell-panel:     #262420;
+    --shell-sunken:    #211F1C;
+    --shell-line:      #3A3732;
+    --shell-text:      #EDE9E1;
+    --shell-text-dim:  #A8A196;
+
+    --accent:          #6FAE96;
+    --accent-strong:   #8CC4AE;
+    --accent-soft:     #2B3A34;
+    --on-accent:       #10201A;
+
+    --mark-on-shell:   #F59E6B;
+    --seal-on-shell:   #6FCF97;
+    --warn-on-shell:   #F2C063;
+    --danger-on-shell: #F48C8C;
+
+    --kind-typo:       #F59E6B;
+    --kind-typo-bg:    #4A2A1C;
+    --kind-fact:       #8FB6E8;
+    --kind-fact-bg:    #1F2E44;
+    --kind-source:     #E3C46F;
+    --kind-source-bg:  #3D3419;
+    --kind-style:      #9CC7B5;
+    --kind-style-bg:   #26372F;
+
+    --focus:           #8FB6E8;
+  }
+}

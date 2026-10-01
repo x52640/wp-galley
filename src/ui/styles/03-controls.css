@@ -1,0 +1,185 @@
+/* --- 控制項 ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem .85rem;
+  border: 1px solid var(--shell-line);
+  border-radius: var(--radius);
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font: inherit;
+  font-size: .875rem;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--fast), border-color var(--fast), color var(--fast);
+}
+
+.btn:hover:not(:disabled) { border-color: var(--shell-text-dim); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-tiny { padding: .25rem .55rem; font-size: .8rem; }
+
+.btn-quiet { background: transparent; }
+.btn-quiet:hover:not(:disabled) { background: var(--shell-panel); }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.btn-big { padding: .7rem 1.3rem; font-size: 1rem; border-radius: 12px; }
+
+/* 核准是整個畫面唯一「蓋章」的動作，所以它自己一種樣子。 */
+.btn-seal {
+  background: color-mix(in srgb, var(--seal-on-shell) 15%, var(--shell-panel));
+  border-color: color-mix(in srgb, var(--seal-on-shell) 50%, transparent);
+  color: var(--seal-on-shell);
+  font-weight: 600;
+  letter-spacing: .05em;
+  padding: .55rem 1.4rem;
+}
+.btn-seal:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--seal-on-shell) 25%, var(--shell-panel));
+  border-color: var(--seal-on-shell);
+}
+
+.btn-danger {
+  background: color-mix(in srgb, var(--danger-on-shell) 16%, var(--shell-panel));
+  border-color: color-mix(in srgb, var(--danger-on-shell) 45%, transparent);
+  color: var(--danger-on-shell);
+  font-weight: 600;
+}
+.btn-danger-text { color: var(--danger-on-shell); }
+
+.btn-file { position: relative; overflow: hidden; }
+.btn-file input[type='file'] {
+  position: absolute; inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 0;
+}
+/* 檔案按鈕的 input 是透明蓋在上面的，停用時要讓外框也看得出按不了。 */
+.btn-file:has(input:disabled) { opacity: .5; }
+.btn-file input[type='file']:disabled { cursor: not-allowed; }
+
+.input {
+  width: 100%;
+  padding: .5rem .7rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  color: var(--shell-text);
+  font: inherit;
+  font-size: .9rem;
+  transition: border-color var(--fast);
+}
+.input:hover { border-color: var(--shell-text-dim); }
+.input::placeholder { color: var(--shell-text-dim); }
+
+.textarea { resize: vertical; line-height: 1.8; min-height: 5rem; }
+.select { appearance: none; padding-right: 1.6rem; }
+
+.field { display: flex; flex-direction: column; gap: .3rem; }
+.field-label {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--shell-text);
+}
+.field-hint { font-size: .78rem; color: var(--shell-text-dim); line-height: 1.6; }
+
+.stack { display: flex; flex-direction: column; gap: .9rem; }
+.row { display: flex; gap: .5rem; align-items: center; }
+.row-end { justify-content: flex-end; }
+
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem .6rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--shell-text-dim);
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+  transition: color var(--fast), border-color var(--fast), background var(--fast);
+}
+.chip:hover { color: var(--shell-text); border-color: var(--shell-text-dim); }
+.chip[data-active='yes'] {
+  color: var(--shell-bg);
+  border-color: var(--shell-text);
+  background: var(--shell-text);
+}
+/* opacity 會把文字壓到 1.5:1，等於看不到。要淡就用顏色，不要用透明度。 */
+.chip-count { font-size: .7rem; color: var(--shell-text-dim); }
+
+/* 選到了、但站上沒有這個項目：形狀（虛線）與圖示都有，不是只靠顏色。 */
+.chip[data-unknown='yes'] {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warn-on-shell) 55%, transparent);
+  color: var(--warn-on-shell);
+  background: color-mix(in srgb, var(--warn-on-shell) 10%, transparent);
+}
+
+.segmented { display: inline-flex; border: 1px solid var(--shell-line); border-radius: 6px; overflow: hidden; }
+.segmented-item {
+  padding: .35rem .8rem;
+  border: 0;
+  background: transparent;
+  color: var(--shell-text-dim);
+  font: inherit;
+  font-size: .85rem;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+.segmented-item + .segmented-item { border-left: 1px solid var(--shell-line); }
+.segmented-item[data-active='yes'] { background: var(--shell-panel); color: var(--shell-text); font-weight: 600; }
+
+
+.note {
+  display: flex;
+  gap: .45rem;
+  align-items: flex-start;
+  margin: 0;
+  padding: .5rem .65rem;
+  border-radius: 6px;
+  font-size: .82rem;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+.note svg { flex: none; margin-top: .18rem; }
+.note-bad  { color: var(--danger-on-shell); border-color: color-mix(in srgb, var(--danger-on-shell) 35%, transparent); background: color-mix(in srgb, var(--danger-on-shell) 10%, transparent); }
+.note-warn { color: var(--warn-on-shell);   border-color: color-mix(in srgb, var(--warn-on-shell) 35%, transparent);   background: color-mix(in srgb, var(--warn-on-shell) 10%, transparent); }
+.note-good { color: var(--seal-on-shell);   border-color: color-mix(in srgb, var(--seal-on-shell) 35%, transparent);   background: color-mix(in srgb, var(--seal-on-shell) 10%, transparent); }
+.note-info { color: var(--shell-text);      border-color: var(--shell-line);                                          background: var(--shell-panel); }
+
+.empty-line { margin: 0; color: var(--shell-text-dim); font-size: .85rem; }
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .15rem .55rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 999px;
+  font-size: .74rem;
+  letter-spacing: .05em;
+  color: var(--shell-text-dim);
+  white-space: nowrap;
+}
+.state-badge[data-state='APPROVED'],
+.state-badge[data-state='PUBLISHED'] { color: var(--seal-on-shell); border-color: color-mix(in srgb, var(--seal-on-shell) 40%, transparent); }
+.state-badge[data-state='PUBLISHING'] { color: var(--mark-on-shell); border-color: color-mix(in srgb, var(--mark-on-shell) 40%, transparent); }
+.state-badge[data-state='FAILED'] { color: var(--danger-on-shell); border-color: color-mix(in srgb, var(--danger-on-shell) 40%, transparent); }
+.state-badge[data-state='CANCELLED'],
+.state-badge[data-state='SUPERSEDED'] { opacity: .7; }

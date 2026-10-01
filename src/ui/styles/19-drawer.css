@@ -1,0 +1,38 @@
+/* --- 抽屜 ---------------------------------------------------------------- */
+
+.sheet-layer { position: fixed; inset: 0; z-index: 40; display: flex; justify-content: flex-end; }
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(28, 27, 25, .28);
+  cursor: default;
+  animation: focus-in var(--fast) both;
+}
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, 100%);
+  height: 100%;
+  background: var(--shell-panel);
+  border-left: 1px solid var(--shell-line);
+  box-shadow: -12px 0 32px rgba(28, 27, 25, .12);
+  animation: sheet-in var(--slow) both;
+}
+.sheet[data-wide='yes'] { width: min(46rem, 100%); }
+.sheet:focus { outline: none; }
+@keyframes sheet-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem .75rem;
+  border-bottom: 1px solid var(--shell-line);
+}
+.sheet-title { margin: 0; font-family: var(--font-serif); font-size: 1.4rem; }
+.sheet-body { flex: 1; overflow-y: auto; padding: 1.1rem 1.25rem 2rem; }
+.sheet-section { display: flex; flex-direction: column; gap: .6rem; }
+.sheet-section + .sheet-section { padding-top: 1.1rem; border-top: 1px solid var(--shell-line); }
+.sheet-section-title { margin: 0; font-size: .95rem; }
+.sheet-foot { padding: 1.5rem 0 0; }

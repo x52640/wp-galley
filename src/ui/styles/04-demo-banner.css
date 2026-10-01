@@ -1,0 +1,17 @@
+/* --- 示範資料橫幅 ------------------------------------------------------- */
+
+.fixture-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem 1rem;
+  background: color-mix(in srgb, var(--warn-on-shell) 16%, var(--shell-bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--warn-on-shell) 40%, transparent);
+  color: var(--warn-on-shell);
+  font-size: .8rem;
+}
+.fixture-bar button { margin-left: auto; }
+
+
+.screen-loading, .screen-error { padding: 3rem 1.5rem; color: var(--shell-text-dim); }
+.screen-error p { display: flex; gap: .4rem; align-items: center; color: var(--danger-on-shell); }
