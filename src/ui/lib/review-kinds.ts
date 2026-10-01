@@ -1,4 +1,5 @@
 import type { Observation, ReviewChange, ReviewItem } from '../service/types.js';
+import { isOpenReviewState } from '../../contract/review-state.js';
 
 /**
  * 建議的四種顏色（B1 右欄的篩選、校樣上的標記用同一套）。
@@ -57,7 +58,7 @@ export function detailOf(item: ReviewItem): string {
 
 /** 還沒有下場的：pending 加上 unappliable（定位不到、等使用者決定）。 */
 export function isOpen(item: ReviewItem): boolean {
-  return item.state === 'pending' || item.state === 'unappliable';
+  return isOpenReviewState(item.state);
 }
 
 /**

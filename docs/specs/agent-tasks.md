@@ -290,7 +290,7 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 | 落地 | **不落地**：不建提案、不改 templateData、不建版本、不動核准、不動配圖需求。候選只回給畫面；使用者點一個才填進網址欄（還沒存，照原本的「儲存」存）。**絕不自動填、不自動存**（AI 可能認錯作品） |
 | 密碼 | **截斷之前**先對整份 templateData 檢查，再對組好的 prompt 檢查（D-023）：只查截好的 prompt 的話，密碼剛好跨在第 600 字時前半段會被送出去（P5-T026 審查）。有就拒絕，不送出、不記執行 |
 | 生命週期 | 跟校稿共用「同一篇一次一趟」（`activeRuns`）、AgentRegistry 同一條佇列、`DELETE /agent` 取消、頂端 AgentBanner。`agent_runs.purpose = 'suggest-slug'`（`AgentRun.task`）。逾時預設 2 分鐘 |
-| 內容被改過 | **不丟結果**：候選不會落地，不像校稿那樣要對著同一版套用。因此它跑的時候上傳圖片的自動放位置／自動設精選照常做（後端 `contentRunActive` 不算它），畫面上圖片的「放進正文／設精選」也不鎖（前端 `runLocksContent`，`src/ui/lib/agent-tasks.ts`，示範資料共用） |
+| 內容被改過 | **不丟結果**：候選不會落地，不像校稿那樣要對著同一版套用。因此它跑的時候上傳圖片的自動放位置／自動設精選照常做（後端 `contentRunActive` 不算它），畫面上圖片的「放進正文／設精選」也不鎖（`runLocksContent`，`src/contract/agent-run.ts`；後端 `contentRunActive` 用同檔的 `taskLocksContent`，畫面與示範資料都用這一份） |
 
 記一筆 `slug_suggested` 事件（provider、候選數、丟掉幾個），**不記候選本身**（沒被採用；採用時會進版本紀錄）。
 不檢查網址是否已被站上別篇用過（WordPress 自己會加 `-2`）；不在建稿時自動產生。

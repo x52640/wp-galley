@@ -4,7 +4,7 @@ phase: 5
 status: done
 depends_on: [P5-T004]
 specs: [architecture.md, design-system.md]
-write_paths: ["src/ui/service/", "src/contract/", "src/core/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T033-split-fixtures.md", "docs/CURRENT_TASK.md"]
+write_paths: ["src/ui/service/", "src/ui/lib/agent-tasks.ts", "src/ui/lib/review-kinds.ts", "docs/specs/state-machine.md", "docs/specs/wordpress-site.md", "docs/specs/agent-tasks.md", "src/contract/", "src/core/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T033-split-fixtures.md", "docs/CURRENT_TASK.md"]
 contract_change: none
 expected_commit: "refactor(P5-T033): 拆分示範資料，規則改用 contract 共用函式"
 ---
@@ -101,3 +101,4 @@ D-033。`src/ui/service/fixtures.ts`（2233 行）是 `?fixtures=1` 的假後端
 - `src/ui/lib/agent-tasks.ts` 的 `runLocksContent` 應改成轉出 `contract/agent-run.ts`；`docs/specs/agent-tasks.md:293` 那句「示範資料共用」要改成指向 contract。
 - 獨立審查（2026-10-01）：後端被換掉的片段逐一比對，條件、順序、訊息一字不差，無 high／medium。low 已修：示範資料取消規則對齊後端。
   low 待使用者：`src/ui/lib/agent-tasks.ts` 的 `runLocksContent` 與 contract 各一份（不在 write_paths）。
+- 2026-10-01 使用者同意擴大 write_paths：收掉審查留下的 6 處範圍外小改動（規格舊路徑 3 行、agent-tasks.md 1 行、畫面端 `runLocksContent`、`review-kinds.ts` 的「還沒處理」判斷改用 contract）。

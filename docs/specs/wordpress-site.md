@@ -29,7 +29,7 @@
 
 ## 更新既有文章（P5-T022，審查 #1、#13）
 
-程式：`src/wordpress/posts.ts`（`updateDraft`）、`src/core/service.ts`（`runPublish`）。目前只有 target 設了
+程式：`src/wordpress/posts.ts`（`updateDraft`）、`src/core/service/publish.ts`（`runPublish`）。目前只有 target 設了
 `fixedObjectId` 才會更新既有文章（一般稿件發過就是 PUBLISHED，不再發第二次；見 `plan.md` Q-5）。
 
 - **只更新草稿**：遠端那篇不是草稿（`publish`、`future`、`private` 等）就在發布前拒絕、零寫入，
@@ -45,7 +45,7 @@
 
 ## 作者（P5-T024，D-024）
 
-程式：`src/wordpress/authors.ts`、`src/core/service.ts`（`listAuthors`、`resolvePublishAuthor`）、
+程式：`src/wordpress/authors.ts`、`src/core/service/authors.ts`（`listAuthors`、`resolvePublishAuthor`）、
 `src/ui/components/AuthorPicker.tsx`。發布選項的規則見 [state-machine.md](state-machine.md)「發布選項」。
 
 不送 `author` 時，WordPress 把作者記成**發布台登入的帳號**（作者站台是 AI 帳號 `ai_publisher`，不是使用者本人）。
