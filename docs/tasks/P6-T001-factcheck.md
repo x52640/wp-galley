@@ -66,3 +66,9 @@ D-034（修訂 D-009）。設計研究的提案在 `/private/tmp/claude-501/fact
 - P6-T003～T005 改 `blocked`，CURRENT_TASK 移到 Blocked 表。
 - 取回器：檢查順序（格式與外洩檢查在 DNS 前）、punycode 解回再比、`application/json` 只收維基 API、維基 API 上限 30 且 Agent 給的維基網址算 API 次數、抓不到的原因要讓使用者看得到（`failReason`）。
 - P6-T002 代理測試改成「代理埠沒收到連線」；P6-T005 write_paths 加 review-proposals.md、agent-tasks.md、`src/ui/lib/review-kinds.ts`。
+
+### Codex 審查修正（2026-10-01，PR #17）
+- 取回器整段拒絕 NAT64 本地前綴 `64:ff9b:1::/48`（RFC 8215）；P6-T002 加假 DNS 測試。
+- 判斷趟改成「該 CLI 做得到的最嚴格無工具模式」：Claude `--tools ""`＋`--strict-mcp-config --no-chrome`（跟 `--json-schema` 的相容性是 P6-T003 手動必驗，不相容退回禁用名單並記錄）；Codex 照 P5-T036；agy 照現況。security.md 信任邊界改成有條件的說法並連到已接受的限制；ADR-0001、P6-T003 要求與測試同步。
+- `correction` 改成選填、不接受 null（缺少＝null）：跟 Codex strict 轉換＋`stripNulls` 相容、不動現有 schema；P6-T003 要求測試走完整 adapter 解析流程。
+- P6-T005 write_paths 加 `src/ui/service/types.ts`。

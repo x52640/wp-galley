@@ -18,7 +18,7 @@
 
 **兩趟 Agent，中間由我們的程式抓網頁並核對引文。**
 第一趟「找來源」只能用**廠商伺服器上執行**的搜尋；我們的取回器抓回候選網頁（另外自己查維基百科）；
-第二趟「判斷」沒有任何工具，只讀我們遞過去的文字、只能用編號引用；最後程式逐字核對引文，
+第二趟「判斷」用該 CLI 做得到的最嚴格無工具模式，只讀我們遞過去的文字、只能用編號引用；最後程式逐字核對引文，
 對不上就降成「查不到」。結果只是卡片，**永不自動套用**到文章。
 
 ## 資料流
@@ -36,7 +36,7 @@
   │    每個網址過 security.md「取回器」的檢查才抓；抽純文字、截斷
   │    某條主張一份都沒抓到 → 那條直接記「查不到」；全部都沒抓到 → 不跑③（省一次額度）
   │
-  ├─③ 判斷（Agent 第二趟，沒有任何工具，參數跟校稿那趟一樣）
+  ├─③ 判斷（Agent 第二趟，用該 CLI 做得到的最嚴格無工具模式）
   │    輸入：主張＋抓回來的文字（每份標 S1、S2…，明講是不受信任資料）
   │    輸出：判定、說明、建議改法（文字）、引文（只能寫 S 編號＋原句）
   │
@@ -86,7 +86,12 @@ Claude 也做不到。
   `--tools WebSearch --allowed-tools WebSearch`（可用的內建工具只有它、不跳權限詢問）；`--strict-mcp-config`、`--no-chrome` 照帶。
 - agy：不給。adapter 回報「不能只開搜尋」，registry 要能問得到這件事，畫面據此講明（見「觸發與畫面」）。
 
-第二趟（判斷）的參數跟現有校稿那趟**完全一樣**，不開任何東西。
+第二趟（判斷）用**該 CLI 做得到的最嚴格無工具模式**（讀的是不受信任的網頁，比校稿更該關死）：
+
+- Claude：`--tools ""`（一個內建工具都不給），加 `--strict-mcp-config --no-chrome`。`--tools ""` 能不能跟 `--json-schema` 一起用**未證實**，
+  是 P6-T003 手動驗證的必驗項；不相容才退回現有的禁用名單（跟校稿那趟一樣），並把結果記進 agent-cli.md 與本節。
+- Codex：照 P5-T036（`web_search="disabled"`＋關掉 features），跟校稿那趟一樣。
+- agy：照現況（`--sandbox`＋prompt 提示），做不到參數保證，見 security.md「刻意接受的限制」。
 
 ### 輸出 schema（`FACTCHECK_FIND_SCHEMA`）
 
@@ -156,12 +161,15 @@ interface FactCheckJudgeOutput {
     claimIndex: number;
     verdict: 'supported' | 'contradicted' | 'unverifiable' | 'needs-context';
     evidence: string;                          // 白話說明查到什麼（≤400）
-    correction: string | null;                 // 例如「應該是 1994 年」；文字建議，不是自動套用的改動（≤200）
+    correction?: string;                       // 選填，沒有就不給；例如「應該是 1994 年」；文字建議，不是自動套用的改動（≤200）
     citations: { ref: string; quote: string }[];  // 0～3 條；ref 只能是我們給的 S 編號；quote 一字不差（≤200）
   }[];
 }
 ```
 
+- `correction` 是**選填**、不接受 null：Codex 的 strict 轉換會把選填欄位變成可 null，adapter 驗證前的 `stripNulls` 再把 null 拿掉，
+  回到「沒有這個欄位」，跟現有其他 schema 同一套。程式把「沒有」存成 `correction: null`（下面存下來的形狀）。
+  不用「必填可為 null」：那樣 `stripNulls` 拿掉 null 之後必填欄位就不見了，整份驗證失敗。
 - 不存在的 `claimIndex` 丟掉；同一個 `claimIndex` 出現兩次留第一個；漏掉的主張記成 `unverifiable`，說明「AI 沒有回這一條」。
 - 不存在的 `ref`、或不是給這條主張的 `ref`，那條引文丟掉。
 
@@ -294,6 +302,7 @@ interface FactCheckFinding {
 - 外洩殘餘風險（取回器照 Agent 給的網址抓）見 security.md「刻意接受的限制」。
 - **未證實，P6-T003／P6-T005 手動驗證時確認**：Codex 的 `-c web_search="cached"` 在 `--ignore-user-config` 下是否生效；
   Claude `-p` 模式下 `--tools WebSearch` 是否在訂閱帳號可用、搭配 `--json-schema` 的結構化輸出是否仍可用；
+  判斷趟的 `--tools ""` 能不能跟 `--json-schema` 一起用（P6-T003 必驗）；
   `agy` 的 `search_web` 在哪執行、會不會被呼叫（沒有參數能關，見 security.md「刻意接受的限制」）；
   維基百科繁體變體用哪個參數有效。
 

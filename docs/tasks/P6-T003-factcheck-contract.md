@@ -46,6 +46,9 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 - Codex：只准 `cached`，程式裡不得出現 `live`／`indexed` 的路徑。
 - Claude：`--disallowed-tools` 禁用優先，所以第一趟＝P5-T036 的禁用名單**減掉 `WebSearch`**（`WebFetch` 與其他照舊禁用）＋`--tools WebSearch --allowed-tools WebSearch`＋`--strict-mcp-config --no-chrome`。
 - `hostedSearch` 沒給或 false 時，產生的參數必須跟 P5-T036 之後完全一樣（有測試逐項比對）。
+- 判斷趟要「最嚴格無工具模式」（factcheck.md「③ 判斷」）：`AgentRequest` 另加一個選項（例如 `strictNoTools`），Claude 帶 `--tools ""`（參數陣列裡的空字串）
+  ＋`--strict-mcp-config --no-chrome`；Codex、agy 跟校稿那趟一樣。沒給時參數不變。
+- `correction` 照 factcheck.md 定為**選填、不接受 null**（不改 `stripNulls`，對現有 schema 零影響）；程式把缺少的當 null。
 - 先寫測試再實作。
 
 ## 驗證
@@ -55,9 +58,14 @@ D-034。查證的第一趟「找來源」要能只開**廠商伺服器上執行*
 - 假執行檔斷言：Codex 第一趟帶 `web_search="cached"` 且沒有 `live`／`indexed`、其餘 P5-T036 的關閉參數都在；Claude 第一趟
   `--tools`／`--allowed-tools` 的值只有 `WebSearch`（`WebFetch` 不在裡面）、`WebSearch` 不在禁用名單而 `WebFetch` 仍在、`--strict-mcp-config` 與 `--no-chrome` 都在；agy 收到 `hostedSearch` 被拒；
   三家 `hostedSearch` 為 false 時參數不變。
+- 判斷趟：Claude 參數有 `--tools` 且值是空字串、有 `--strict-mcp-config` 與 `--no-chrome`、沒有 `--allowed-tools`；Codex 帶 `web_search="disabled"`。
+- 解析：兩份 schema 的輸出要**走完整的 adapter 解析流程**測（假執行檔吐出 Codex strict 模式會給的 JSON，含 `"correction": null`，經 `stripNulls`＋原 schema 驗證），
+  沒有建議時結果是合格、`correction` 視為 null；不能只對 schema 單獨驗。
 - prompt：第二趟每份來源有編號與不受信任標示；第一趟開搜尋時不出現「你沒有網路」。
 ### 手動驗證
-無（未證實的三件——Codex `-c` 在 `--ignore-user-config` 下是否生效、Claude `-p` 下 `WebSearch` 能不能用、`--tools WebSearch` 搭配 `--json-schema` 結構化輸出是否仍可用——在 P6-T005 使用者真跑時確認）。
+- **必驗**：使用者真跑一次 Claude 判斷趟的參數組合（`--tools ""`＋`--json-schema`，給一小段假來源，不碰 WordPress），確認回得出結構化輸出。
+  不相容就退回禁用名單，結果寫進 agent-cli.md 與 factcheck.md「③ 判斷」。
+- 其餘未證實的三件——Codex `-c` 在 `--ignore-user-config` 下是否生效、Claude `-p` 下 `WebSearch` 能不能用、`--tools WebSearch` 搭配 `--json-schema` 結構化輸出是否仍可用——在 P6-T005 使用者真跑時確認。
 
 ## 完成定義
 - [ ] `npm run verify` 綠

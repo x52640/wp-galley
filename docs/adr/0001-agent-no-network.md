@@ -57,7 +57,7 @@ Agent 從頭到尾沒有拿到連外能力。它只能「請求」，抓不抓�
 **Agent 不握有任何在使用者機器上執行的連網能力**：抓網頁、shell 連外、本機 MCP、瀏覽器控制都不行。
 
 唯一例外：**查證「找來源」那一趟**可以開廠商伺服器上執行的搜尋——Codex `web_search="cached"`、Claude `WebSearch`。
-讀網頁內容的那一趟照舊沒有任何工具，抓網頁永遠是我們的程式。資料流與各家做法見 [factcheck.md](../specs/factcheck.md)；
+讀網頁內容的那一趟用該 CLI 做得到的最嚴格無工具模式（agy 與 Codex plugins 類做不到參數保證，見 security.md「刻意接受的限制」），抓網頁永遠是我們的程式。資料流與各家做法見 [factcheck.md](../specs/factcheck.md)；
 實際參數見 [agent-cli.md](../specs/agent-cli.md)。原文說「取回器的硬性要求…見 factcheck.md」，
 修訂後硬性要求的家改在 [security.md](../specs/security.md)「取回器」（安全規則只有一個家）。
 
