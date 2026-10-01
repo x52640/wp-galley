@@ -1,7 +1,7 @@
 ---
 id: P6-T005
 phase: 6
-status: blocked
+status: in_progress
 depends_on: [P6-T004]
 specs: [factcheck.md, design-system.md, review-proposals.md, architecture.md]
 write_paths: ["src/ui/components/Factcheck*.tsx", "src/ui/components/SuggestionColumn.tsx", "src/ui/components/ProofView.tsx", "src/ui/components/AgentButton.tsx", "src/ui/components/AgentProgress.tsx", "src/ui/components/Workspace.tsx", "src/ui/components/PublishSheet.tsx", "src/ui/lib/factcheck-view.ts", "src/ui/lib/stage-view.ts", "src/ui/lib/agent-tasks.ts", "src/ui/lib/review-kinds.ts", "src/ui/service/client.ts", "src/ui/service/types.ts", "src/ui/service/fixtures.ts", "src/ui/service/fixtures/factcheck.ts", "src/ui/service/fixtures/data.ts", "src/ui/service/fixtures/store.ts", "src/ui/service/fixtures/agent.ts", "src/ui/service/fixtures/content.ts", "src/ui/service/fixtures/jobs.ts", "src/ui/styles/25-factcheck.css", "src/ui/styles/index.css", "src/ui/styles/01-tokens.css", "tests/factcheck-view.test.ts", "tests/stage-view.test.ts", "tests/agent-progress.test.ts", "docs/specs/design-system.md", "docs/specs/review-proposals.md", "docs/specs/agent-tasks.md", "docs/specs/architecture.md", "docs/specs/factcheck.md", "docs/tasks/P6-T005-factcheck-ui.md"]
@@ -65,10 +65,10 @@ D-034、D-008（不離開發布台）、D-010（一鍵、慢可以不確定不�
 - [ ] 使用者真跑過一次查證
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-01，P6-T001）
+- 最後完成：開工（2026-10-01，使用者說「開工」；P6-T004 已合併 #20）
 - 已通過驗證：—
-- 下一步：等 P6-T004 合併後派 subagent 實作
-- Blocker：P6-T004 未完成（完成後 status 改回 ready）
+- 下一步：派 subagent 實作
+- Blocker：無
 
 ## 完成結果
 - 備忘（P6-T004 審查，2026-10-01）：`excerptGone`／`blockIndex` 由後端以 `articleTextForAgent` 處理後的文字計算並經 API 回傳；示範資料若要自己算，須先把該前處理搬進 `src/contract`（目前在 `src/core/factcheck-prompts.ts`，依賴 `image-generation.ts` 的 `neutralize`），另需放寬 write_paths。
