@@ -13,7 +13,7 @@ import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
 import { canInsertImages, canSelectToFactCheck, stageDisplay, type StageView } from '../lib/stage-view.js';
-import { factCheckBlockedReason, hostedSearchNote, isNewCancelledRun, isOpenFinding } from '../lib/factcheck-view.js';
+import { factCheckBlockedReason, hostedSearchNote, isNewCancelledRun, isOpenFinding, isWorkspaceBusy } from '../lib/factcheck-view.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
@@ -72,7 +72,15 @@ export function Workspace({
   /** 這篇的查證結果（`GET …/factchecks`，D-034）。讀不到（舊後端）就是 null，右欄照樣只有校稿。 */
   const [factChecks, setFactChecks] = useState<FactCheckListResponse | null>(null);
   /** 按了查證、請求剛送出但 agentRun 還沒出現在稿件上：這段時間也不給再按。 */
-  const [factCheckSending, setFactCheckSending] = useState(false);
+  const [sendingUuid, setSendingUuid] = useState<string | null>(null);
+  /**
+   * 記的是「哪一篇」在送：App 換篇時沿用同一個 Workspace（沒有 key），A 的查證還在等的時候切到 B，
+   * B 不能看起來也在送（Codex 審查 1）。
+   */
+  const factCheckSending = sendingUuid === uuid;
+  /** 目前是哪一篇。查證完成的後續（重讀、報錯、亮卡片）只在還是發起那一篇時才做。 */
+  const uuidRef = useRef(uuid);
+  uuidRef.current = uuid;
   /**
    * 交給哪一家（記在 localStorage）。放在工作區而不是 AgentButton 裡：三個查證入口與它們旁邊的
    * Antigravity 說明都要跟著選單上換的那一家走。
@@ -160,7 +168,11 @@ export function Workspace({
   }, [refresh]);
 
   // 有東西在跑的時候才輪詢。閒著的時候不打擾後端。
-  const working = job?.state === 'PUBLISHING' || job?.agentRun?.status === 'running';
+  // 查證剛送出、還沒讀到 running 的 agentRun 也算（第一次重讀失敗時輪詢照樣在跑，進度與停止才會出來）。
+  const working = isWorkspaceBusy({
+    working: job?.state === 'PUBLISHING' || job?.agentRun?.status === 'running',
+    factCheckSending,
+  });
   const workingRef = useRef(working);
   workingRef.current = working;
   useEffect(() => {
@@ -235,25 +247,30 @@ export function Workspace({
   const startFactCheck = useCallback(
     (request: Omit<FactCheckRequest, 'provider'>) => {
       const previousRunId = latestRunId.current;
+      const origin = uuid;
+      // 跑完的時候畫面可能已經換到別篇（App 沿用同一個 Workspace）：那時這篇的結果一個字都不寫進畫面。
+      const stillHere = (): boolean => alive.current && uuidRef.current === origin;
       setAgentError(null);
-      setFactCheckSending(true);
+      setSendingUuid(origin);
       void (async () => {
         let created: FactCheckFinding[] = [];
         try {
-          const pending = api.runFactCheck(uuid, { provider, ...request });
-          window.setTimeout(() => void refresh(), 500);
+          const pending = api.runFactCheck(origin, { provider, ...request });
+          window.setTimeout(() => {
+            if (stillHere()) void refresh();
+          }, 500);
           created = (await pending).findings;
         } catch (cause) {
-          const latest = await api.listFactChecks(uuid).catch(() => null);
+          const latest = await api.listFactChecks(origin).catch(() => null);
           // 只有「這次新開的那一筆被停止」才不當錯誤講；在開紀錄之前就失敗的（選字找不到、含密碼、另一個動作在跑…）照講。
-          if (alive.current && !isNewCancelledRun(latest?.latestRun ?? null, previousRunId)) setAgentError(describeError(cause));
+          if (stillHere() && !isNewCancelledRun(latest?.latestRun ?? null, previousRunId)) setAgentError(describeError(cause));
         } finally {
-          if (alive.current) setFactCheckSending(false);
-          await refresh();
+          if (alive.current) setSendingUuid((current) => (current === origin ? null : current));
+          if (stillHere()) await refresh();
         }
         // 查一句（選字、觀察卡片）的結果只有一張：直接亮起來、右欄捲到它，不用自己找。
         const only = created.length === 1 ? created[0] : undefined;
-        if (only !== undefined && alive.current) activate({ key: findingKey(only), blockIndex: only.blockIndex });
+        if (only !== undefined && stillHere()) activate({ key: findingKey(only), blockIndex: only.blockIndex });
       })();
     },
     [uuid, refresh, activate, provider],
@@ -373,7 +390,7 @@ export function Workspace({
   const display = stageDisplay(view, sheet === 'publish');
   // 查證三個入口共用的反灰條件（跟其他 Agent 動作同一套）；查證跑的期間內容鎖住（D-034）。
   const factCheckBlocked = factCheckBlockedReason({
-    running: working === true || factCheckSending,
+    running: working,
     editing: editing !== null,
     comparing: display.compare,
     bodyEmpty: job.bodyEmpty,

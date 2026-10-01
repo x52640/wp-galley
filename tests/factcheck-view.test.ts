@@ -13,6 +13,8 @@ import {
   mergeByBlock,
   pickClickedMark,
   isNewCancelledRun,
+  isWorkspaceBusy,
+  markScopes,
   progressSteps,
   quoteInContext,
   resolvedFindingLabel,
@@ -320,5 +322,28 @@ describe('停止才不當錯誤講（審查 1）', () => {
     expect(isNewCancelledRun(run({ id: 5, status: 'failed' }), 4)).toBe(false);
     expect(isNewCancelledRun(run({ id: 1, status: 'cancelled' }), null)).toBe(true);
     expect(isNewCancelledRun(null, null)).toBe(false);
+  });
+});
+
+describe('工作區「忙」：輪詢、改原文、從卡片進編輯共用一個條件（Codex 審查 2、3）', () => {
+  it('Agent 在跑、發布中、查證剛送出（輪詢還沒看到 agentRun）都算忙', () => {
+    expect(isWorkspaceBusy({ working: false, factCheckSending: false })).toBe(false);
+    expect(isWorkspaceBusy({ working: true, factCheckSending: false })).toBe(true);
+    expect(isWorkspaceBusy({ working: false, factCheckSending: true })).toBe(true);
+  });
+});
+
+describe('標記去哪裡找（Codex 審查 4）', () => {
+  it('有段落就只在那一段', () => {
+    expect(markScopes('factcheck', 2)).toEqual(['block']);
+    expect(markScopes('fact', 2)).toEqual(['block']);
+  });
+
+  it('查證定位不到段落：先找正文，再找標題（只出現在標題的那句）', () => {
+    expect(markScopes('factcheck', null)).toEqual(['body', 'title']);
+  });
+
+  it('校稿維持原本的行為：只找正文', () => {
+    expect(markScopes('typo', null)).toEqual(['body']);
   });
 });

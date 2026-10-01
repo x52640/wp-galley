@@ -238,3 +238,21 @@ export function pickClickedMark(
 export function isNewCancelledRun(latest: FactCheckRun | null, previousId: number | null): boolean {
   return latest !== null && latest.status === 'cancelled' && latest.id !== previousId;
 }
+
+/**
+ * 工作區現在「忙」：有 Agent 在跑、發布中，或查證剛送出、輪詢還沒看到 `agentRun`。
+ * 忙的時候要輪詢、不能進編輯（「改原文」、卡片的自己改／去原文改）——三處共用這一個條件，
+ * 不然送出到第一次重讀之間可以進編輯，存檔被後端拒（Codex 審查 2、3）。
+ */
+export function isWorkspaceBusy(state: { working: boolean; factCheckSending: boolean }): boolean {
+  return state.working || state.factCheckSending;
+}
+
+/**
+ * 文章上的標記要去哪裡找那段字：有段落就只在那一段；定位不到段落的查證先找正文、再找標題
+ * （只出現在標題的那句，例如在標題上選字查證）。校稿維持原本只找正文（P5-T031 講標題的建議另有游標規則，這次不動）。
+ */
+export function markScopes(kind: string, blockIndex: number | null): ('block' | 'body' | 'title')[] {
+  if (blockIndex !== null) return ['block'];
+  return kind === 'factcheck' ? ['body', 'title'] : ['body'];
+}

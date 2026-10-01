@@ -29,7 +29,7 @@ import type { RichUnit } from '../../contract/rich-text.js';
 import { isBlankBody } from '../../contract/empty-body.js';
 import { readString } from '../lib/format.js';
 import { decideProofSave } from '../lib/write-in-place.js';
-import { pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
+import { markScopes, pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
 import { FcIcon } from './FactcheckIcon.js';
 import {
   attachEditInterceptors,
@@ -617,11 +617,17 @@ export function ProofView({
     const doc = frameRef.current?.contentDocument;
     const body = doc?.querySelector('.preview-body');
     if (!doc || !body) return;
+    // 標題裡也可能有查證的標記（只出現在標題的那句，Codex 審查 4）：跟正文一起拆。
+    const title = doc.querySelector('.preview-title');
     unwrapHighlightMarks(body);
+    if (title) unwrapHighlightMarks(title);
     if (mode !== 'edit') return;
     for (const highlight of highlights) {
-      const scope = highlight.blockIndex === null ? body : body.children[highlight.blockIndex];
-      if (scope) wrapFirst(doc, scope, highlight, highlight.id === activeHighlight);
+      const active = highlight.id === activeHighlight;
+      for (const where of markScopes(highlight.kind, highlight.blockIndex)) {
+        const scope = where === 'block' ? body.children[highlight.blockIndex ?? -1] : where === 'title' ? title : body;
+        if (scope && wrapFirst(doc, scope, highlight, active)) break;
+      }
     }
     measure(measureToken.current);
     // highlights 由 highlightKey 代表；陣列本身每次都是新的。
@@ -663,6 +669,8 @@ export function ProofView({
       return;
     }
     unwrapHighlightMarks(body);
+    // 標題要變成可打字（plaintext-only）之前，查證留在標題上的標記先拆掉。
+    if (title) unwrapHighlightMarks(title);
     if (originalBody.current === null) {
       originalBody.current = body.innerHTML;
       originalUnits.current = snapshotBody(body);
@@ -1046,8 +1054,8 @@ export function ProofView({
  * 只在單一文字節點裡找：跨過標籤的（`今天<em>讀完`）不包，跟後端逐項套用的規則
  * 一致（docs/specs/review-proposals.md）——找不到就不標，右欄的卡片照樣在。
  */
-function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): void {
-  if (highlight.text.length === 0) return;
+function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): boolean {
+  if (highlight.text.length === 0) return false;
   const group = highlight.kind === 'factcheck' ? 'factcheck' : 'review';
   const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
@@ -1079,8 +1087,9 @@ function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, act
       mark.style.outlineOffset = '2px';
     }
     range.surroundContents(mark);
-    return;
+    return true;
   }
+  return false;
 }
 
 /**

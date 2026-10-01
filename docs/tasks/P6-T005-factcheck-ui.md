@@ -65,9 +65,9 @@ D-034、D-008（不離開發布台）、D-010（一鍵、慢可以不確定不�
 - [ ] 使用者真跑過一次查證
 
 ## 中斷／接手紀錄
-- 最後完成：審查修正（2026-10-02）：停止判斷改看新開的那一筆、標記改成校稿先包＋同範圍點兩次換外層、觀察卡片的查證說明常駐、送出到輪詢之間反灰與鎖內容、示範資料擋已結束的稿件
-- 已通過驗證：`npm run verify` 綠（84 檔／1856 測試；新增 `tests/factcheck-view.test.ts`，`stage-view`、`agent-progress` 加測試）；`?fixtures=1` 用 ui-drive 截圖看過（含 1024px）
-- 下一步：主 session 審查 → 使用者真跑一次查證（手動驗證那幾項）→ commit
+- 最後完成：Codex 審查（PR #21）修正（2026-10-02，工作樹、未 commit）：查證完成的後續只寫回發起那一篇（換篇不串）；送出中也輪詢；「忙」統一一個條件（輪詢、改原文、卡片進編輯）；只在標題的查證在標題上標字
+- 已通過驗證：`npm run verify` 綠（84 檔／1860 測試；新增 `tests/factcheck-view.test.ts`，`stage-view`、`agent-progress` 加測試）；`?fixtures=1` 用 ui-drive 截圖看過（含 1024px）
+- 下一步：主 session 審查 → commit 到 PR #21 → 使用者真跑一次查證（手動驗證那幾項）
 - Blocker：無（write_paths 夠用；`icons.tsx` 不在範圍內，新圖示放在 `FactcheckIcon.tsx`）
 
 ## 完成結果
