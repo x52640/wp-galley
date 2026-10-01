@@ -4,50 +4,50 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **70 檔 / 1441 測試**全綠（2026-09-30，P5-T032；P5-T027 時 63 檔 / 1153，
-  P5-T026 commit 時是 62 檔 / 1141）
+- `npm run verify`：typecheck 通過；Vitest **70 檔 / 1441 測試**全綠（2026-09-30，P5-T032）
 - migration head：`008-user-image-briefs`（dev server 已自動套到本機 DB）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-- [P5-T032](tasks/P5-T032-disable-targets.md)：設定精靈可以停用不要的文章類型（D-032），PR #9 已合併（獨立審查 2 條 low、Codex 3 條都已修），**待使用者手動驗證**。
-- [P5-T031](tasks/P5-T031-edit-jump-to-title.md)：講標題的建議按「去原文改」游標跳到標題，PR #7＋#8 已合併，**待使用者手動驗證**（只存草稿）。
-- [P5-T030](tasks/P5-T030-restore-cancelled.md)：已取消的稿件可以恢復（D-031），PR #6 已合併，**待使用者手動驗證**（只存草稿）。
-- [P5-T029](tasks/P5-T029-write-in-place.md)：新稿件直接在文章上寫、標題在文章上直接改（D-030），PR #4 已合併（對抗性審查 4 條 low 已修；使用者決定不補 Codex），**待使用者手動驗證**。
-  併入使用者回報的「文章上滾輪要滾兩次」修正。
-- [P5-T028](tasks/P5-T028-rich-edit-toolbar.md)：直接在文章上改時可以加格式（D-028），PR #2 已合併（五輪 Codex 審查），**待使用者手動驗證**（只存草稿）。
-- [P5-T027](tasks/P5-T027-keep-edited-brief.md)：使用者改過的配圖描述不被 AI 蓋掉（D-027），已 commit（審查 3 條低度，只改文件說法），**待使用者手動驗證**。
-- P5-T025（配圖的 prompt 可以直接改）已 commit，**待使用者手動驗證**。蓋掉使用者改過描述的問題 → P5-T027。
-- [P5-T026](tasks/P5-T026-suggest-slug.md) AI 建議英文網址（D-026），已 commit（審查後修 3 條），**待使用者手動驗證**（真實 CLI 是否接受新 schema、是否用官方英文片名；只存草稿）。
-- P5-T024（發布時指定作者）已 commit，**待使用者在自己的站手動驗證**（存草稿、後台看作者；read-think／diary 若不支援作者欄位，WordPress 會默默忽略）。
+- [P0-T002](tasks/P0-T002-slim-docs.md)：冷啟動文件瘦身、加功能地圖（D-033 第 1 步），冷啟動四檔 16847→12859 字元（−24%），獨立審查無遺失，PR 審查中，**待使用者合併**。
+
+## 待使用者手動驗證（都已合併；一律只存草稿）
+
+| Task | 驗什麼 |
+| --- | --- |
+| [P5-T032](tasks/P5-T032-disable-targets.md) | 精靈停用一個類型 → 新稿件選單看不到 → 舊稿件照常打開 → 再啟用 |
+| [P5-T031](tasks/P5-T031-edit-jump-to-title.md) | 講標題的建議按「去原文改」→ 游標在標題、可直接改 → 儲存 |
+| [P5-T030](tasks/P5-T030-restore-cancelled.md) | 打開已取消的稿件 → 恢復 → 繼續改 → 核准 → 存草稿 |
+| [P5-T029](tasks/P5-T029-write-in-place.md) | 新日記 → 建立並打開 → 直接打字、用工具列、改標題 → 儲存；文章上滾輪不用滾兩次 |
+| [P5-T028](tasks/P5-T028-rich-edit-toolbar.md) | 長文加粗、連結、H2、清單、貼網頁格式 → 存 → 草稿看後台區塊 |
+| [P5-T027](tasks/P5-T027-keep-edited-brief.md) | 改封面描述 → 按「校驗」→ 描述仍是自己改的 |
+| [P5-T026](tasks/P5-T026-suggest-slug.md) | 「建議網址」：真實 CLI 接受新 schema、候選跟內容有關、用官方英文片名、點了才填 |
+| [P5-T025](tasks/P5-T025-edit-image-prompt.md) | 一鍵配圖 → 改封面 prompt → 存 → Codex 生圖照新描述 |
+| [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
+| [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
 
 ## 上次停在哪（2026-09-30 收官）
 
-- 本日合併：#6 P5-T030 恢復已取消的稿件、#7＋#8 P5-T031 講標題的建議跳到標題（#7 在 GitHub 同步前被合併、漏掉 Codex 修正，#8 補上）、
-  #9 P5-T032 設定精靈停用類型。每個都走：subagent 實作 → 獨立審查 → PR → Codex 審查 → 修正與意見貼 PR。
-- 流程補充：開完 PR 主動跑 Codex、有問題直接修；叫使用者合併前先確認 PR head 等於本機 HEAD。
-- **待使用者手動驗證（只存草稿）**：P5-T024～P5-T032。P5-T030～T032 的步驟寫在各 Task 的「手動驗證」。
-- 已知殘餘（新增）：P5-T030 取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）；
-  P5-T032 畫面要連得上 WordPress 才改得了停用；精靈寫檔一律兩格縮排 JSON（原有行為）。
+- 合併 #6 P5-T030、#7＋#8 P5-T031（#7 在 GitHub 同步前被合併、漏掉 Codex 修正，#8 補上）、#9 P5-T032。
+- 工作方式：實作派 subagent、主 session 監工 → 獨立審查 → PR → Codex 審查 → 修正與意見貼 PR。
+  開完 PR 主動跑 Codex、有問題直接修；叫使用者合併前先確認 PR head 等於本機 HEAD。
+- 已真實驗證（2026-09-24）：Codex 生圖 → 上傳 → 放進正文 → 存草稿。P5-T029 使用者決定不補 Codex 審查。
+- 開源在 https://github.com/x52640/wp-galley （D-029），main 有分支保護（只能 PR）；commit 用 noreply 信箱。
 - 背景跑的 dev server 最多 2 小時會被 Claude Code 關掉；要長開請使用者自己在終端機跑 `npm run dev`。
-
-## 更早
-
-- 2026-09-28：開源到 https://github.com/x52640/wp-galley （MIT，D-029），main 有分支保護（只能 PR）；commit 用 noreply 信箱。
-  殘餘：帶連結的圖片發布走 wp:html（未開 Task）；Safari／Firefox 未測；「不要了」的配圖需求被 Agent 再提會復活（未裁定）；
-  D-016 各家 CLI 條款未查證；可考慮加 CI 後開「測試通過才能合併」。
-- 2026-09-24：使用者已真實驗證 Codex 生圖 → 上傳 → 放進正文 → 存草稿。精靈是否用作者本人的站完整跑過（含填錯密碼、填 http）
-  使用者沒明確回報——下次開工先問。工作方式：實作派 subagent、主 session 監工。
 
 ## Ready
 
+D-033 依序：P0-T002 → P5-T004 → P5-T033 → P5-T034 → P5-T035（一次一個，各一個 PR）。
 
 | Task | 內容 | 備註 |
 | --- | --- | --- |
-| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | 原本等 P5-T001，已解除 |
-| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService | 跟 P5-T003 不衝突 |
+| [P5-T004](tasks/P5-T004-split-core-service.md) | 拆分 CoreService（含 `api.ts`） | 等 P0-T002 |
+| [P5-T033](tasks/P5-T033-split-fixtures.md) | 拆分示範資料，規則改用 contract | 等 P5-T004 |
+| [P5-T034](tasks/P5-T034-split-styles.md) | 樣式表照畫面拆檔 | |
+| [P5-T035](tasks/P5-T035-proofview-edit-logic.md) | 抽出 ProofView 編輯邏輯 | |
+| [P6-T001](tasks/P6-T001-factcheck.md) | AI 查證 | |
 
 ## Blocked
 
@@ -57,34 +57,9 @@
 
 `plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
 
-## 已知殘餘（記錄，不擋進度）
+## 已知問題
 
-- 帶連結的圖片（`<figure><a href><img></a></figure>`）存得住、連結不丟，但發布時 `block-parse.ts` 還不認得 figure 裡的 `<a>`，
-  整塊會走 wp:html 保底，不是帶 `linkDestination: custom` 的圖片區塊。要改 `block-parse.ts`／`block-types.ts`／`block-serialize.ts`
-  （P5-T028 的 write_paths 只含最後一個），另開 Task（P5-T028 第三輪審查 #4）。
-
-- 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
-  `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
-
-- 啟動清理在建 CoreService 時就跑（P5-T020）：已開著一個後端時再啟動第二個（連接埠被占而退出），會先把第一個正在跑的 AI 工作標成「後端重啟」作廢、額度照花。修法是移到 listen 成功後（要改 `src/server/main.ts`）；MCP 若另起行程共用 DB 也會踩到。2026-09-24 使用者裁定先記下，未開 Task。
-- `?fixtures=1` 的假資料（`src/ui/service/fixtures.ts`）移除／移動圖片仍整塊刪，跟後端（P5-T019）不一致，只影響示範畫面。
-- 直接在文章上改遇到 409 後按「重新讀取」，編輯框裡未存的字可能消失（P5-T005，少見）。
-- 階段 5 的 Codex review 報告沒有留檔（`tests/review-proposal.test.ts` 已註明）。2026-09-24 全 repo 審查有留檔：`docs/reviews/`。
-- `core-service.md` 的方法清單是節錄 → P5-T004。
-- D-016 未查證：Codex／Claude／Google 的條款是否允許第三方工具呼叫其 CLI；開源公開前要查。
-- ~~prompt 同時帶過期的原稿（sourceText）~~ → P5-T017 已處理：prompt 只送目前這一版；sourceText 仍是
-  「最早貼上的原稿」的紀錄，不跟著更新（刻意的）。模板 `rules.md` 裡還有「原稿」的字眼（指使用者的文章，
-  不是那份過期的稿子），在 `templates/`，P5-T017 沒動。
-- ~~直接在文章上改的整理規則只處理頂層：巢狀 `div` 不轉成段落、空標題不刪~~ → P5-T028 已處理（清單項目、引用裡的 div，空標題刪掉）。
-- 程式註解大量引用「計畫 §N」，指的是 `docs/archive/IMPLEMENTATION_PLAN.md`，部分已被推翻；
-  以 spec 為準。
-- 發布面板靠比對後端的中文 blocker 字串分類（後端改字會多擋）→ 應改成結構化代碼，尚未開 Task。
-- Codex 生圖的圖檔留在 `~/.codex/generated_images/`（那是 Codex 的資料夾，發布台不刪）。
-- `CODEX_HOME` 只明確傳給生圖那一趟；偵測（`codex login status`）與校稿沒傳，使用者自訂 `CODEX_HOME` 時會用預設位置（P5-T013 審查，未處理）。
-- `-s read-only` 的 Codex 仍然**讀得到**磁碟上的檔案（例如專案的 `.env`），校稿與生圖都一樣，原本就存在；
-  目前靠 cwd 是隔離工作區與 prompt 約束，沒有真的擋（P5-T013 審查，未處理）。
-- 刻意接受的限制（不是 bug）：見 `docs/specs/security.md` 最後一節、
-  `docs/specs/review-proposals.md` 的逐項套用定位規則。
+見 [known-issues.md](known-issues.md)（記錄，不擋進度）。
 
 ## 治理
 

@@ -12,7 +12,7 @@ expected_commit: "type(P0-T000): 一句話成果"
 # 標題
 
 ## 目標
-<!-- 為什麼做，引用 plan.md 的決策編號 -->
+<!-- 為什麼做，引用 plan.md 的決策編號。決策的理由寫在這裡（plan.md 只放一行結論） -->
 
 ## 範圍
 ### 包含
@@ -34,7 +34,8 @@ expected_commit: "type(P0-T000): 一句話成果"
 
 ## 完成定義
 - [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新
+- [ ] 擁有這些行為的 spec 已更新（新增或搬動功能：architecture.md 功能地圖）
+- [ ] 留下的殘餘已寫進 `docs/known-issues.md`
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄

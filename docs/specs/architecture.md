@@ -1,6 +1,6 @@
 # 架構與程式慣例
 
-> 擁有範圍：技術選型、模組邊界、依賴方向、跨模組的程式慣例、資料存放。
+> 擁有範圍：技術選型、模組邊界、依賴方向、跨模組的程式慣例、資料存放、功能地圖。
 > 各模組的行為規格在各自的 spec，這裡只管「東西放哪、誰可以 import 誰」。
 
 ## 內容管線
@@ -79,3 +79,32 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `config/publish-targets.json` | 本機站台設定（發布目標），一次一個站（D-016） | 否 |
 | `config/publish-targets.example.json`、`config/examples/` | 站台設定範例（通用、作者站台）；測試用 `config/examples/remusplus.json`，不讀本機檔 | 是 |
 | `templates/` | 模板 | 是 |
+
+## 功能地圖
+
+一列一個使用者看得到的功能：從畫面一路查到測試。2026-10-01 對著程式查證（P0-T002）。
+畫面元件在 `src/ui/components/`；路由在 `src/server/routes/`，沒寫檔名的是 `jobs.ts`（前綴 `/api/jobs/:uuid`，表中寫成 `…`）；
+後端欄是 `src/core/service.ts` 的區段註解（`// --- 區段名 ---`）。**P5-T004 拆完後，後端欄改成檔名。**
+測試在 `tests/`，省略 `.test.ts`。
+
+| 功能 | 畫面 | API 路由 | 後端 | 規格 | 主要測試 |
+| --- | --- | --- | --- | --- | --- |
+| 稿件總覽、拖放／⌘V 貼上建稿 | `JobList` | `GET /api/jobs`、`POST /api/jobs`、`GET /api/wordpress`（`wordpress.ts`，類型清單） | 建立與讀取 | core-service、design-system | jobs-api、core-service |
+| 新稿件（只問類型與標題，直接進打字模式） | `NewJob`、`lib/write-in-place.ts` | `POST /api/jobs` | 建立與讀取（`createJob`） | design-system、core-service | write-in-place、disable-targets |
+| 在文章上改（含標題、格式工具列、貼上整理） | `ProofView`、`FormatBar`、`Workspace`、`lib/rich-*.ts`、`lib/edit-target.ts` | `POST …/revisions`（`editedBody`／`editedTitle`、`expectedContentHash`） | 內容（`createRevision`） | design-system、security（貼上、連結） | edited-body、rich-text、rich-format、edit-jump-to-title、expected-content-hash |
+| 校樣預覽 | `ProofView`（iframe） | `POST …/render`、`GET …/preview`、`GET …/diff`（標記） | 內容 | templates、review-proposals | preview、render |
+| 一鍵動作（校驗、只找錯字、一鍵配圖）、停止 | `AgentButton`、`AgentProgress`、`lib/agent-tasks.ts` | `POST …/agent`、`DELETE …/agent` | Agent（`runAgentReview`） | agent-tasks、agent-cli | agent-output、agent-run-lifecycle、review-schema |
+| 校稿提案／待處理（逐項接受、略過、整份採用、丟棄、已經改好了） | `SuggestionColumn` | `GET …/review`、`POST …/review/resolve`、`POST …/review/accept-all`、`DELETE …/review` | 待處理清單 | review-proposals | review-proposal、review-apply、text-match |
+| 對照（git diff 式，跟上一版或 AI 提案） | `CompareView`、`lib/diff-view.ts` | `GET …/compare` | 待處理清單（`getComparison`） | review-proposals | diff、diff-view、field-diff、word-diff |
+| 配圖需求卡片（改描述、不要了） | `panels/MediaPanel`（BriefCard） | `PATCH …/briefs/:id`、`DELETE …/briefs/:id` | 待處理清單 | agent-tasks | edit-image-brief、keep-edited-brief |
+| 用 Codex 生圖、用這張 | `panels/MediaPanel` | `GET /api/image-generation`（`agents.ts`）、`POST …/briefs/:id/generate`、`GET …/candidates/:id`、`POST …/candidates/:id/use` | 生圖 | agent-tasks、agent-cli | codex-image、image-generation、image-generation-api、image-anchor |
+| 在這裡插圖、請 AI 配一張 | `InsertImagePanel`、`ProofView` | `POST …/media`、`POST …/media/:id/place`、`POST …/briefs` | 媒體、生圖（`requestImageAtPosition`） | agent-tasks、design-system | image-at-position、image-anchor |
+| 媒體（上傳、換圖、移除、放位置、精選圖片） | `panels/MediaPanel` | `POST …/media`、`PUT …/media/:id`、`DELETE …/media/:id`、`POST …/media/:id/place`、`POST …/media/:id/featured`、`DELETE …/featured` | 媒體 | core-service、agent-tasks | media-upload、media-validate、image-inline-text |
+| 標題與網址、建議網址 | `panels/SourcePanel`、`lib/slug-suggest-store.ts` | `POST …/revisions`、`POST …/slug-suggestions` | 內容、Agent（`suggestSlugs`） | agent-tasks | slug-suggestion、slug-suggest-store、clear-template-fields |
+| 分類 | `panels/TaxonomyPanel`（在發布面板裡） | `POST …/revisions`、`GET`／`POST /api/wordpress/terms`（`wordpress.ts`，不經 CoreService） | 內容；發布時對名稱在內部 | wordpress-site、templates | wordpress-terms、clear-template-fields |
+| 核准 | `PublishSheet` | `POST …/approve`、`DELETE …/approve` | 核准（失效在內部 `invalidateApproval`） | state-machine | state-machine、content-hash、core-service |
+| 發布（草稿／公開，顯示發到哪裡） | `PublishSheet` | `POST …/publish` | 發布 | state-machine、wordpress-site | publish-path-guards、wordpress-posts、blocks、core-service |
+| 作者 | `AuthorPicker`（在發布面板裡） | `GET /api/wordpress/authors`（`wordpress.ts`）、`POST /api/setup/default-author`（`setup.ts`） | 作者 | wordpress-site、state-machine（發布選項） | publish-author |
+| 取消、恢復已取消的稿件 | `Workspace` | `DELETE …`、`POST …/restore` | 建立與讀取（`cancelJob`、`restoreJob`） | state-machine | restore-cancelled |
+| 設定精靈、停用類型 | `SetupWizard` | `/api/setup/*`（`setup.ts`） | 設定精靈（`server/reconfigure.ts`、`config/env-file.ts`、`wordpress/setup.ts`） | wordpress-site、security | setup-api、setup-diagnose、setup-env-file、site-switch、disable-targets、ui-target-toggle |
+| 診斷 | `Diagnostics`（總覽進入） | `GET /api/health`（`health.ts`）、`GET /api/wordpress`（`wordpress.ts`） | 不經 CoreService（`wordpress/site.ts`） | wordpress-site | health、wordpress-api |

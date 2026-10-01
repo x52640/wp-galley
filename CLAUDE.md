@@ -40,9 +40,11 @@ npm run build && npm start            # 正式啟動
 | 要找 | 在哪 |
 | --- | --- |
 | 現在做什麼、基準數字 | `docs/CURRENT_TASK.md` |
-| 為什麼這樣決定 | `plan.md` 決策記錄、`docs/adr/` |
+| 為什麼這樣決定 | `plan.md` 決策記錄（一行結論）→ 連到的 Task「目標」、`docs/adr/` |
 | 技術規格（誰擁有什麼） | `docs/specs/README.md` |
 | 模組與依賴方向、程式慣例 | `docs/specs/architecture.md` |
+| 功能在哪個檔（畫面 → 路由 → 後端 → spec → 測試） | `docs/specs/architecture.md`「功能地圖」 |
+| 已知問題、殘餘 | `docs/known-issues.md` |
 | 站台實況（post type、區塊格式、分類法） | `docs/specs/wordpress-site.md` |
 | 三個 CLI 的參數與坑 | `docs/specs/agent-cli.md` |
 | 首頁風格快照（不在發布台範圍） | `docs/reference/homepage/` |
