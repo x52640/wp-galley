@@ -34,11 +34,12 @@ export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled' | 
 export type AgentTask = 'review' | 'images';
 
 /**
- * `agent_runs` 裡記的一趟是在做什麼：`AgentTask` 之外多兩種——`generate-image`
- * （用 Codex 訂閱生圖，D-017）與 `suggest-slug`（AI 建議英文網址，D-026）。
- * 兩者都不走 `POST /agent`，所以不放進 `AgentTask`。
+ * `agent_runs` 裡記的一趟是在做什麼：`AgentTask` 之外多三種——`generate-image`
+ * （用 Codex 訂閱生圖，D-017）、`suggest-slug`（AI 建議英文網址，D-026）與 `factcheck`
+ * （AI 查證，D-034：兩趟 Agent 加中間的抓網頁與核對，整次算一個動作）。
+ * 都不走 `POST /agent`，所以不放進 `AgentTask`。
  */
-export type AgentRunTask = AgentTask | 'generate-image' | 'suggest-slug';
+export type AgentRunTask = AgentTask | 'generate-image' | 'suggest-slug' | 'factcheck';
 
 /** 存成草稿與直接公開是兩個不同的決定。 */
 export type PublishStatus = 'draft' | 'publish';

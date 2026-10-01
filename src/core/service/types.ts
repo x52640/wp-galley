@@ -1,7 +1,7 @@
 /** CoreService 方法的輸入型別（P5-T004 從 service.ts 拆出；門面 `../service.ts` 原名轉出）。 */
 
 import type { DatabaseSync } from 'node:sqlite';
-import type { AgentTask, AutoFeatureResult, AutoPlaceResult, MediaAsset } from '../../contract/api.js';
+import type { AgentTask, AutoFeatureResult, AutoPlaceResult, FactCheckScope, MediaAsset } from '../../contract/api.js';
 import type { EventActor, RevisionOrigin } from '../repository.js';
 import type { Scrubber } from '../../config/secrets.js';
 import { AgentRegistry } from '../../agents/registry.js';
@@ -9,6 +9,7 @@ import type { AgentId } from '../../agents/types.js';
 import type { TemplateRegistry } from '../../templates/registry.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import type { PublishTargetRegistry } from '../../wordpress/targets.js';
+import type { SourceFetcher } from '../../fetch/index.js';
 
 export interface CreateJobInput {
   readonly targetKey: string;
@@ -26,6 +27,8 @@ export interface CreateRevisionInput {
   readonly editedBody?: string | undefined;
   /** 從哪張建議卡片進去改的：存成新版本時一起標成已處理。只能跟 editedBody／editedTitle 一起用（P5-T031）。 */
   readonly resolveItemId?: number | undefined;
+  /** 從哪張查證卡片「去原文改」進來的：存成新版本時那條標成 resolved-by-edit。只能跟 editedBody／editedTitle 一起用（P6-T004）。 */
+  readonly resolveFactCheckId?: number | undefined;
   /** 在文章上直接改的標題（P5-T029）：只換 title。純文字、一行、非空（contract/plain-title.ts）。 */
   readonly editedTitle?: string | undefined;
   readonly sourceText?: string | undefined;
@@ -87,6 +90,31 @@ export interface SlugSuggestionInput {
   readonly timeoutMs?: number | undefined;
 }
 
+/** AI 查證（D-034，P6-T004）。範圍與輸入規則見 docs/specs/factcheck.md「① 找來源」。 */
+export interface FactCheckInput {
+  readonly provider: AgentId;
+  readonly scope: FactCheckScope;
+  /** `selection` 才給：選的那段字。 */
+  readonly selection?: string | undefined;
+  /** `observation` 才給：校稿觀察卡片的 id。 */
+  readonly observationItemId?: number | undefined;
+  readonly model?: string | undefined;
+  /** 每一趟 Agent 的逾時。 */
+  readonly timeoutMs?: number | undefined;
+}
+
+/**
+ * 每次查證建一個取回器（共用同一份額度）。正式啟動由 `server/app.ts` 給真的（`src/fetch`），測試一律給假的。
+ * `signal`：使用者按停止時 abort，取回器要中止正在抓的請求。
+ */
+export type FactCheckFetcherFactory = (input: {
+  /** 目前這一版的純文字（外洩檢查的「文章片段」用）。 */
+  readonly articleText: string;
+  /** WordPress 密碼判斷（CoreService 的遮蔽器）。 */
+  readonly containsSecret: (text: string) => boolean;
+  readonly signal: AbortSignal;
+}) => SourceFetcher;
+
 export interface PublishInput {
   readonly status: 'draft' | 'publish';
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
@@ -123,4 +151,6 @@ export interface CoreServiceOptions {
   readonly scrub?: Scrubber;
   readonly draftsDir?: string;
   readonly mediaDir?: string;
+  /** AI 查證的取回器（P6-T004）。沒給就不能查證（503）：測試不會因為忘了注入而連到真的網路。 */
+  readonly factCheckFetcher?: FactCheckFetcherFactory;
 }

@@ -26,6 +26,9 @@ import type {
   DiscardReviewRequest,
   DiscardedResponse,
   DismissedResponse,
+  FactCheckListResponse,
+  FactCheckRequest,
+  FactCheckRunResult,
   ImageAtPositionRequest,
   ImageBriefResponse,
   UseCandidateRequest,
@@ -76,6 +79,7 @@ const CreateRevisionBody = z.object({
   templateData: z.record(z.string(), z.unknown()).optional(),
   editedBody: z.string().max(500_000).optional(),
   resolveItemId: z.number().int().positive().optional(),
+  resolveFactCheckId: z.number().int().positive().optional(),
   // 內容規則（一行、非空、120 字）在 CoreService，MCP 也走那裡；這裡只限大小。
   editedTitle: z.string().max(1_000).optional(),
   sourceText: z.string().max(200_000).optional(),
@@ -105,6 +109,34 @@ const SlugSuggestionBody = z
     timeoutMs: z.number().int().min(1_000).max(900_000).optional(),
   })
   .strict();
+
+/**
+ * AI 查證（D-034，P6-T004）。`.strict()`：輸入一律由後端讀目前這一版（觀察卡片的 excerpt 也是後端讀），
+ * 前端多送欄位要當場擋下。`selection` 只給選字、`observationItemId` 只給觀察卡片，各自一定要給；
+ * 長度、找不找得到、卡片種類等內容規則在 CoreService（MCP 也走那裡），這裡只限形狀與大小。
+ */
+const FactCheckBody = z
+  .object({
+    provider: z.enum(['codex', 'claude', 'google']),
+    scope: z.enum(['selection', 'observation', 'article']),
+    selection: z.string().max(4_000).optional(),
+    observationItemId: z.number().int().positive().optional(),
+    model: z.string().max(120).optional(),
+    timeoutMs: z.number().int().min(1_000).max(900_000).optional(),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    if ((body.scope === 'selection') !== (body.selection !== undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['selection'], message: '選字查證（scope: selection）要給、而且只有它能給 selection' });
+    }
+    if ((body.scope === 'observation') !== (body.observationItemId !== undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['observationItemId'],
+        message: '觀察卡片的查證（scope: observation）要給、而且只有它能給 observationItemId',
+      });
+    }
+  });
 
 /**
  * 圖片走 base64 JSON 而不是 multipart：本機工具沒有大量上傳的場景，
@@ -210,6 +242,7 @@ export const REQUEST_CONTRACT_CHECK: {
   readonly createRevision: Accepts<typeof CreateRevisionBody, CreateRevisionRequest>;
   readonly agent: Accepts<typeof AgentBody, AgentRunRequest>;
   readonly slugSuggestion: Accepts<typeof SlugSuggestionBody, SlugSuggestionRequest>;
+  readonly factCheck: Accepts<typeof FactCheckBody, FactCheckRequest>;
   readonly media: Accepts<typeof MediaBody, MediaUploadRequest>;
   readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
   readonly imageAtPosition: Accepts<typeof ImageAtPositionBody, ImageAtPositionRequest>;
@@ -225,6 +258,7 @@ export const REQUEST_CONTRACT_CHECK: {
   createRevision: true,
   agent: true,
   slugSuggestion: true,
+  factCheck: true,
   media: true,
   place: true,
   imageAtPosition: true,
@@ -398,6 +432,7 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
         ...(body.templateData === undefined ? {} : { templateData: body.templateData }),
         ...(body.editedBody === undefined ? {} : { editedBody: body.editedBody }),
         ...(body.resolveItemId === undefined ? {} : { resolveItemId: body.resolveItemId }),
+        ...(body.resolveFactCheckId === undefined ? {} : { resolveFactCheckId: body.resolveFactCheckId }),
         ...(body.editedTitle === undefined ? {} : { editedTitle: body.editedTitle }),
         ...(body.sourceText === undefined ? {} : { sourceText: body.sourceText }),
         ...(body.featuredMediaId === undefined ? {} : { featuredMediaId: body.featuredMediaId }),
@@ -481,6 +516,48 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
           ...(body.timeoutMs === undefined ? {} : { timeoutMs: body.timeoutMs }),
         }),
       );
+    },
+  );
+
+  // --- AI 查證（D-034，P6-T004） ----------------------------------------------
+
+  /**
+   * 發起查證，等它跑完才回（通常 1～3 分鐘）。跑的期間 `GET /api/jobs/:uuid` 的 agentRun 是 running
+   * （task `factcheck`，`factCheck` 帶階段與計數），停止走 `DELETE /agent`。結果只是卡片，**不動文章、不動核准**。
+   * 選字或組好的 prompt 含密碼、選字找不到、觀察卡片種類不對 400；另一個 Agent 動作在跑 502；
+   * AI 給的網址含密碼 502（整次停止、一個網址都不抓）；Agent 不能用 503。
+   */
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/factchecks', async (request): Promise<FactCheckRunResult> => {
+    const { uuid } = parse(UuidParams, request.params);
+    const body = parse(FactCheckBody, request.body ?? {});
+    return guard(() =>
+      core().runFactCheck(uuid, {
+        provider: body.provider,
+        scope: body.scope,
+        ...(body.selection === undefined ? {} : { selection: body.selection }),
+        ...(body.observationItemId === undefined ? {} : { observationItemId: body.observationItemId }),
+        ...(body.model === undefined ? {} : { model: body.model }),
+        ...(body.timeoutMs === undefined ? {} : { timeoutMs: body.timeoutMs }),
+      }),
+    );
+  });
+
+  /** 這篇的查證結果（不含 superseded），依段落順序；blockIndex 與「原句已經改了」讀取時算。 */
+  app.get<{ Params: { uuid: string } }>('/api/jobs/:uuid/factchecks', async (request): Promise<FactCheckListResponse> => {
+    const { uuid } = parse(UuidParams, request.params);
+    return guard(() => core().listFactChecks(uuid));
+  });
+
+  /** 「知道了」：那條查證結果結案（dismissed）。不是內容改動。 */
+  app.delete<{ Params: { uuid: string; id: string } }>(
+    '/api/jobs/:uuid/factchecks/:id',
+    async (request): Promise<DismissedResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const findingId = parseId(request.params.id, '查證結果');
+      return guard(() => {
+        core().dismissFactCheck(uuid, findingId);
+        return { dismissed: true };
+      });
     },
   );
 

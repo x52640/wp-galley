@@ -128,6 +128,7 @@ describe('POST/GET /api/jobs', () => {
         'imageBriefs',
         'marks',
         'media',
+        'openFactCheckContradictions',
         'previewUrl',
         'published',
         'review',

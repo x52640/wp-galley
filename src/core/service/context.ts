@@ -35,7 +35,7 @@ import type { TemplateRegistry } from '../../templates/registry.js';
 import type { LoadedTemplate } from '../../templates/types.js';
 import type { WordPressClient } from '../../wordpress/client.js';
 import type { PublishTarget, PublishTargetRegistry } from '../../wordpress/targets.js';
-import type { RevisionPayload, CoreServiceOptions } from './types.js';
+import type { RevisionPayload, CoreServiceOptions, FactCheckFetcherFactory } from './types.js';
 import type { SetupModule } from './setup.js';
 import type { JobsModule } from './jobs.js';
 import type { ContentModule } from './content.js';
@@ -47,6 +47,7 @@ import type { MediaModule } from './media.js';
 import type { ApprovalModule } from './approval.js';
 import type { PublishModule } from './publish.js';
 import type { AuthorsModule } from './authors.js';
+import type { FactCheckModule } from './factcheck.js';
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -62,6 +63,25 @@ export const GENERATE_IMAGE_PURPOSE: AgentRunTask = 'generate-image';
 
 /** `agent_runs.purpose` 記的「建議英文網址」那一趟（D-026）。 */
 export const SUGGEST_SLUG_PURPOSE: AgentRunTask = 'suggest-slug';
+
+/** `agent_runs.purpose` 記的 AI 查證兩趟（D-034）；整次的進度在 `factcheck_runs`。 */
+export const FACTCHECK_PURPOSE: AgentRunTask = 'factcheck';
+
+/**
+ * 進行中的 Agent 動作（`CoreContext.activeRuns` 的值）。`rowId` 是目前（或最近一趟）的 `agent_runs`。
+ * 查證（P6-T004）多帶 `factCheck`：抓網頁、核對兩段沒有 CLI 在跑，取消要中止抓取、結掉查證紀錄。
+ */
+export interface ActiveRun {
+  runId: string;
+  provider: AgentId;
+  rowId: number;
+  factCheck?: {
+    readonly runRowId: number;
+    readonly abort: AbortController;
+    /** 這一刻有沒有 CLI 在跑（第一趟、第二趟）；抓網頁與核對時是 false。 */
+    cliRunning: boolean;
+  };
+}
 
 /** 後端重啟時還沒跑完的 Agent 執行，結掉時寫的原因。 */
 const AGENT_INTERRUPTED_MESSAGE = '後端重啟，這次沒有完成';
@@ -103,6 +123,7 @@ export class CoreContext {
   approval!: ApprovalModule;
   publish!: PublishModule;
   authors!: AuthorsModule;
+  factcheck!: FactCheckModule;
 
   readonly repo: Repository;
   readonly templates: TemplateRegistry;
@@ -117,7 +138,9 @@ export class CoreContext {
   targetIds: Map<string, number>;
   readonly templateRowIds: Map<string, number>;
   /** 進行中的 Agent 執行；程式重啟就沒了，反正子行程也一起沒了。 */
-  readonly activeRuns = new Map<string, { runId: string; provider: AgentId; rowId: number }>();
+  readonly activeRuns = new Map<string, ActiveRun>();
+  /** AI 查證的取回器（P6-T004）；沒給就不能查證。 */
+  readonly factCheckFetcher: FactCheckFetcherFactory | null;
   /**
    * 正在發布中的 job。狀態機本身擋得住大部分的重複發布（第二次會看到 PUBLISHING），
    * 但「讀遠端」那一段 await 發生在轉成 PUBLISHING **之前**，兩個請求可以同時通過
@@ -150,6 +173,7 @@ export class CoreContext {
     this.scrub = options.scrub ?? createSecretScrubber([]);
     this.draftsDir = options.draftsDir ?? paths.drafts;
     this.mediaDir = options.mediaDir ?? paths.generatedImages;
+    this.factCheckFetcher = options.factCheckFetcher ?? null;
 
     this.siteId = this.repo.syncSite(options.site ?? null);
     this.targetIds = this.repo.syncTargets(this.targets.list(), this.siteId);
@@ -161,8 +185,8 @@ export class CoreContext {
    * 啟動清理（P5-T020）：上一個行程留下、DB 還是 running 的 Agent 執行，一律結成失敗。
    *
    * `activeRuns` 只在記憶體，子行程也跟著舊行程一起沒了，所以這些執行不可能再完成；不結掉的話
-   * 畫面會一直卡在「看稿中」、校稿按鈕停用、取消也找不到它。所有種類（校稿、配圖、生圖）都清。
-   * **只改 agent_runs 的 running 紀錄**、每筆記一條事件，不刪資料、不動其他表。
+   * 畫面會一直卡在「看稿中」、校稿按鈕停用、取消也找不到它。所有種類（校稿、配圖、生圖、查證）都清。
+   * **只改 agent_runs 與 factcheck_runs（P6-T004）的 running 紀錄**、每筆記一條事件，不刪資料、不動其他表。
    *
    * 前提：一個 DB 只有一個 CoreService 行程在用（本機單使用者工具，見 core-service.md）。
    */
@@ -178,6 +202,19 @@ export class CoreContext {
         eventType: 'agent_interrupted',
         status: 'failed',
         detail: { agentRunId: row.id, purpose: row.purpose, provider: row.provider, startedAt: row.started_at },
+      });
+    }
+    // AI 查證（P6-T004）：抓網頁、核對兩段沒有 agent_runs 在跑，整次的紀錄另外結。
+    for (const row of this.repo.allRunningFactCheckRuns()) {
+      this.repo.finishFactCheckRun(row.id, { status: 'failed', errorMessage: AGENT_INTERRUPTED_MESSAGE });
+      this.repo.insertEvent({
+        jobId: row.job_id,
+        revisionId: null,
+        approvalId: null,
+        actor: 'system',
+        eventType: 'factcheck_interrupted',
+        status: 'failed',
+        detail: { factCheckRunId: row.id, stage: row.stage, provider: row.provider, startedAt: row.started_at },
       });
     }
   }

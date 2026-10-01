@@ -3,6 +3,7 @@
 import type { ProofMark } from './api-compare.js';
 import type { AgentRunStatus, AgentRunTask, AgentTask, JobState, RevisionOrigin } from './api-enums.js';
 import type { ImageBrief, ImageBriefDraft, Observation, ReviewChange, ReviewProposal } from './api-review.js';
+import type { FactCheckProgress } from './api-factcheck.js';
 
 // --- Job -------------------------------------------------------------------
 
@@ -111,6 +112,11 @@ export interface AgentRun {
   readonly startedAt: string;
   readonly finishedAt: string | null;
   readonly errorMessage: string | null;
+  /**
+   * `task: 'factcheck'` 時的階段與計數（D-034，P6-T004，新增欄位）；其他趟是 null 或沒有。
+   * 查證的抓網頁、核對兩段沒有 CLI 在跑，這時 `status` 照樣是 running（由查證紀錄組出來）。
+   */
+  readonly factCheck?: FactCheckProgress | null;
 }
 
 export interface PublishedRef {
@@ -150,6 +156,11 @@ export interface JobDetail {
    * 空的時候 AI 校稿／配圖不給跑、不能核准與發布；畫面靠它停用按鈕並說明。
    */
   readonly bodyEmpty: boolean;
+  /**
+   * AI 查證「說法不同」、還沒結案、原句還在的條數（D-034，P6-T004，新增欄位）。發布面板提醒用，**不是 blocker**
+   * （規則 `contract/factcheck.ts` 的 `countOpenContradictions`）。舊後端沒有這個欄位。
+   */
+  readonly openFactCheckContradictions?: number;
 }
 
 export interface RenderOutcome {

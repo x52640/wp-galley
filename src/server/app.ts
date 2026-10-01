@@ -21,6 +21,27 @@ import type { WordPressClient } from '../wordpress/client.js';
 import type { PublishTargetRegistry } from '../wordpress/targets.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import type { TemplateRegistry } from '../templates/registry.js';
+import type { FactCheckFetcherFactory } from '../core/service.js';
+import { createSourceFetcher } from '../fetch/index.js';
+import { createHttpsTransport } from '../fetch/transport.js';
+import type { Transport } from '../fetch/types.js';
+
+/**
+ * 正式的查證取回器（D-034，P6-T004）：每次查證一個，共用同一份額度。傳輸層包一層，使用者按停止
+ * （`signal` abort）時正在抓的請求一起中止。測試一律注入假的（`BuildAppOptions.factCheckFetcher` 或注入 core）。
+ */
+export function realFactCheckFetcher(version: string): FactCheckFetcherFactory {
+  return ({ articleText, containsSecret, signal }) => {
+    const inner = createHttpsTransport();
+    const transport: Transport = (request) => inner({ ...request, signal: AbortSignal.any([request.signal, signal]) });
+    return createSourceFetcher({
+      articleText,
+      containsSecret,
+      userAgent: `Galley/${version} (+https://github.com/x52640/wp-galley)`,
+      transport,
+    });
+  };
+}
 
 /**
  * 設定精靈（P8-T002）要寫的檔案。**沒給就不能寫**：寫入路由回 503，絕不退回專案裡真的 `.env`
@@ -79,6 +100,8 @@ export interface BuildAppOptions {
   readonly setupFetch?: typeof fetch;
   /** 測試用：log 的去處（驗證 log 裡沒有秘密）。 */
   readonly logStream?: { write(line: string): void };
+  /** 測試用：查證的取回器。不給就用真的（`realFactCheckFetcher`）；注入 core 時這個不用。 */
+  readonly factCheckFetcher?: FactCheckFetcherFactory;
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -112,6 +135,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         wordpress,
         site: config.wordpress ? siteOf(config.wordpress) : null,
         scrub,
+        factCheckFetcher: options.factCheckFetcher ?? realFactCheckFetcher(options.version ?? '0.1.0'),
       }),
     secrets,
     setupFiles: options.setupFiles ?? null,

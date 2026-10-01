@@ -21,12 +21,19 @@ import { pendingReviewBlocker } from '../../contract/review-state.js';
 import { createJobWorkspace } from '../../agents/workspace.js';
 import type { PublishTarget } from '../../wordpress/targets.js';
 import type { CreateJobInput, RevisionPayload } from './types.js';
-import { GENERATE_IMAGE_PURPOSE, SUGGEST_SLUG_PURPOSE } from './context.js';
+import { FACTCHECK_PURPOSE, GENERATE_IMAGE_PURPOSE, SUGGEST_SLUG_PURPOSE } from './context.js';
 import type { CoreContext } from './context.js';
 
 /** `agent_runs.purpose` → 畫面上的 task。舊資料沒有 generate-image，一律照舊當成 review。 */
 function taskOfPurpose(purpose: string): AgentRunTask {
-  if (purpose === 'images' || purpose === GENERATE_IMAGE_PURPOSE || purpose === SUGGEST_SLUG_PURPOSE) return purpose;
+  if (
+    purpose === 'images' ||
+    purpose === GENERATE_IMAGE_PURPOSE ||
+    purpose === SUGGEST_SLUG_PURPOSE ||
+    purpose === FACTCHECK_PURPOSE
+  ) {
+    return purpose;
+  }
   return 'review';
 }
 
@@ -152,7 +159,8 @@ export class JobsModule {
               link: publishedRow.link,
             }
           : null,
-      agentRun: agentRow
+      // AI 查證（P6-T004）正在跑或是最近一趟：由查證紀錄組出來（抓網頁、核對兩段沒有 running 的 agent_runs）。
+      agentRun: this.ctx.factcheck.agentRunView(job, agentRow?.purpose ?? null) ?? (agentRow
         ? {
             status: agentRow.status,
             provider: agentRow.provider,
@@ -162,12 +170,15 @@ export class JobsModule {
             startedAt: agentRow.started_at,
             finishedAt: agentRow.finished_at,
             errorMessage: agentRow.error_message,
+            factCheck: null,
           }
-        : null,
+        : null),
       review,
       imageBriefs: this.ctx.briefs.imageBriefViews(job, media, revision),
       sourceText: revisionRow?.source_text ?? this.ctx.repo.listRevisions(job.id)[0]?.source_text ?? null,
       bodyEmpty: isBlankBody(revisionRow?.rendered_html ?? null),
+      // 發布面板提醒（不是 blocker）：查證說法不同、還沒結案、原句還在的條數。
+      openFactCheckContradictions: this.ctx.factcheck.openContradictionCount(job, revision),
     };
   }
 

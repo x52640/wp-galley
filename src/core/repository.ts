@@ -2,7 +2,17 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobState } from './state-machine.js';
 import type { LoadedTemplate } from '../templates/types.js';
 import type { PublishTarget } from '../wordpress/targets.js';
-import type { AgentRunStatus, ReviewItemState, ReviewItemType, RevisionOrigin } from '../contract/api.js';
+import type {
+  AgentRunStatus,
+  FactCheckFindingStatus,
+  FactCheckRunStatus,
+  FactCheckScope,
+  FactCheckStage,
+  FactCheckVerdict,
+  ReviewItemState,
+  ReviewItemType,
+  RevisionOrigin,
+} from '../contract/api.js';
 
 /**
  * CoreService 的 SQLite 存取層。
@@ -176,6 +186,47 @@ export interface ImageBriefRow {
   readonly user_note: string | null;
 }
 
+/** migration 009（P6-T004）：一次 AI 查證。 */
+export interface FactCheckRunRow {
+  readonly id: number;
+  readonly job_id: number;
+  readonly revision_id: number | null;
+  readonly scope: FactCheckScope;
+  readonly provider: string;
+  readonly hosted_search: number;
+  readonly status: FactCheckRunStatus;
+  readonly stage: FactCheckStage;
+  readonly candidate_count: number;
+  readonly fetched_count: number;
+  readonly fetch_failed_count: number;
+  readonly dropped_claim_count: number;
+  readonly judged: number;
+  readonly find_agent_run_id: number | null;
+  readonly judge_agent_run_id: number | null;
+  readonly started_at: string;
+  readonly finished_at: string | null;
+  readonly error_message: string | null;
+}
+
+/** migration 009：一條查證結果。`sources_json` 是給畫面的來源清單（FactCheckSource[]）。 */
+export interface FactCheckFindingRow {
+  readonly id: number;
+  readonly run_id: number;
+  readonly job_id: number;
+  readonly ordinal: number;
+  readonly excerpt: string;
+  readonly claim: string;
+  readonly verdict: FactCheckVerdict;
+  readonly agent_verdict: FactCheckVerdict;
+  readonly evidence: string;
+  readonly correction: string | null;
+  readonly sources_json: string;
+  readonly status: FactCheckFindingStatus;
+  readonly resolved_revision_id: number | null;
+  readonly created_at: string;
+  readonly resolved_at: string | null;
+}
+
 export interface PublishEventRow {
   readonly id: number;
   readonly job_id: number;
@@ -194,6 +245,23 @@ function rowId(result: { lastInsertRowid: number | bigint }): number {
 
 export class Repository {
   constructor(private readonly db: DatabaseSync) {}
+
+  /**
+   * 包成一個交易：`fn` 丟錯就全部回滾、錯誤往外丟；成功才一起生效。用 SAVEPOINT，巢狀呼叫也安全。
+   * `fn` 必須是同步的（node:sqlite 是同步 API，中間不會被別的請求插隊）。
+   */
+  transaction<T>(fn: () => T): T {
+    this.db.exec('SAVEPOINT repo_tx');
+    try {
+      const result = fn();
+      this.db.exec('RELEASE repo_tx');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK TO repo_tx');
+      this.db.exec('RELEASE repo_tx');
+      throw error;
+    }
+  }
 
   // --- 設定同步 -------------------------------------------------------------
 
@@ -1056,6 +1124,151 @@ export class Repository {
 
   markImageCandidateUsed(id: number, mediaAssetId: number): void {
     this.db.prepare('UPDATE image_candidates SET media_asset_id = ? WHERE id = ?').run(mediaAssetId, id);
+  }
+
+  /** 單一校稿項目（查證觀察卡片用：要確認它屬於哪一篇）。 */
+  reviewItemById(id: number): ReviewItemRow | null {
+    return (this.db.prepare('SELECT * FROM review_items WHERE id = ?').get(id) as unknown as ReviewItemRow) ?? null;
+  }
+
+  // --- AI 查證（migration 009，P6-T004）----------------------------------------
+
+  insertFactCheckRun(input: {
+    jobId: number;
+    revisionId: number | null;
+    scope: FactCheckScope;
+    provider: string;
+    hostedSearch: boolean;
+  }): FactCheckRunRow {
+    const result = this.db
+      .prepare(`
+        INSERT INTO factcheck_runs (job_id, revision_id, scope, provider, hosted_search, status, stage)
+        VALUES (?, ?, ?, ?, ?, 'running', 'find')
+      `)
+      .run(input.jobId, input.revisionId, input.scope, input.provider, input.hostedSearch ? 1 : 0);
+    return this.factCheckRunById(rowId(result))!;
+  }
+
+  factCheckRunById(id: number): FactCheckRunRow | null {
+    return (this.db.prepare('SELECT * FROM factcheck_runs WHERE id = ?').get(id) as unknown as FactCheckRunRow) ?? null;
+  }
+
+  latestFactCheckRun(jobId: number): FactCheckRunRow | null {
+    return (
+      (this.db
+        .prepare('SELECT * FROM factcheck_runs WHERE job_id = ? ORDER BY id DESC LIMIT 1')
+        .get(jobId) as unknown as FactCheckRunRow) ?? null
+    );
+  }
+
+  runningFactCheckRun(jobId: number): FactCheckRunRow | null {
+    return (
+      (this.db
+        .prepare("SELECT * FROM factcheck_runs WHERE job_id = ? AND status = 'running' ORDER BY id DESC LIMIT 1")
+        .get(jobId) as unknown as FactCheckRunRow) ?? null
+    );
+  }
+
+  /** 所有還是 running 的查證（給啟動清理用）。 */
+  allRunningFactCheckRuns(): FactCheckRunRow[] {
+    return this.db
+      .prepare("SELECT * FROM factcheck_runs WHERE status = 'running' ORDER BY id")
+      .all() as unknown as FactCheckRunRow[];
+  }
+
+  /** 進度：階段、計數、兩趟各是哪一筆 agent_runs。只更新給了的欄位。 */
+  updateFactCheckRun(
+    id: number,
+    patch: {
+      stage?: FactCheckStage;
+      candidates?: number;
+      fetched?: number;
+      fetchFailed?: number;
+      droppedClaims?: number;
+      judged?: boolean;
+      findAgentRunId?: number;
+      judgeAgentRunId?: number;
+    },
+  ): void {
+    const columns: [string, string | number | null][] = [];
+    if (patch.stage !== undefined) columns.push(['stage', patch.stage]);
+    if (patch.candidates !== undefined) columns.push(['candidate_count', patch.candidates]);
+    if (patch.fetched !== undefined) columns.push(['fetched_count', patch.fetched]);
+    if (patch.fetchFailed !== undefined) columns.push(['fetch_failed_count', patch.fetchFailed]);
+    if (patch.droppedClaims !== undefined) columns.push(['dropped_claim_count', patch.droppedClaims]);
+    if (patch.judged !== undefined) columns.push(['judged', patch.judged ? 1 : 0]);
+    if (patch.findAgentRunId !== undefined) columns.push(['find_agent_run_id', patch.findAgentRunId]);
+    if (patch.judgeAgentRunId !== undefined) columns.push(['judge_agent_run_id', patch.judgeAgentRunId]);
+    if (columns.length === 0) return;
+    this.db
+      .prepare(`UPDATE factcheck_runs SET ${columns.map(([name]) => `${name} = ?`).join(', ')} WHERE id = ?`)
+      .run(...columns.map(([, value]) => value), id);
+  }
+
+  finishFactCheckRun(id: number, input: { status: Exclude<FactCheckRunStatus, 'running'>; errorMessage: string | null }): void {
+    this.db
+      .prepare("UPDATE factcheck_runs SET status = ?, finished_at = datetime('now'), error_message = ? WHERE id = ?")
+      .run(input.status, input.errorMessage, id);
+  }
+
+  insertFactCheckFinding(input: {
+    runId: number;
+    jobId: number;
+    ordinal: number;
+    excerpt: string;
+    claim: string;
+    verdict: FactCheckVerdict;
+    agentVerdict: FactCheckVerdict;
+    evidence: string;
+    correction: string | null;
+    sourcesJson: string;
+  }): FactCheckFindingRow {
+    const result = this.db
+      .prepare(`
+        INSERT INTO factcheck_findings
+          (run_id, job_id, ordinal, excerpt, claim, verdict, agent_verdict, evidence, correction, sources_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        input.runId,
+        input.jobId,
+        input.ordinal,
+        input.excerpt,
+        input.claim,
+        input.verdict,
+        input.agentVerdict,
+        input.evidence,
+        input.correction,
+        input.sourcesJson,
+      );
+    return this.factCheckFindingById(rowId(result))!;
+  }
+
+  factCheckFindingById(id: number): FactCheckFindingRow | null {
+    return (
+      (this.db.prepare('SELECT * FROM factcheck_findings WHERE id = ?').get(id) as unknown as FactCheckFindingRow) ?? null
+    );
+  }
+
+  /** 這篇的查證結果，舊的在前。`superseded` 預設不列。 */
+  listFactCheckFindings(jobId: number, options: { includeSuperseded?: boolean } = {}): FactCheckFindingRow[] {
+    const filter = options.includeSuperseded ? '' : " AND status <> 'superseded'";
+    return this.db
+      .prepare(`SELECT * FROM factcheck_findings WHERE job_id = ?${filter} ORDER BY id`)
+      .all(jobId) as unknown as FactCheckFindingRow[];
+  }
+
+  factCheckFindingsOfRun(runId: number): FactCheckFindingRow[] {
+    return this.db
+      .prepare('SELECT * FROM factcheck_findings WHERE run_id = ? ORDER BY ordinal, id')
+      .all(runId) as unknown as FactCheckFindingRow[];
+  }
+
+  /** 結案（dismissed、resolved-by-edit、superseded）。`resolvedRevisionId` 只有 resolved-by-edit 給。 */
+  updateFactCheckFindingStatus(id: number, status: Exclude<FactCheckFindingStatus, 'open'>, resolvedRevisionId: number | null): void {
+    this.db
+      .prepare("UPDATE factcheck_findings SET status = ?, resolved_revision_id = ?, resolved_at = datetime('now') WHERE id = ?")
+      .run(status, resolvedRevisionId, id);
   }
 
   // --- 稽核 -----------------------------------------------------------------

@@ -1,6 +1,7 @@
 # AI 查證（階段 6）
 
-> 狀態：**定稿**（P6-T001，2026-10-01，D-034）；實作分 [P6-T002](../tasks/P6-T002-safe-fetcher.md)～[P6-T005](../tasks/P6-T005-factcheck-ui.md)，尚未上線。
+> 狀態：**定稿**（P6-T001，2026-10-01，D-034）；實作分 [P6-T002](../tasks/P6-T002-safe-fetcher.md)～[P6-T005](../tasks/P6-T005-factcheck-ui.md)。
+> 後端（流程、儲存、API）P6-T004 已做：`src/core/service/factcheck.ts`、純函式 `src/core/factcheck.ts`、前後端共用規則 `src/contract/factcheck.ts`；畫面 P6-T005。
 > 擁有範圍：查證的資料流、兩趟 Agent 的輸入與輸出 schema、候選來源怎麼挑、引文核對與降級、
 > 存下來的形狀、觸發方式與畫面、執行規則。
 > **不在這裡**：取回器的安全硬性要求、外洩殘餘風險 → [security.md](security.md)「取回器」；
@@ -134,6 +135,10 @@ prompt 在 `src/core/factcheck-prompts.ts`：開了搜尋的系統指令講「�
 
 - 每條主張的候選依序：`article-link` → `agent-search`／`agent-memory` → `wikipedia`；同一網址只抓一次。
 - **整次查證最多留 8 份來源、每條主張最多 3 份**；多條主張時輪流分配，每條至少輪到一次。
+- 實作（P6-T004，`collectSources`）：第 k 輪，還沒滿 k 份、還有候選的主張各自照順序抓到**一份成功**為止；每輪最多開「剩下幾個名額」條主張（照主張順序），
+  同一輪的主張同時抓。同一網址（或同一個「語言＋搜尋字串」）出現在好幾條主張時只給排在前面的那條。
+  維基百科搜尋沒找到也算一個 `fetch-failed` 來源，網址記成該語言站的搜尋頁（`/w/index.php?search=…`），標題「維基百科：搜尋字串」。
+- 文章連結＝主張的 excerpt 所在頂層區塊（忽略空白比對）裡的 `http(s)` 絕對連結；excerpt 在標題或跨段時沒有。
 - 嘗試次數、同時數、同主機數、維基百科 API 次數、大小、逾時、跳轉的上限是安全規則，家在 security.md「取回器」。
 
 ### 維基百科
@@ -198,14 +203,16 @@ interface FactCheckJudgeOutput {
   「實際給 Agent 的文字」＝`sourceTextForAgent(截短後的文字)` 的輸出，不是取回器的原文：前處理會刪字、換字（例如一段 `===` 變成「…」），
   拿原文比的話 Agent 一字不差引用它看到的字也會被誤降為查不到。
   找到 → `found`；找不到 → `not-found`。少於 8 個非空白字的引文不算核對過（當成 `not-found`）：「1994」到處都找得到，證明不了什麼。
-- **降級**：`supported`、`contradicted` 至少要一條 `found`，否則改成 `unverifiable`，`agentVerdict` 留 AI 原本的判定。
+- **降級**：`supported`、`contradicted` 至少要一條 `found`，否則改成 `unverifiable`，`agentVerdict` 留 AI 原本的判定；
+  被降級的不留 `correction`（沒有對得上的出處撐著它，P6-T004 決定）。
+- 每份來源的 `quote`／`check`：AI 引這份的引文裡第一條對得上的（`found`＋前後文）；都對不上取第一條（`not-found`）；沒引這份是 `not-found`、`quote: null`。
   `needs-context`、`unverifiable` 不用引文。
 - 抓不到的來源照樣列在卡片上，標 `fetch-failed` 並寫出原因，讓使用者知道 AI 想看什麼、為什麼沒拿到。
   特別是外洩檢查的「網址含文章原句」會誤擋標題跟文章同句的新聞網址，原因一定要看得到，使用者才能自己點開。
 
 ## 存下來的結果
 
-存在新表（migration 009，P6-T004），**不放 `review_items`**：`runAgentReview` 每跑一次就把舊提案結掉，
+存在新表（migration 009：`factcheck_runs`、`factcheck_findings`，P6-T004），**不放 `review_items`**：`runAgentReview` 每跑一次就把舊提案結掉，
 放在一起的話按一次「校驗」就把查證結果洗掉（跟配圖需求不放 `review_items` 同一個理由）。
 右欄把兩邊合成一張清單（review-proposals.md「統一模型」本來就預期這樣）。
 
@@ -313,8 +320,18 @@ interface FactCheckFinding {
 - 後端重啟時還在跑的查證紀錄照既有啟動清理結掉（「後端重啟，這次沒有完成」）。
 - 防禦性規則（照上面的鎖，理論上不會發生）：萬一跑完時內容已經不是發起時那一版，結果照收、用 excerpt 重新定位，找不到原句的直接收進已處理；不因此丟掉整次結果。
 - WordPress 密碼（D-023，規則的家在 security.md）：選字、兩趟組好的 prompt 在派工前擋（400 `INVALID_INPUT`，一個請求都不發）；
-  第一趟產出的候選網址**在任何抓取之前整批檢查**，任一含已知密碼 → 整次查證失敗、一個網址都不抓、記事件，畫面講「AI 給的網址裡有你的 WordPress 應用程式密碼，這次查證停止」。
+  第一趟產出的候選網址與搜尋字串（`queries[].q`，會變成維基百科的網址）**在任何抓取之前整批檢查**，任一含已知密碼 → 整次查證失敗、一個網址都不抓、記事件（只記筆數，不記內容），畫面講「AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止」。
+  排好候選之後、抓之前**再整批檢查所有候選**（含文章原有連結的網址與文字）：任一命中 → 同樣整次失敗、一個都不抓（取回器雖然會拒抓，但候選會被記進來源清單）。
+  存結果之前，每一筆要存的文字欄位（excerpt、claim、evidence、correction、來源清單裡的網址、標題、引文、前後文）**再檢查一次**：
+  任一命中 → 整次失敗、什麼都不存、記 `factcheck_secret_in_result` 事件（只記筆數）。
+- 存結果是**一個交易**：舊結果標 `superseded`、寫入全部新結果、查證紀錄結成 `succeeded`、完成事件，中途任何一步失敗全部回滾，查證紀錄結成 `failed`。
 - 只有本機 UI 觸發；MCP 要不要開查證，等 MCP 定稿時再裁定。
+- 實作補充（P6-T004）：
+  - `POST /factchecks` 等整次跑完才回（跟 `POST /agent` 一樣）；進度看 `JobDetail.agentRun.factCheck`。
+  - 鎖內容做在後端：`createRevision` 在查證跑的期間一律拒絕（放圖、設封面、套用建議、在文章上改都經過它）。
+  - 第一趟候選網址的密碼檢查涵蓋 AI 回的**全部**網址與搜尋字串，包括因為 excerpt 找不到而丟掉的那幾條。
+  - 觀察卡片引的句子已經不在目前的文章裡：400，請改用選字查證（不花額度跑一趟一定被丟掉的查證）。
+  - 網頁來源的標題目前是 Agent 給的（或文章連結的文字、網域）：取回器（P6-T002）沒有回頁面標題，維基百科才是真的條目標題。
 
 ## 已知限制與未證實
 

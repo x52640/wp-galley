@@ -18,7 +18,7 @@
 - **所有回應送出前過遮蔽器**（P5-T023）：JSON 與校樣 HTML 裡若出現已知的 WordPress 密碼，換成 `[REDACTED]`；
   圖檔原樣。
 - **內容裡有 WordPress 應用程式密碼就拒絕**（P5-T023，D-023）：建立 job、建 revision、上傳／換圖／用這張的
-  替代文字與說明、派校稿、請 AI 配一張、生圖、核准，回 400 `INVALID_INPUT`「內容裡有你的 WordPress 應用程式密碼，
+  替代文字與說明、派校稿、請 AI 配一張、生圖、AI 查證（選字與兩趟組好的 prompt）、核准，回 400 `INVALID_INPUT`「內容裡有你的 WordPress 應用程式密碼，
   請刪掉再存」，什麼都不寫、不派工、不上傳；發布回 `PUBLISH_BLOCKED`（同一句），一個請求都不送。
 - `GET /api/agents/:id/models`：30 秒快取（跟 `GET /api/agents` 一樣），同時進來的請求共用同一趟；
   `POST /api/setup/agents` 會清掉。
@@ -40,6 +40,9 @@
 | `POST` | `/api/jobs/:uuid/agent` | 派工給 Agent（`task: review \| images`） | `AgentRunRequest` → `AgentRunResult` |
 | `DELETE` | `/api/jobs/:uuid/agent` | 取消執行中的 Agent | → `CancelledResponse` |
 | `POST` | `/api/jobs/:uuid/slug-suggestions` | AI 建議英文網址（D-026，等它跑完才回；不動文章） | `SlugSuggestionRequest` → `SlugSuggestionResponse` |
+| `POST` | `/api/jobs/:uuid/factchecks` | AI 查證（D-034，等它跑完才回；不動文章、不動核准） | `FactCheckRequest` → `FactCheckRunResult` |
+| `GET` | `/api/jobs/:uuid/factchecks` | 這篇的查證結果（不含 superseded）與最近一次查證 | → `FactCheckListResponse` |
+| `DELETE` | `/api/jobs/:uuid/factchecks/:id` | 查證卡片「知道了」（dismissed） | → `DismissedResponse` |
 | `GET` | `/api/jobs/:uuid/review` | 待處理清單 | → `ReviewResponse` |
 | `POST` | `/api/jobs/:uuid/review/resolve` | 逐項套用或略過 | `ResolveReviewRequest` → `ReviewResolveResult` |
 | `POST` | `/api/jobs/:uuid/review/accept-all` | 採用整份稿 | `ProposalRefRequest` → `ReviewResolveResult` |
@@ -182,3 +185,17 @@
     `POST /api/jobs` 用停用的類型回 400。規則見 [wordpress-site.md](wordpress-site.md)「停用類型」。
   - 有發布或上傳正在進行（或另一個儲存還沒完成）時兩個寫入路由回 409；儲存期間發布、上傳、換圖、放圖、
     設封面回 503「設定精靈正在儲存…」。沒連上 WordPress 時 `destinations/check` 回 503。
+- AI 查證（D-034，P6-T004；規則見 [factcheck.md](factcheck.md)）：`POST /factchecks` 的 body 是 `.strict()`：`provider`、`scope`
+  （`selection`／`observation`／`article`）＋選填 `model`、`timeoutMs`；`selection` 只有選字查證能給、而且一定要給，
+  `observationItemId` 只有觀察卡片能給、而且一定要給（形狀不對 400 `VALIDATION_FAILED`）。觀察卡片的 excerpt 一律後端讀。
+  選字長度不對（4～300 字）、選字在目前的標題或正文裡找不到、卡片不存在或不屬於這篇、卡片種類不是三種之一、卡片引的句子已經不在文章裡、
+  選字或組好的 prompt 含 WordPress 密碼、正文是空的：400 `INVALID_INPUT`，一個請求都不發。另一個 Agent 動作在跑 502 `AGENT_ERROR`；
+  AI 給的網址或搜尋字串含密碼 502（訊息「AI 給的網址或搜尋字串裡有你的 WordPress 應用程式密碼，這次查證停止」，一個網址都不抓）；要抓的候選（含文章原有連結）含密碼 502、一個都不抓；要存的結果含密碼 502、不存任何結果；被停止 502「查證已停止…」；
+  Agent 不能用或沒有取回器 503。
+  跑的期間 `JobDetail.agentRun` 是 running、`task: 'factcheck'`，`agentRun.factCheck` 帶 `stage`（`find`／`fetch`／`judge`／`verify`）、
+  `counts`、`hostedSearch`、`judged`——抓網頁、核對兩段沒有 CLI 在跑也一樣；停止走 `DELETE /agent`。這段期間改內容的路由
+  （`POST /revisions`、放圖、設封面、套用建議）一律 502 `AGENT_ERROR`「查證正在跑，內容先鎖住…」。
+  `FactCheckFinding.blockIndex` 與 `excerptGone`（open 但原句已經不在文章裡＝「原句已經改了」）讀取時算。
+  `JobDetail.openFactCheckContradictions`：說法不同、open、原句還在的條數，發布面板提醒用，不進 `blockers`。
+  `POST /revisions` 多 `resolveFactCheckId`（規則同 `resolveItemId`）：從查證卡片去原文改，存成新版本時那條結成 `resolved-by-edit`。
+  `AgentRunTask` 多 `factcheck`。都是新增的。

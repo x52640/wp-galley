@@ -29,6 +29,11 @@ export interface CreateRevisionRequest {
    */
   readonly resolveItemId?: number;
   /**
+   * 從哪張查證卡片「去原文改」進來的（D-034，P6-T004）。規則同 `resolveItemId`：存成新版本時那條查證結果
+   * 標成 `resolved-by-edit`；沒有實質改動就不動它。只能跟 `editedBody` 或 `editedTitle` 一起用。
+   */
+  readonly resolveFactCheckId?: number;
+  /**
    * 在文章上直接改的標題（P5-T029）：只換 `title`，其他欄位沿用上一版；可以單獨給，也可以跟
    * `editedBody` 一起給（存成同一個新版本）。純文字、一行、不能是空的（`contract/plain-title.ts`）。
    * 不能跟 `templateData` 同時給。

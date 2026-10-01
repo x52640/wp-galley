@@ -39,7 +39,7 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | `src/preview` | 校樣 HTML 文件 | [templates.md](templates.md) |
 | `src/agents` | CLI 適配器、輸出契約與解析 | [agent-cli.md](agent-cli.md)、[agent-tasks.md](agent-tasks.md) |
 | `src/wordpress` | REST client、區塊序列化、分類項目 | [wordpress-site.md](wordpress-site.md) |
-| `src/fetch` | AI 查證的取回器：安全抓取（DNS 前檢查、在連線用的解析裡查位址、跳轉、不經代理、大小與逾時）、外洩檢查、這次查證的額度、維基百科、抽文字（P6-T002；P6-T004 接進流程） | [security.md](security.md)「取回器」、[factcheck.md](factcheck.md) |
+| `src/fetch` | AI 查證的取回器：安全抓取（DNS 前檢查、在連線用的解析裡查位址、跳轉、不經代理、大小與逾時）、外洩檢查、這次查證的額度、維基百科、抽文字（P6-T002；P6-T004 已接進流程，`server/app.ts` 的 `realFactCheckFetcher`） | [security.md](security.md)「取回器」、[factcheck.md](factcheck.md) |
 | `src/media` | 圖片驗證（`validate.ts`，上傳與生圖候選圖共用）與上傳 | [agent-tasks.md](agent-tasks.md) |
 | `src/server` | Fastify、路由、守門；設定換掉後就地生效（`reconfigure.ts`） | [http-api.md](http-api.md)、[security.md](security.md) |
 | `src/ui` | React 發布台；示範資料（`?fixtures=1`）在 `service/fixtures/`，照後端 `service/` 的領域拆檔、同名對應，只放假資料、規則用 `src/contract`（D-033，P5-T033） | [design-system.md](design-system.md) |
@@ -112,4 +112,5 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | 作者 | `AuthorPicker`（在發布面板裡） | `GET /api/wordpress/authors`（`wordpress.ts`）、`POST /api/setup/default-author`（`setup.ts`） | `authors.ts` | wordpress-site、state-machine（發布選項） | publish-author |
 | 取消、恢復已取消的稿件 | `Workspace` | `DELETE …`、`POST …/restore` | `jobs.ts`（`cancelJob`、`restoreJob`） | state-machine | restore-cancelled |
 | 設定精靈、停用類型 | `SetupWizard` | `/api/setup/*`（`setup.ts`） | `setup.ts`（另有 `server/reconfigure.ts`、`config/env-file.ts`、`wordpress/setup.ts`） | wordpress-site、security | setup-api、setup-diagnose、setup-env-file、site-switch、disable-targets、ui-target-toggle |
+| AI 查證（選字、觀察卡片、一鍵查證；停止；知道了；去原文改） | （P6-T005） | `POST`／`GET …/factchecks`、`DELETE …/factchecks/:id`、`DELETE …/agent`、`POST …/revisions`（`resolveFactCheckId`） | `factcheck.ts`（純函式 `src/core/factcheck.ts`、取回器 `src/fetch/`） | factcheck、security | factcheck-service、factcheck-api、factcheck-verify、factcheck-prompts、factcheck-schema、safe-fetch |
 | 診斷 | `Diagnostics`（總覽進入） | `GET /api/health`（`health.ts`）、`GET /api/wordpress`（`wordpress.ts`） | 不經 CoreService（`wordpress/site.ts`） | wordpress-site | health、wordpress-api |
