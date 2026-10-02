@@ -66,6 +66,20 @@ export const QUICK_TASKS = [
   },
 ];
 
+/**
+ * 「一鍵查證」（D-034，P6-T005）：整篇交給 AI 挑最多 5 個值得查的說法，找來源、抓網頁、核對引文。
+ * 不是校稿那條管線（`POST …/factchecks`），所以不放進 `QUICK_TASKS`；選單上跟它們並排。
+ */
+export const FACTCHECK_QUICK = {
+  label: '一鍵查證',
+  hint: '整篇挑最多 5 個說法，找來源、核對引文。通常 1～3 分鐘，用掉兩次額度；不會改文章。',
+};
+
+/** 畫面上的名字（Codex、Claude、Gemini）。`agentRun.provider` 是 id，講額度時要換成這個。 */
+export function providerLabel(id: string): string {
+  return PROVIDERS.find((option) => option.id === id)?.label ?? id;
+}
+
 export const PRESETS = [
   '把過長的段落拆開，每段一個重點。',
   '統一全形標點，並把口語的贅字拿掉。',

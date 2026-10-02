@@ -50,6 +50,9 @@ import type {
   UpdateImageBriefResponse,
   SlugSuggestionRequest,
   SlugSuggestionResponse,
+  FactCheckListResponse,
+  FactCheckRequest,
+  FactCheckRunResult,
 } from '../../contract/api.js';
 
 export type {
@@ -67,6 +70,14 @@ export type {
   CompareRow,
   Comparison,
   DiffSegment,
+  FactCheckFinding,
+  FactCheckListResponse,
+  FactCheckProgress,
+  FactCheckRequest,
+  FactCheckRun,
+  FactCheckRunResult,
+  FactCheckSource,
+  FactCheckVerdict,
   FieldChange,
   ImageBrief,
   ImageBriefDraft,
@@ -183,6 +194,16 @@ export interface PublisherApi {
    * 取消用 `cancelAgent`。**不動文章**：候選只回給畫面，點了才填進網址欄。日記不提供。
    */
   suggestSlugs(uuid: string, input: SlugSuggestionRequest): Promise<SlugSuggestionResponse>;
+
+  /**
+   * AI 查證（D-034）。等它跑完才回（通常 1～3 分鐘）；跑的期間 `agentRun` 是 running（task `factcheck`，
+   * `factCheck` 帶階段與計數），停止用 `cancelAgent`。**不動文章、不動核准**：結果只是卡片。
+   */
+  runFactCheck(uuid: string, input: FactCheckRequest): Promise<FactCheckRunResult>;
+  /** 這篇的查證結果（不含 superseded），依段落順序；`blockIndex` 與「原句已經改了」讀取時算。 */
+  listFactChecks(uuid: string): Promise<FactCheckListResponse>;
+  /** 「知道了」：那條查證結果收進已處理。不是內容改動。 */
+  dismissFactCheck(uuid: string, findingId: number): Promise<void>;
 
   /** 逐項套用或略過。套用會產生新版本，略過不動內容。 */
   resolveReview(

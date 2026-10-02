@@ -1,7 +1,8 @@
 # AI 查證（階段 6）
 
 > 狀態：**定稿**（P6-T001，2026-10-01，D-034）；實作分 [P6-T002](../tasks/P6-T002-safe-fetcher.md)～[P6-T005](../tasks/P6-T005-factcheck-ui.md)。
-> 後端（流程、儲存、API）P6-T004 已做：`src/core/service/factcheck.ts`、純函式 `src/core/factcheck.ts`、前後端共用規則 `src/contract/factcheck.ts`；畫面 P6-T005。
+> 後端（流程、儲存、API）P6-T004 已做：`src/core/service/factcheck.ts`、純函式 `src/core/factcheck.ts`、前後端共用規則 `src/contract/factcheck.ts`；
+> 畫面 P6-T005 已做：`src/ui/components/FactcheckCard.tsx`、`src/ui/lib/factcheck-view.ts`，版面與文案見 [design-system.md](design-system.md)「AI 查證」。
 > 擁有範圍：查證的資料流、兩趟 Agent 的輸入與輸出 schema、候選來源怎麼挑、引文核對與降級、
 > 存下來的形狀、觸發方式與畫面、執行規則。
 > **不在這裡**：取回器的安全硬性要求、外洩殘餘風險 → [security.md](security.md)「取回器」；
@@ -308,6 +309,15 @@ interface FactCheckFinding {
 - 「去原文改」走現有編輯流程，存檔後結案（`resolved-by-edit`）。**永不自動套用**，`correction` 只是文字。
 - 「知道了」＝`dismissed`，收進「已處理」。
 - **發布面板提醒**（不擋，跟 Q-1 現況一致）：只有 `contradicted` 且 `open` 的才算，一條「有 N 條查證說法不同」。
+- 實作補充（P6-T005）：
+  - 畫面上那一家叫「Gemini」（`lib/agent-tasks.ts` 的 `PROVIDERS`），所以說明寫「Gemini（Antigravity）不能只開搜尋，這次只查維基百科和 AI 記得的網址」。
+    按之前沒有 API 問得到「這家能不能只開搜尋」，前端照 `provider !== 'google'` 判斷（`providerHasHostedSearch`）；跑起來之後以 `agentRun.factCheck.hostedSearch` 為準。
+  - 查證結果另一條路讀（`GET …/factchecks`），工作區每次重讀稿件時一起讀；讀不到（舊後端）右欄照樣只有校稿。
+  - 卡片的 key：校稿 `r<id>`、查證 `f<id>`（兩張表的 id 會撞號），文章上的標記與右欄用同一個 key 一對一。
+  - 停止：`POST …/factchecks` 會失敗回來，畫面再讀一次 `latestRun`，**是這次新開的那一筆（id 跟送出前不同）而且 `cancelled`** 才不當錯誤講，
+    右欄中性地寫「已停止，這次查證沒有留下結果。」；在開紀錄之前就失敗的（選字找不到、含密碼、另一個動作在跑…）照講錯誤（`isNewCancelledRun`）。
+  - 示範資料（`?fixtures=1`）：稿件「重看《刺激1995》」（`f-factcheck`）有每種判定、降級、抓不到、原句已經改了、已處理；跑一次會照四段走
+    （`&fcslow=1` 每段放慢、`&factcheck=nofetch` 模擬一份都沒抓到）。`blockIndex`／`excerptGone` 在種子資料裡寫死；選字查證的新結果用 `text-match` 在示範正文裡找段落（不做後端那份前處理）。
 
 ## 執行規則
 

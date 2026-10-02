@@ -6,6 +6,7 @@ import type { JobDetail, JobState, PublishTargetSummary, ReviewProposal } from '
 import {
   ARTICLE_BODY,
   DIARY_BODY,
+  FACTCHECK_BODY,
   DIARY_MARKS,
   DIARY_TARGET,
   LONGFORM_BODY,
@@ -16,6 +17,7 @@ import {
   TEMPLATE_TAGS,
   diaryBriefs,
   diaryReview,
+  factcheckReview,
   longformBriefs,
   media,
   revision,
@@ -205,6 +207,22 @@ export function buildStore(): Map<string, FixtureJob> {
       blockers: ['遠端文章在本次載入之後被改過。請重新載入內容並重新核准，再發布一次。'],
     }),
     baseArticle('f-article', {}),
+    // AI 查證（P6-T005）：每種判定、降級、抓不到、原句已經改了、已處理；查證結果在 fixtures/factcheck.ts。
+    baseArticle('f-factcheck', {
+      title: '重看《刺激1995》',
+      currentRevision: revision(
+        2,
+        'manual',
+        { title: '重看《刺激1995》', body: FACTCHECK_BODY, category: '電影' },
+        'a0c4e2f19b7d3c55',
+      ),
+      revisionCount: 2,
+      review: factcheckReview(),
+      blockers: ['還有 2 項校稿建議沒處理', '還沒核准'],
+      sourceText: null,
+      createdAt: '2026-09-30T07:30:00Z',
+      updatedAt: '2026-09-30T08:10:00Z',
+    }),
     // 已取消（D-031）：打開看得到「恢復這篇」。取消前是已核准，恢復後回到「還沒核准」。
     baseLongform('f-cancelled', {
       state: 'CANCELLED',

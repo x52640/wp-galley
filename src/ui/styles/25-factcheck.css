@@ -1,0 +1,188 @@
+/* --- AI 查證（D-034，P6-T005） ---------------------------------------------
+   右欄的查證卡片、來源列、看原文、選字的「查證這句」膠囊、頂端長條底下的分段進度。
+   查證的顏色是 --kind-check（靛藍）；判定另外用文字＋圖示，不只靠顏色。 */
+
+/* 卡片：跟校稿卡片同一個底，左邊一條靛藍虛線（跟文章上的虛線底線對得起來）。 */
+.fc-card { --kind-color: var(--kind-check); border-left: 3px dashed var(--kind-check); }
+.pill[data-kind='factcheck'] { color: var(--kind-check); }
+.pill[data-active='yes'][data-kind='factcheck'] { color: var(--shell-bg); }
+
+.fc-verdict { display: inline-flex; align-items: center; gap: .3rem; font-size: .84rem; font-weight: 700; }
+.fc-verdict[data-verdict='supported'] { color: var(--seal-on-shell); }
+.fc-verdict[data-verdict='contradicted'] { color: var(--mark-on-shell); }
+.fc-verdict[data-verdict='unverifiable'] { color: var(--shell-text-dim); }
+.fc-verdict[data-verdict='needs-context'] { color: var(--warn-on-shell); }
+.fc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: 0 .45rem;
+  border: 1px solid var(--kind-check);
+  border-radius: 999px;
+  color: var(--kind-check);
+  font-size: .7rem;
+  line-height: 1.6;
+}
+
+.fc-claim { margin: 0; font-size: .8rem; line-height: 1.6; color: var(--shell-text-dim); }
+.fc-evidence { color: var(--shell-text); }
+.fc-dim { font-size: .76rem; color: var(--shell-text-dim); }
+p.fc-dim { margin: 0; }
+.fc-downgrade {
+  display: flex;
+  align-items: flex-start;
+  gap: .35rem;
+  margin: 0;
+  padding: .35rem .5rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warn-on-shell) 10%, transparent);
+  color: var(--warn-on-shell);
+  font-size: .8rem;
+  line-height: 1.6;
+}
+.fc-downgrade svg { flex: none; margin-top: .2rem; }
+
+.fc-sources { padding-top: .45rem; border-top: 1px dashed var(--shell-line); }
+.fc-sources-label { margin: 0 0 .3rem; font-size: .74rem; font-weight: 700; color: var(--shell-text-dim); }
+.fc-sources ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+.fc-source { display: flex; flex-direction: column; gap: .15rem; }
+.fc-source-main { display: flex; flex-direction: column; min-width: 0; }
+.fc-source-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .25rem;
+  color: var(--shell-text);
+  font-size: .82rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+a.fc-source-title { text-decoration: underline; text-decoration-color: var(--shell-line); text-underline-offset: 3px; }
+a.fc-source-title:hover { text-decoration-color: currentColor; }
+.fc-source-title svg { flex: none; color: var(--shell-text-dim); }
+.fc-source-meta { font-size: .74rem; color: var(--shell-text-dim); overflow-wrap: anywhere; }
+.fc-source-row { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .5rem; }
+.fc-check { display: inline-flex; align-items: flex-start; gap: .25rem; font-size: .76rem; line-height: 1.55; }
+.fc-check svg { flex: none; margin-top: .2rem; }
+.fc-check[data-tone='good'] { color: var(--seal-on-shell); }
+.fc-check[data-tone='warn'] { color: var(--warn-on-shell); }
+.fc-check[data-tone='dim'] { color: var(--shell-text-dim); }
+.fc-open { margin-left: auto; }
+.fc-quote-missing { margin: 0; font-size: .76rem; color: var(--shell-text-dim); overflow-wrap: anywhere; }
+.fc-context {
+  margin: .3rem 0 0;
+  padding: .5rem .65rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  border-left: 3px solid var(--kind-check);
+  border-radius: 0 6px 6px 0;
+  background: var(--shell-sunken);
+  color: var(--shell-text);
+  font-size: .8rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.fc-context mark {
+  background: var(--kind-check-bg);
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+/* 觀察卡片上的「查證」：一般按鈕（強調色只給下一步），字用查證色。 */
+.fc-check-btn { color: var(--kind-check); }
+.fc-check-btn:disabled { color: var(--shell-text-dim); }
+
+.fc-run-note { align-items: center; }
+.fc-run-note > span { flex: 1; }
+.margin-empty p.margin-empty-sub { font-size: .8rem; }
+
+/* 選單裡的「一鍵查證」：反灰時把原因寫在說明那一行。 */
+.menu-item:disabled { cursor: not-allowed; }
+.menu-item:disabled .menu-item-label { color: var(--shell-text-dim); }
+.menu-item:disabled:hover { background: none; }
+.menu-item-warn { color: var(--warn-on-shell); }
+
+/* --- 選字「查證這句」：跟「在這裡插圖」一樣畫在 iframe 外層、紙上，所以用固定的淺色。 */
+.fc-pick-layer {
+  position: absolute;
+  left: var(--gutter);
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.fc-pick {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+  pointer-events: auto;
+}
+.fc-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .15rem .7rem;
+  border: 1px solid #3730A3;
+  border-radius: 999px;
+  background: #FFFFFF;
+  color: #3730A3;
+  font-family: var(--font-ui);
+  font-size: .78rem;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(28, 27, 25, .16);
+}
+.fc-pick-btn:hover:not(:disabled) { background: #F0EFFB; }
+.fc-pick-btn:disabled { border-style: dashed; border-color: #8A8994; color: #5F5E5A; cursor: not-allowed; }
+.fc-pick-note {
+  max-width: 19rem;
+  padding: .2rem .55rem;
+  border: 1px solid #E2E0DA;
+  border-radius: 6px;
+  background: #FFFFFF;
+  color: #5F5E5A;
+  font-family: var(--font-ui);
+  font-size: .72rem;
+  line-height: 1.55;
+  text-align: center;
+  box-shadow: 0 4px 14px rgba(28, 27, 25, .12);
+}
+.fc-pick-note[data-tone='warn'] { color: #8A4B06; }
+
+/* --- 頂端長條底下的分段進度（找來源 → 抓網頁 → 判斷 → 核對）。 */
+.agent-banner-group { border-bottom: 1px solid var(--shell-line); background: var(--shell-panel); }
+.agent-banner-group .agent-banner { border-bottom: 0; }
+.fc-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 1rem .45rem 2.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1.3rem;
+  font-size: .78rem;
+  color: var(--shell-text-dim);
+}
+.fc-step { display: inline-flex; align-items: center; gap: .3rem; }
+.fc-step svg { flex: none; }
+.fc-step[data-state='done'] { color: var(--shell-text); }
+.fc-step[data-state='done'] svg { color: var(--seal-on-shell); }
+.fc-step[data-state='active'] { color: var(--shell-text); font-weight: 700; }
+.fc-step[data-state='active'] svg { color: var(--mark-on-shell); }
+.fc-step[data-state='skipped'] { color: var(--warn-on-shell); }
+.fc-step-note { flex-basis: 100%; color: var(--warn-on-shell); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-pick-btn { transition: none; }
+}
+
+/* 觀察卡片「查證」底下的說明：反灰原因（灰）或這一家的限制（琥珀）。 */
+.fc-card-note { display: flex; align-items: flex-start; gap: .3rem; margin: 0; font-size: .76rem; line-height: 1.55; color: var(--shell-text-dim); }
+.fc-card-note svg { flex: none; margin-top: .2rem; }
+.fc-card-note[data-tone='warn'] { color: var(--warn-on-shell); }

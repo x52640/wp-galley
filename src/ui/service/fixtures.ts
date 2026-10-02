@@ -10,7 +10,7 @@
  * | `data.ts` | 示範內容：發布目標、正文、校對符號、待處理清單、配圖需求 |
  * | `store.ts` | 每篇示範稿件的初始狀態（記憶體裡，重新整理就重來） |
  * | `context.ts` | 共用小工具：讀稿件、拆正文、換一版正文、撕核准 |
- * | `jobs.ts`、`content.ts`、`agent.ts`、`review.ts`、`briefs.ts`、`images.ts`、`media.ts`、`approval.ts`、`publish.ts`、`authors.ts`、`setup.ts` | 跟後端同名檔對應的那幾個方法 |
+ * | `jobs.ts`、`content.ts`、`agent.ts`、`factcheck.ts`、`review.ts`、`briefs.ts`、`images.ts`、`media.ts`、`approval.ts`、`publish.ts`、`authors.ts`、`setup.ts` | 跟後端同名檔對應的那幾個方法 |
  * | `terms.ts` | 分類項目（後端是 `/api/wordpress/terms`） |
  *
  * 規矩（D-033）：前後端都要的規則一律用 `src/contract` 的純函式，這裡只放假資料與「假裝是資料庫」的部分，不重寫規則。
@@ -22,6 +22,7 @@ import { approvalApi } from './fixtures/approval.js';
 import { authorsApi } from './fixtures/authors.js';
 import { briefsApi } from './fixtures/briefs.js';
 import { contentApi } from './fixtures/content.js';
+import { factcheckApi } from './fixtures/factcheck.js';
 import { imagesApi } from './fixtures/images.js';
 import { jobsApi } from './fixtures/jobs.js';
 import { mediaApi } from './fixtures/media.js';
@@ -36,6 +37,7 @@ export const fixtureApi: PublisherApi = {
   ...jobsApi,
   ...contentApi,
   ...agentApi,
+  ...factcheckApi,
   ...reviewApi,
   ...briefsApi,
   ...imagesApi,

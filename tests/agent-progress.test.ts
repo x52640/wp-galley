@@ -29,4 +29,10 @@ describe('waitingNote', () => {
     expect(waitingNote('suggest-slug', 5)).toContain('點了才填');
     expect(waitingNote('suggest-slug', 90)).toContain('停止');
   });
+
+  it('查證講兩趟的額度與 1～3 分鐘（D-034）', () => {
+    expect(waitingNote('factcheck', 10, 'Claude')).toBe('通常 1～3 分鐘，會用掉兩次 Claude 額度');
+    expect(waitingNote('factcheck', 10)).toBe('通常 1～3 分鐘，會用掉兩次 AI 額度');
+    expect(waitingNote('factcheck', 200, 'Claude')).toContain('停止');
+  });
 });

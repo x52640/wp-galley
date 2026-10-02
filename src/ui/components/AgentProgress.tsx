@@ -1,6 +1,8 @@
 import { useEffect, useState, type JSX } from 'react';
-import type { AgentRun } from '../service/types.js';
+import type { AgentRun, FactCheckProgress } from '../service/types.js';
 import { Icon } from '../icons.js';
+import { providerLabel } from '../lib/agent-tasks.js';
+import { progressSteps } from '../lib/factcheck-view.js';
 
 /**
  * 「Agent 還在跑」的畫面。
@@ -29,7 +31,13 @@ const TASK_VERB: Record<AgentRun['task'], string> = {
  * 大概要多久。生圖實測約一分鐘（docs/specs/agent-cli.md），跟校稿的期待值不一樣；
  * 超過「平常」之後換一句安撫，但不假裝知道還剩多少。
  */
-export function waitingNote(task: AgentRun['task'], seconds: number): string {
+export function waitingNote(task: AgentRun['task'], seconds: number, providerLabel?: string): string {
+  if (task === 'factcheck') {
+    // 兩趟 Agent（找來源、判斷），中間抓網頁（D-034）。全部抓不到時第二趟不跑，那時進度那幾行會講。
+    return seconds < 180
+      ? `通常 1～3 分鐘，會用掉兩次 ${providerLabel ?? 'AI'} 額度`
+      : '比平常久一點；真的等太久就按停止再試一次';
+  }
   if (task === 'suggest-slug') {
     return seconds < 60
       ? '通常十幾秒到一分鐘。想好會列在網址欄下面，點了才填進去'
@@ -99,8 +107,9 @@ export function AgentBanner({
   cancelling: boolean;
 }): JSX.Element {
   const seconds = useElapsedSeconds(run.startedAt, true);
+  const factCheck = run.task === 'factcheck' ? (run.factCheck ?? null) : null;
 
-  return (
+  const banner = (
     <div className="agent-banner" role="status" aria-live="polite">
       <Icon name="spinner" size={14} className="spin" />
       <span className="agent-banner-text">
@@ -109,12 +118,46 @@ export function AgentBanner({
       <span className="agent-banner-time mono">{formatElapsed(seconds)}</span>
       <IndeterminateBar />
       <span className="agent-banner-note">
-        {waitingNote(run.task, seconds)}
+        {waitingNote(run.task, seconds, providerLabel(run.provider))}
       </span>
       <button type="button" className="btn btn-quiet btn-tiny" disabled={cancelling} onClick={onCancel}>
         <Icon name="x" size={13} />
         停止
       </button>
     </div>
+  );
+  if (factCheck === null) return banner;
+  return (
+    <div className="agent-banner-group">
+      {banner}
+      <FactCheckSteps progress={factCheck} />
+    </div>
+  );
+}
+
+/**
+ * 查證的四段（D-034）：找來源 → 抓網頁 → 判斷 → 核對。每段寫做到哪、數到幾個，不畫百分比。
+ * 狀態不只靠顏色：做完打勾、在跑轉圈、還沒開始空心圈、跳過的寫出原因。
+ */
+function FactCheckSteps({ progress }: { progress: FactCheckProgress }): JSX.Element {
+  return (
+    <ol className="fc-steps" aria-label="查證進度">
+      {progressSteps(progress).map((step) => (
+        <li key={step.stage} className="fc-step" data-state={step.state}>
+          <Icon
+            name={step.state === 'done' ? 'check' : step.state === 'active' ? 'spinner' : step.state === 'skipped' ? 'minus' : 'circle'}
+            size={13}
+            {...(step.state === 'active' ? { className: 'spin' } : {})}
+          />
+          <span>{step.text}</span>
+          <span className="sr-only">
+            {step.state === 'done' ? '（完成）' : step.state === 'active' ? '（進行中）' : step.state === 'skipped' ? '（跳過）' : '（還沒開始）'}
+          </span>
+        </li>
+      ))}
+      {!progress.hostedSearch && (
+        <li className="fc-step fc-step-note">這次沒開搜尋：Gemini（Antigravity）只查維基百科和 AI 記得的網址。</li>
+      )}
+    </ol>
   );
 }

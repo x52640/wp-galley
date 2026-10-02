@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canInsertImages, stageDisplay } from '../src/ui/lib/stage-view.js';
+import { canInsertImages, canSelectToFactCheck, stageDisplay } from '../src/ui/lib/stage-view.js';
 
 /** 主區顯示什麼（D-018）：拿掉三段切換後，成品只在發布面板打開時出現。 */
 describe('stageDisplay', () => {
@@ -49,5 +49,24 @@ describe('canInsertImages', () => {
   it('AI 還在跑、或稿件已經結束時不出現', () => {
     expect(canInsertImages(stageDisplay('article', false), { ...idle, working: true })).toBe(false);
     expect(canInsertImages(stageDisplay('article', false), { ...idle, finished: true })).toBe(false);
+  });
+});
+
+/** 選字「查證這句」的膠囊什麼時候出現（P6-T005）：看文章、沒在改字、稿件沒結束。AI 在跑時照樣出現但反灰講原因。 */
+describe('canSelectToFactCheck', () => {
+  const idle = { editing: false, finished: false };
+
+  it('看文章時出現', () => {
+    expect(canSelectToFactCheck(stageDisplay('article', false), idle)).toBe(true);
+  });
+
+  it('對照、發布面板的成品上不出現', () => {
+    expect(canSelectToFactCheck(stageDisplay('compare', false), idle)).toBe(false);
+    expect(canSelectToFactCheck(stageDisplay('article', true), idle)).toBe(false);
+  });
+
+  it('改字中、稿件結束時不出現', () => {
+    expect(canSelectToFactCheck(stageDisplay('article', false), { ...idle, editing: true })).toBe(false);
+    expect(canSelectToFactCheck(stageDisplay('article', false), { ...idle, finished: true })).toBe(false);
   });
 });

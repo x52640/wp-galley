@@ -422,3 +422,55 @@ export function revision(
     createdAt: '2026-08-28T09:40:00Z',
   };
 }
+
+/**
+ * AI 查證的示範稿件（P6-T005）：一篇講《刺激1995》的文章，句句都是查得到（或查不到）的說法。
+ * 頂層區塊：0 段落、1 段落、2 小標、3 段落、4 段落、5 段落。查證結果的 `blockIndex` 照這個寫死（`fixtures/factcheck.ts`）。
+ */
+export const FACTCHECK_BODY = [
+  '<p>《刺激1995》是法蘭克・戴拉邦特執導的電影，這部片 1995 年上映，改編自史蒂芬・金的中篇小說。</p>',
+  '<p>它上映時票房並不好，北美首輪只收了大約一千六百萬美元，後來靠錄影帶出租才慢慢累積口碑。</p>',
+  '<h2 class="wp-block-heading">為什麼現在還有人重看</h2>',
+  '<p>片中的肖申克監獄其實是俄亥俄州一座已經關閉的感化院，現在開放參觀。</p>',
+  '<p>導演當年只花了五千美元就買下改編權。</p>',
+  '<p>研究顯示，重看喜歡的電影能降低焦慮。</p>',
+].join('\n');
+
+/** 查證示範稿件上的校稿提案：一張「沒有依據」的觀察卡片，練「查證」按鈕（跟一條查證結果引同一句）。 */
+export function factcheckReview(): ReviewProposal {
+  return {
+    id: 520,
+    provider: 'claude',
+    summary: '一個沒有依據的說法',
+    createdAt: '2026-09-30T08:00:00Z',
+    baseContentHash: 'a0c4e2f19b7d3c55'.padEnd(64, '0'),
+    stale: false,
+    pendingCount: 2,
+    items: [
+      reviewItem(9201, 0, {
+        type: 'observation',
+        blockIndex: 5,
+        change: null,
+        observation: {
+          kind: 'unsupported-claim',
+          blockIndex: 5,
+          excerpt: '研究顯示，重看喜歡的電影能降低焦慮',
+          detail: '「研究顯示」沒有說是哪一份研究，讀者沒辦法自己去看。',
+          suggestion: '補上研究的出處，或改成自己的感受。',
+        },
+      }),
+      reviewItem(9202, 1, {
+        type: 'observation',
+        blockIndex: 4,
+        change: null,
+        observation: {
+          kind: 'missing-source',
+          blockIndex: 4,
+          excerpt: '只花了五千美元就買下改編權',
+          detail: '金額這種細節最好標出處。',
+          suggestion: '補一個連結。',
+        },
+      }),
+    ],
+  };
+}

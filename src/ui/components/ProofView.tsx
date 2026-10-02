@@ -29,6 +29,8 @@ import type { RichUnit } from '../../contract/rich-text.js';
 import { isBlankBody } from '../../contract/empty-body.js';
 import { readString } from '../lib/format.js';
 import { decideProofSave } from '../lib/write-in-place.js';
+import { markScopes, pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
+import { FcIcon } from './FactcheckIcon.js';
 import {
   attachEditInterceptors,
   disableWriting,
@@ -90,12 +92,19 @@ import {
  * 段落之間（含最前面與最後面）滑鼠移過去出現「在這裡插圖」。跟頁邊符號一樣畫在 iframe 外層，
  * 位置用同一份量到的區塊座標算（上一段的底與下一段的頂的中間），iframe 裡什麼都不加。
  * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。
+ *
+ * **六、選字「查證這句」（P6-T005，D-034）。**
+ * 沒在改字時，在正文或標題上選一段字，選取下方浮出一顆膠囊按鈕（樣子跟「在這裡插圖」一致），畫在 iframe 外層，
+ * 位置用選取範圍在文件裡的座標。要不要出現由上層決定（`selectionCheck` 給 null 就不畫）；不能查的時候照樣出現但反灰、講原因。
+ * 選的字只當純文字送出（`Selection.toString()`），後端再驗一次長度與找不找得到。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
 export interface ProofEditRequest {
   /** 從哪張建議卡片進來的；存檔時那一項一起標成已處理（P5-T012）。null＝從上方「改原文」。 */
   itemId: number | null;
+  /** 從哪張查證卡片「去原文改」進來的（D-034）；存檔時那條結成 resolved-by-edit。 */
+  factCheckId?: number | null;
   /** 游標要停在哪段字前面；null＝文章開頭。 */
   caret: string | null;
   /** 落在這段字（建議的 after）裡的 caret 不算，跟後端套用同一條規則（P5-T017）。 */
@@ -106,8 +115,10 @@ export interface ProofEditRequest {
 
 /** 校樣上要標出來的一段字。 */
 export interface ProofHighlight {
-  id: number;
-  kind: SuggestionKind;
+  /** 卡片的 key：校稿 `r<id>`、查證 `f<id>`（兩張表的 id 會撞號）。 */
+  id: string;
+  /** 校稿的四種分類，或查證（跟校稿不同的樣式，D-034）。 */
+  kind: SuggestionKind | 'factcheck';
   text: string;
   /** 掛在第幾個頂層區塊；null＝定位不到，就在整篇裡找第一個。 */
   blockIndex: number | null;
@@ -118,12 +129,17 @@ export interface ProofHighlight {
   skipInside?: string | null;
 }
 
-/** 標記的顏色。跟 styles/01-tokens.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。 */
-const HIGHLIGHT_COLORS: Record<SuggestionKind, { bg: string; line: string }> = {
+/**
+ * 標記的顏色。跟 styles/01-tokens.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。
+ * 查證（`factcheck`，對應 --kind-check）用靛藍**虛線底線**、很淡的底，跟校稿的實線底線分得開；
+ * 它用 text-decoration 畫線，校稿標記包在它裡面（同一句既有觀察卡片又有查證）時兩條線都看得到。
+ */
+const HIGHLIGHT_COLORS: Record<SuggestionKind | 'factcheck', { bg: string; line: string; dashed?: boolean }> = {
   typo: { bg: '#FCE3D6', line: '#C2410C' },
   style: { bg: '#E4EDE8', line: '#3F5B4F' },
   fact: { bg: '#DDE8F5', line: '#1E4F8A' },
   source: { bg: '#F6EDCF', line: '#8A6A14' },
+  factcheck: { bg: '#F0EFFB', line: '#3730A3', dashed: true },
 };
 
 /**
@@ -189,14 +205,15 @@ export function ProofView({
   onSaveEdit,
   onEndEdit,
   insertImage = null,
+  selectionCheck = null,
 }: {
   job: LoadedJob;
   /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
   mode: 'edit' | 'final';
   highlights?: readonly ProofHighlight[];
-  activeHighlight?: number | null;
-  /** 點了文章裡某個標記。 */
-  onHighlight?: (id: number) => void;
+  activeHighlight?: string | null;
+  /** 點了文章裡某個標記（卡片的 key）。 */
+  onHighlight?: (id: string) => void;
   /** 放在校樣上方工具列右邊的按鈕（例如「改原文」）。 */
   tools?: ReactNode;
   /** 待處理清單點過來的段落。會捲到那一段並畫一個框。 */
@@ -233,6 +250,11 @@ export function ProofView({
    * `afterBlockIndex` 跟 `placeMedia` 同一套索引，-1＝最前面。
    */
   insertImage?: ((afterBlockIndex: number, close: () => void) => ReactNode) | null;
+  /**
+   * 選字「查證這句」（P6-T005）。null＝不給（對照、成品、改字中、稿件結束）。
+   * `blockedReason` 不是 null 時膠囊照樣出現但反灰、講原因（另一個 AI 動作在跑…）。
+   */
+  selectionCheck?: { blockedReason: string | null; note: string | null; onCheck: (text: string) => void } | null;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -246,6 +268,10 @@ export function ProofView({
   /** 打開了哪一個「在這裡插圖」（插在第幾塊之後）；null＝沒打開。 */
   const [inserting, setInserting] = useState<number | null>(null);
   const [showMarks, setShowMarks] = useState(true);
+  /** 選字查證：選了哪段字、膠囊畫在哪（文件座標）。null＝沒選或不給查。 */
+  const [picked, setPicked] = useState<{ text: string; top: number; left: number } | null>(null);
+  const selectionCheckRef = useRef(selectionCheck);
+  selectionCheckRef.current = selectionCheck;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   /**
@@ -265,6 +291,8 @@ export function ProofView({
   onPreviewHashRef.current = onPreviewHash;
   const onHighlightRef = useRef(onHighlight);
   onHighlightRef.current = onHighlight;
+  const activeHighlightRef = useRef(activeHighlight);
+  activeHighlightRef.current = activeHighlight;
   const [loadCount, setLoadCount] = useState(0);
   const isEditing = editing !== null;
   const editingRef = useRef(isEditing);
@@ -373,6 +401,7 @@ export function ProofView({
     setBlocks([]);
     setPinned(null);
     setInserting(null);
+    setPicked(null);
     onBlocksRef.current?.([]);
     onPreviewHashRef.current?.(null);
   }, [revisionKey]);
@@ -516,7 +545,23 @@ export function ProofView({
       // 不能用 instanceof Element：iframe 裡的節點屬於另一個視窗，外層的 Element 認不得它。
       const target = event.target as Element | null;
       const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
-      if (mark && !editingRef.current) onHighlightRef.current?.(Number(mark.getAttribute('data-hl')));
+      if (!mark || editingRef.current) return;
+      // 同一段字有兩種標記（查證包在校稿裡面）時，點擊只會落在內層：已經亮著再點一次就換外層（審查 A）。
+      const parent = mark.parentElement?.closest('mark[data-hl]') ?? null;
+      const key = pickClickedMark(
+        { key: mark.getAttribute('data-hl') ?? '', text: mark.textContent ?? '' },
+        parent === null ? null : { key: parent.getAttribute('data-hl') ?? '', text: parent.textContent ?? '' },
+        activeHighlightRef.current,
+      );
+      onHighlightRef.current?.(key);
+    });
+    // 選字查證（P6-T005）：沒在改字、上層有給的時候，選了字就在選取下方浮出「查證這句」。
+    doc.addEventListener('selectionchange', () => {
+      if (editingRef.current || selectionCheckRef.current == null) return;
+      setPicked(pickSelection(doc));
+    });
+    doc.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setPicked(null);
     });
     // 編輯中：打字會改變高度，要重量；正文空不空決定要不要顯示「從這裡開始寫…」。
     doc.addEventListener('input', () => {
@@ -572,11 +617,17 @@ export function ProofView({
     const doc = frameRef.current?.contentDocument;
     const body = doc?.querySelector('.preview-body');
     if (!doc || !body) return;
+    // 標題裡也可能有查證的標記（只出現在標題的那句，Codex 審查 4）：跟正文一起拆。
+    const title = doc.querySelector('.preview-title');
     unwrapHighlightMarks(body);
+    if (title) unwrapHighlightMarks(title);
     if (mode !== 'edit') return;
     for (const highlight of highlights) {
-      const scope = highlight.blockIndex === null ? body : body.children[highlight.blockIndex];
-      if (scope) wrapFirst(doc, scope, highlight, highlight.id === activeHighlight);
+      const active = highlight.id === activeHighlight;
+      for (const where of markScopes(highlight.kind, highlight.blockIndex)) {
+        const scope = where === 'block' ? body.children[highlight.blockIndex ?? -1] : where === 'title' ? title : body;
+        if (scope && wrapFirst(doc, scope, highlight, active)) break;
+      }
     }
     measure(measureToken.current);
     // highlights 由 highlightKey 代表；陣列本身每次都是新的。
@@ -618,6 +669,8 @@ export function ProofView({
       return;
     }
     unwrapHighlightMarks(body);
+    // 標題要變成可打字（plaintext-only）之前，查證留在標題上的標記先拆掉。
+    if (title) unwrapHighlightMarks(title);
     if (originalBody.current === null) {
       originalBody.current = body.innerHTML;
       originalUnits.current = snapshotBody(body);
@@ -732,6 +785,14 @@ export function ProofView({
   };
 
   const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
+
+  // 不給選字查證了（進了對照、打開發布面板、開始改字…）就把膠囊收掉。
+  const canPick = selectionCheck !== null && mode === 'edit' && !isEditing;
+  useEffect(() => {
+    if (!canPick) setPicked(null);
+  }, [canPick]);
+  const pickProblem = picked === null ? null : (selectionCheck?.blockedReason ?? selectionProblem(picked.text));
+  const pickNote = picked === null ? null : (selectionCheck?.note ?? null);
 
   // 不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
   const canInsert = insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0;
@@ -929,6 +990,38 @@ export function ProofView({
               </div>
             )}
 
+            {canPick && picked !== null && (
+              <div className="fc-pick-layer">
+                <div
+                  className="fc-pick"
+                  role="group"
+                  aria-label="查證選的字"
+                  style={{ top: `${picked.top}px`, left: `${Math.max(picked.left, 80)}px` }}
+                >
+                  <button
+                    type="button"
+                    className="fc-pick-btn"
+                    disabled={pickProblem !== null}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const text = picked.text;
+                      setPicked(null);
+                      frameRef.current?.contentDocument?.getSelection()?.removeAllRanges();
+                      selectionCheck?.onCheck(text);
+                    }}
+                  >
+                    <FcIcon name="search-check" size={13} />
+                    查證這句
+                  </button>
+                  {(pickProblem ?? pickNote) !== null && (
+                    <span className="fc-pick-note" data-tone={pickProblem !== null ? 'warn' : 'info'}>
+                      {pickProblem ?? pickNote}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {focused !== undefined && !isEditing && (
               <div
                 className="proof-focus"
@@ -961,23 +1054,32 @@ export function ProofView({
  * 只在單一文字節點裡找：跨過標籤的（`今天<em>讀完`）不包，跟後端逐項套用的規則
  * 一致（docs/specs/review-proposals.md）——找不到就不標，右欄的卡片照樣在。
  */
-function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): void {
-  if (highlight.text.length === 0) return;
+function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): boolean {
+  if (highlight.text.length === 0) return false;
+  const group = highlight.kind === 'factcheck' ? 'factcheck' : 'review';
   const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const text = node as Text;
-    if (text.parentElement?.closest('mark[data-hl]')) continue;
+    // 同一種（校稿／查證）的標記裡不再包；另一種的可以包在裡面（同一句既有觀察卡片又有查證）。
+    if (text.parentElement?.closest(`mark[data-hl-group='${group}']`)) continue;
     const hit = findIgnoringSpaces(text.data, highlight.text, highlight.skipInside);
     if (hit === null) continue;
     const range = doc.createRange();
     range.setStart(text, hit.start);
     range.setEnd(text, hit.end);
     const mark = doc.createElement('mark');
-    mark.setAttribute('data-hl', String(highlight.id));
+    mark.setAttribute('data-hl', highlight.id);
+    mark.setAttribute('data-hl-group', group);
     const color = HIGHLIGHT_COLORS[highlight.kind];
     mark.style.background = color.bg;
     mark.style.color = 'inherit';
-    mark.style.borderBottom = `2px solid ${color.line}`;
+    if (color.dashed) {
+      mark.style.textDecoration = `underline dashed ${color.line}`;
+      mark.style.textDecorationThickness = '2px';
+      mark.style.textUnderlineOffset = '5px';
+    } else {
+      mark.style.borderBottom = `2px solid ${color.line}`;
+    }
     mark.style.borderRadius = '2px';
     mark.style.cursor = 'pointer';
     if (active) {
@@ -985,8 +1087,28 @@ function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, act
       mark.style.outlineOffset = '2px';
     }
     range.surroundContents(mark);
-    return;
+    return true;
   }
+  return false;
+}
+
+/**
+ * 選字查證：目前的選取（不收空的、不收跨出正文與標題的），以及膠囊要畫在哪（選取最後一行的下方中間，文件座標）。
+ * 選的字只拿純文字（`toString()`）。
+ */
+function pickSelection(doc: Document): { text: string; top: number; left: number } | null {
+  const selection = doc.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const container = range.commonAncestorContainer;
+  const element = container.nodeType === 1 ? (container as Element) : container.parentElement;
+  if (!element || typeof element.closest !== 'function' || element.closest('.preview-body, .preview-title') === null) return null;
+  const text = selection.toString();
+  if (text.trim().length === 0) return null;
+  const rects = range.getClientRects();
+  const last = rects.length > 0 ? rects[rects.length - 1]! : range.getBoundingClientRect();
+  const scrollY = doc.defaultView?.scrollY ?? 0;
+  return { text, top: last.bottom + scrollY + 6, left: last.left + last.width / 2 };
 }
 
 const KIND_LABEL: Record<ProofMark['kind'], string> = {
