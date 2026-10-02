@@ -175,6 +175,11 @@ interface Observation {
 那一項沒有跳轉按鈕——**包括 observation**，它自帶的 `blockIndex` 是 Agent 看它
 那一版時算的，不拿來充數。
 
+**觀察的原句被同一份校稿改過**（P5-T037）：excerpt 在目前內容找不到時，拿同一份校稿已接受（`applied`）或
+已經改好了的 change，依 ordinal 把 excerpt 裡**完整包含**的 `before` 換成 `after` 再找一次（`excerptAfterChanges`，
+`src/contract/review-locate.ts`）；只交疊一段的不處理；before 在 excerpt 裡出現兩次以上不換（套用一條只換一處，猜不出換了哪個）。對應出來的字是推的，**全文剛好一處才算數**，兩處以上（同段或別段）算找不到（短原句「大腕」→「大碗」可能撞到「一大碗粥」）。後端實際找到的那段字放在 `locatedText`
+（change 套用前是 before、套用後是 after；找不到 null），畫面的字上標記與「去原文改」游標用它，null 時退回引用的字。
+
 **定位忽略所有空白**（`src/contract/text-match.ts`，前後端共用）：Agent 引用原文時會自己在中文與
 數字、英文之間加空格（「佔 40%」對「佔40%」），逐字比對會漏掉（P5-T008）。只用在定位與字上標記；
 逐項**套用**照舊逐字比對。
@@ -192,6 +197,9 @@ interface Observation {
 （找不到的原因是文章裡沒有那句話，重按一次結果一樣；文章改成 AI 要的樣子之後會自動變成「已經改好了」）。
 從這種卡片（或任何定位不到段落的卡片）按「自己改」，游標放文章開頭，頂端講「文章裡找不到「…」，游標放在文章開頭」——
 字上標不出來、段落也框不出來，不講的話使用者會以為游標停的地方就是要改的地方。
+`unappliable` 以外的卡片（校稿觀察、查證 finding）是 `ProofView` 定位完才知道：有要找的字、但字與段落都標不出來
+（`editTarget` 回 `target: null`）時講「文章裡找不到「…」，游標放在文章開頭。」（`missingTargetNotice`，P5-T037）；
+段落找得到、字找不到的標整段，不另提示。打字模式的正文焦點框往外推 6px（`WRITE_RULES`），段首游標不疊在框線上。
 定位不到段落但字在標題裡的（講標題的觀察，例如「標題是『hello』，像暫定標題」），「去原文改／自己改」游標跳到標題、標那段字（P5-T031）；
 `unappliable` 的卡片照舊不找，游標放文章開頭。
 
@@ -211,7 +219,7 @@ Node 內建、有完整 ICU）斷詞，再對「詞」做 LCS——`src/core/wor
 階段 6 的查證發現**不會**再開新的檢視——它跟校稿改動一起掛在右欄的建議清單上。
 
 **標在字上。** 校樣在 sandbox iframe 裡（沒有 allow-scripts）。外層把待處理項目的
-`before`（改動）或 `excerpt`（觀察）包進 `<mark>`，顏色用 CSSOM 設定——文件的 CSP 擋的是
+`before`（改動）或 `excerpt`（觀察）包進 `<mark>`（後端給了 `locatedText` 就標它，P5-T037），顏色用 CSSOM 設定——文件的 CSP 擋的是
 `<style>` 與 style 屬性，不管外層透過 CSSOM 改樣式。只在單一文字節點裡找第一個相符的字，
 跨標籤的不標，跟逐項套用的定位規則一致。點標記的事件由外層掛在文件上；判斷目標時不能用
 `instanceof Element`（iframe 的節點屬於另一個視窗）。

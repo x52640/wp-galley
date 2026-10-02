@@ -285,6 +285,7 @@ export function Workspace({
     // 按過接受、後端在每個欄位（標題、正文…）都找不到原句的（unappliable，P5-T017）：字上標不出來，
     // 游標只能放文章開頭——明講找不到，不然使用者會以為游標停的地方就是要改的地方。
     // 不用 blockIndex === null 判斷：改標題的建議也沒有段落，但它找得到，只是不在正文裡。
+    // 其他卡片（觀察、查證）字與段落都標不出來的，由 ProofView 定位完回報（onEditTargetMissing，P5-T037）。
     const quoted = item === null ? null : (item.change?.before ?? item.observation?.excerpt ?? null);
     const lost = item !== null && item.state === 'unappliable';
     // 空白不同之類逐字對不上、但定位（忽略空白）找得到段落的，游標放那一段開頭。
@@ -534,6 +535,7 @@ export function Workspace({
             onPreviewHash={onPreviewHash}
             editing={editing}
             onEndEdit={endEdit}
+            onEditTargetMissing={setEditNotice}
             selectionCheck={
               canSelectToFactCheck(display, { editing: editing !== null, finished: isFinished(job.state) })
                 ? {
@@ -587,7 +589,8 @@ export function Workspace({
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
-              setEditing(null);
+              // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
+              endEdit();
               await refresh();
               return saved.contentHash;
             }}

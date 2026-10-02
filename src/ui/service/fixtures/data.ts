@@ -3,6 +3,7 @@
  * 只有資料與組資料的小函式，沒有規則（P5-T033）。
  */
 
+import { excerptAfterChanges } from '../../../contract/review-locate.js';
 import type { ImageBrief, MediaAsset, ProofMark, PublishTargetSummary, ReviewItem, ReviewProposal, Revision } from '../types.js';
 
 export const DIARY_TARGET: PublishTargetSummary = {
@@ -182,12 +183,29 @@ export const LONGFORM_MARKS: ProofMark[] = [
 export function reviewItem(
   id: number,
   ordinal: number,
-  partial: Pick<ReviewItem, 'type' | 'change' | 'observation' | 'blockIndex'>,
+  partial: Pick<ReviewItem, 'type' | 'change' | 'observation' | 'blockIndex'> & Partial<Pick<ReviewItem, 'locatedText'>>,
   state: ReviewItem['state'] = 'pending',
   alreadyDone = false,
 ): ReviewItem {
-  return { id, ordinal, state, resolvedAt: null, resolvedByEdit: false, alreadyDone, ...partial };
+  // 後端讀取時算的 `locatedText`；示範資料沒寫的給 null，畫面退回卡片引用的字（照舊）。
+  return { id, ordinal, state, resolvedAt: null, resolvedByEdit: false, alreadyDone, locatedText: null, ...partial };
 }
+
+const TYPO_WRITTEN = {
+  type: 'typo' as const,
+  before: '就先寫道這裡',
+  after: '就先寫到這裡',
+  reason: '「寫道」是「寫到」的錯字',
+  meaningChanged: false,
+};
+
+const OBS_EARLY = {
+  kind: 'gap' as const,
+  blockIndex: 3,
+  excerpt: '明天要早起。就先寫道這裡',
+  detail: '最後一段突然收尾，沒交代為什麼要早起。',
+  suggestion: '補半句早起要做什麼，或保留這種戛然而止的語氣。',
+};
 
 export function diaryReview(): ReviewProposal {
   return {
@@ -197,7 +215,7 @@ export function diaryReview(): ReviewProposal {
     createdAt: '2026-08-28T09:39:10Z',
     baseContentHash: '5c02f7ab91de4460'.padEnd(64, '0'),
     stale: false,
-    pendingCount: 6,
+    pendingCount: 8,
     items: [
       reviewItem(9001, 0, {
         type: 'change',
@@ -297,6 +315,34 @@ export function diaryReview(): ReviewProposal {
           excerpt: '20260828',
           detail: '標題是日期「20260828」，正文說「今天讀完這本書」，沒辦法確認這是不是寫這篇的那一天。',
           suggestion: '日期不對就直接改標題。',
+        },
+      }),
+      // P5-T037：同一份校稿裡改錯字的那條已接受（文章裡現在是「寫到」）……
+      reviewItem(
+        9008,
+        7,
+        { type: 'change', blockIndex: 3, change: TYPO_WRITTEN, observation: null, locatedText: TYPO_WRITTEN.after },
+        'applied',
+      ),
+      // ……另一條觀察引用的是改之前的字。後端拿已套用的那條對應過再找，示範資料用同一個契約函式算字、段落寫死。
+      reviewItem(9009, 8, {
+        type: 'observation',
+        blockIndex: 3,
+        change: null,
+        observation: OBS_EARLY,
+        locatedText: excerptAfterChanges(OBS_EARLY.excerpt, [TYPO_WRITTEN]),
+      }),
+      // 哪裡都找不到的觀察：按「去原文改」，游標放文章開頭，頂端要明講找不到（P5-T037）。
+      reviewItem(9010, 9, {
+        type: 'observation',
+        blockIndex: null,
+        change: null,
+        observation: {
+          kind: 'missing-source',
+          blockIndex: 1,
+          excerpt: '把雨傘忘在公車上',
+          detail: '這件事前後文都沒有交代。',
+          suggestion: '補一句發生在哪裡，或拿掉。',
         },
       }),
     ],

@@ -132,6 +132,8 @@
   [review-proposals.md](review-proposals.md)「對照畫面長什麼樣」。
 - 配圖需求與待處理清單的行為見 [agent-tasks.md](agent-tasks.md)、
   [review-proposals.md](review-proposals.md)。`blockIndex` 的語意見 review-proposals.md。
+  `ReviewItem.locatedText`（P5-T037，新增欄位）：後端在目前內容實際找到的那段字，跟 `blockIndex` 一起讀取時算，找不到 null；
+  規則見 review-proposals.md「`blockIndex` 每次讀取時重算」。
 - 在文章上請 AI 配一張（D-022，P5-T018）：`POST /briefs` 只收位置（`afterBlockIndex`，跟 `place` 同一套索引）、
   畫面上那一版的 `contentHash` 與選填的 `note`（上限 200 字，摺疊空白後數 code point，跟畫面計數同一套）；body 是 `.strict()`，多送欄位（例如 `prompt`）回 400——
   prompt 只能由後端組。建好就回 202，生圖在背後跑，進度看 `JobDetail.agentRun`（`generate-image`、`briefId`），
