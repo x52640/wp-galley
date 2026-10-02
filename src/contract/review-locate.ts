@@ -9,7 +9,8 @@ import { findIgnoringSpaces } from './text-match.js';
  *
  * - 只用 excerpt 完整包含的 `before`；只交疊一段的不處理（猜位置比不能跳更糟）。
  * - 比對忽略空白，跟定位同一套規則（`findIgnoringSpaces`）：Agent 引用時常自己加空格。
- * - 一條 `before` 在 excerpt 裡出現幾次就換幾次。
+ * - 一條 `before` 在 excerpt 裡要剛好出現一次才換；出現兩次以上不知道套用時換的是哪一個
+ *   （套用一條只換一處，`大腕→大碗`、`大腕→大海碗` 各換一個），有歧義就整個回 null，不猜。
  * - 沒有任何一條用得上就回 null（呼叫端照舊算找不到）。
  *
  * 呼叫端只傳已套用（`applied`）或已經改好了（`alreadyDone`）的 change；還沒處理的不能拿來換——
@@ -22,16 +23,24 @@ export function excerptAfterChanges(
   let text = excerpt;
   let touched = false;
   for (const change of changes) {
-    let from = 0;
-    for (;;) {
-      const hit = findIgnoringSpaces(text.slice(from), change.before);
-      if (hit === null) break;
-      const start = from + hit.start;
-      const end = from + hit.end;
-      text = text.slice(0, start) + change.after + text.slice(end);
-      from = start + change.after.length;
-      touched = true;
-    }
+    const count = countIgnoringSpaces(text, change.before);
+    if (count === 0) continue;
+    if (count > 1) return null;
+    const hit = findIgnoringSpaces(text, change.before)!;
+    text = text.slice(0, hit.start) + change.after + text.slice(hit.end);
+    touched = true;
   }
   return touched ? text : null;
+}
+
+/** `needle` 在 `haystack` 裡出現幾次（忽略空白，不重疊）。對應出來的字要剛好一處才算數。 */
+export function countIgnoringSpaces(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const hit = findIgnoringSpaces(haystack.slice(from), needle);
+    if (hit === null) return count;
+    count++;
+    from += hit.end;
+  }
 }

@@ -589,7 +589,8 @@ export function Workspace({
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
-              setEditing(null);
+              // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
+              endEdit();
               await refresh();
               return saved.contentHash;
             }}

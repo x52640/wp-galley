@@ -177,7 +177,7 @@ interface Observation {
 
 **觀察的原句被同一份校稿改過**（P5-T037）：excerpt 在目前內容找不到時，拿同一份校稿已接受（`applied`）或
 已經改好了的 change，依 ordinal 把 excerpt 裡**完整包含**的 `before` 換成 `after` 再找一次（`excerptAfterChanges`，
-`src/contract/review-locate.ts`）；只交疊一段的不處理；對應出來的字是推的，**兩段以上都對得上就算找不到**（短原句「大腕」→「大碗」可能撞到別段的「一大碗粥」）。後端實際找到的那段字放在 `locatedText`
+`src/contract/review-locate.ts`）；只交疊一段的不處理；before 在 excerpt 裡出現兩次以上不換（套用一條只換一處，猜不出換了哪個）。對應出來的字是推的，**全文剛好一處才算數**，兩處以上（同段或別段）算找不到（短原句「大腕」→「大碗」可能撞到「一大碗粥」）。後端實際找到的那段字放在 `locatedText`
 （change 套用前是 before、套用後是 after；找不到 null），畫面的字上標記與「去原文改」游標用它，null 時退回引用的字。
 
 **定位忽略所有空白**（`src/contract/text-match.ts`，前後端共用）：Agent 引用原文時會自己在中文與

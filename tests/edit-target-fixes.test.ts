@@ -34,9 +34,11 @@ describe('excerptAfterChanges', () => {
     expect(excerptAfterChanges('撐出來的大腕', [{ before: '大碗', after: '大海碗' }, BOWL])).toBe('撐出來的大碗');
   });
 
-  it('忽略空白比對；出現幾次換幾次；after 裡含 before 不會無限換', () => {
+  it('忽略空白比對；before 出現兩次以上有歧義回 null；after 裡含 before 不會無限換', () => {
     expect(excerptAfterChanges('佔 40% 的大腕', [{ before: '佔40%', after: '佔四成' }])).toBe('佔四成 的大腕');
-    expect(excerptAfterChanges('大腕配大腕', [BOWL])).toBe('大碗配大碗');
+    // 套用一條只換一處：「大腕→大碗」「大腕→大海碗」接受後文章是「大碗配大海碗」，猜不出來（Codex 審查）。
+    expect(excerptAfterChanges('大腕配大腕', [BOWL])).toBeNull();
+    expect(excerptAfterChanges('大腕配大腕', [BOWL, { before: '大腕', after: '大海碗' }])).toBeNull();
     expect(excerptAfterChanges('很多事', [{ before: '很多事', after: '很多事情' }])).toBe('很多事情');
   });
 });
@@ -151,6 +153,16 @@ describe('ReviewItem.locatedText 與觀察原句的對應', () => {
       [{ before: '演藝圈的大腕', after: '演藝圈的大碗' }],
       '大腕',
       '早餐吃了一大碗粥。\n\n他是演藝圈的大腕。',
+    );
+    apply(core, uuid, items(core, uuid).changes[0]!.id);
+    expect(items(core, uuid).observation).toMatchObject({ blockIndex: null, locatedText: null });
+  });
+
+  it('對應出來的字在同一段出現兩次：有歧義，不猜', async () => {
+    const { core, uuid } = await propose(
+      [{ before: '演藝圈的大腕', after: '演藝圈的大碗' }],
+      '大腕',
+      '早餐吃了一大碗粥。他是演藝圈的大腕。',
     );
     apply(core, uuid, items(core, uuid).changes[0]!.id);
     expect(items(core, uuid).observation).toMatchObject({ blockIndex: null, locatedText: null });

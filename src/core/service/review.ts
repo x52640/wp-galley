@@ -10,8 +10,8 @@ import type {
 import { computeComparison } from '../diff.js';
 import { describeMediaForDiff, diffFields } from '../field-diff.js';
 import { ContentChangedError, InvalidInputError } from '../errors.js';
-import { excerptAfterChanges } from '../../contract/review-locate.js';
-import { findBlockContaining, findBlocksContaining, splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
+import { countIgnoringSpaces, excerptAfterChanges } from '../../contract/review-locate.js';
+import { findBlockContaining, splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
 import type { JobRow, RevisionRow, ReviewItemRow, ReviewItemState, ReviewProposalRow } from '../repository.js';
 import type { Observation, ReviewChange, ReviewOutput } from '../../agents/output-contract.js';
 import { applyChanges, isAlreadyDone, type ChangeSlot } from '../review-apply.js';
@@ -565,9 +565,10 @@ export class ReviewModule {
     if (direct !== null) return found(observation.excerpt, direct);
     const mapped = excerptAfterChanges(observation.excerpt, landed);
     if (mapped === null) return notFound;
-    // 對應出來的字是推的，不是 AI 原本引的：只有一段對得上才算數，兩段以上有歧義就不猜
-    // （短的原句「大腕」對應成「大碗」，可能先撞到別段的「一大碗粥」）。
-    const hits = findBlocksContaining(blocks, mapped);
-    return hits.length === 1 ? found(mapped, hits[0]!) : notFound;
+    // 對應出來的字是推的，不是 AI 原本引的：全文只出現一處才算數，兩處以上（不論同段或別段）有歧義就不猜
+    // （短的原句「大腕」對應成「大碗」，可能先撞到「一大碗粥」）。
+    const counts = blocks.map((block) => countIgnoringSpaces(block.text, mapped));
+    if (counts.reduce((sum, n) => sum + n, 0) !== 1) return notFound;
+    return found(mapped, counts.findIndex((n) => n === 1));
   }
 }
