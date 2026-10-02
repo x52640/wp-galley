@@ -38,3 +38,15 @@ function findInTexts(
   }
   return null;
 }
+
+/**
+ * 「去原文改／自己改」最後沒有東西可標時，頂端要講的話（P5-T037）。
+ *
+ * 只在「有要找的字」而且「字與段落都標不出來」（`editTarget` 回 `target: null`）時講：游標掉在文章開頭，
+ * 不講的話使用者會以為游標停的地方就是要改的地方。段落找得到、字找不到的照舊標整段，不另提示；
+ * 從上方「改原文」進來的（沒有要找的字）也不講。
+ */
+export function missingTargetNotice(caret: string | null, hasTarget: boolean): string | null {
+  if (caret === null || caret.trim().length === 0 || hasTarget) return null;
+  return `文章裡找不到「${caret}」，游標放在文章開頭。`;
+}

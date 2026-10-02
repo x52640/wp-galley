@@ -31,6 +31,7 @@ import { readString } from '../lib/format.js';
 import { decideProofSave } from '../lib/write-in-place.js';
 import { markScopes, pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
 import { FcIcon } from './FactcheckIcon.js';
+import { missingTargetNotice } from '../lib/edit-target.js';
 import {
   attachEditInterceptors,
   disableWriting,
@@ -204,6 +205,7 @@ export function ProofView({
   editing = null,
   onSaveEdit,
   onEndEdit,
+  onEditTargetMissing,
   insertImage = null,
   selectionCheck = null,
 }: {
@@ -245,6 +247,8 @@ export function ProofView({
   onSaveEdit?: (save: { editedBody?: string; editedTitle?: string }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
+  /** 進入編輯時要找的字與段落都標不出來（游標掉在文章開頭）：要在頂端講的話（P5-T037）。 */
+  onEditTargetMissing?: (notice: string) => void;
   /**
    * 「在這裡插圖」按下去之後的面板內容（P5-T016）。null＝不給插（對照中、成品、稿件結束…）。
    * `afterBlockIndex` 跟 `placeMedia` 同一套索引，-1＝最前面。
@@ -299,6 +303,8 @@ export function ProofView({
   editingRef.current = isEditing;
   const onEndEditRef = useRef(onEndEdit);
   onEndEditRef.current = onEndEdit;
+  const onEditTargetMissingRef = useRef(onEditTargetMissing);
+  onEditTargetMissingRef.current = onEditTargetMissing;
   /** 進入編輯那一刻的正文，用來判斷「有沒有改」與取消時還原。 */
   const originalBody = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -684,6 +690,8 @@ export function ProofView({
 
     const { caret: range, target, inTitle } = editTarget(doc, body, title, editing);
     showEditTarget(frame, target);
+    const missing = missingTargetNotice(editing.caret, target !== null);
+    if (missing !== null) onEditTargetMissingRef.current?.(missing);
     frame.contentWindow?.focus();
     // 講標題的建議（P5-T031）：焦點給標題，不然游標會被拉回正文。
     (inTitle && title ? title : body).focus();

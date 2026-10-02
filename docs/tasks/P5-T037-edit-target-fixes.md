@@ -1,7 +1,7 @@
 ---
 id: P5-T037
 phase: 5
-status: in_progress
+status: done
 depends_on: [P5-T031]
 specs: [review-proposals.md, design-system.md]
 write_paths: ["src/ui/", "src/core/service/review.ts", "src/core/service/types.ts", "src/contract/", "tests/", "docs/specs/review-proposals.md", "docs/specs/core-service.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/tasks/P5-T037-edit-target-fixes.md", "docs/CURRENT_TASK.md"]
@@ -57,5 +57,21 @@ expected_commit: "fix(P5-T037): 去原文改找得到被改過的原句並標黃
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
+- 最後完成：2026-10-02 實作完。規則 `excerptAfterChanges`（`src/contract/review-locate.ts`）；`ReviewItem.locatedText`
+  （`review.ts` 的 `locateItem` 一起算）；`highlightText` 優先用它；`missingTargetNotice`（`lib/edit-target.ts`）由 `ProofView`
+  定位完經 `onEditTargetMissing` 回報給 Workspace 顯示；`WRITE_RULES` 加正文焦點框（實線藍、offset 6px）。
+  fixtures 日記提案加 9008（已套用的錯字）、9009（引用套用前字的觀察）、9010（哪裡都找不到的觀察）；spec 已補
+  （review-proposals、http-api、core-service、design-system）。
+- 已通過驗證：`npm run verify` 綠，85 檔／1875 測試（新增 `tests/edit-target-fixes.test.ts` 14 條）。
+  沒在瀏覽器實際看過（fixtures 畫面、焦點框位置未目測）。
+- 下一步：主 session 審查；`docs/specs/architecture.md` 功能地圖可補 `contract/review-locate.ts`（不在本 Task write_paths）；
+  CURRENT_TASK 由主 session 更新；使用者手動驗證 job 17。
+- Blocker：無。
 
 ## 完成結果
+
+- 獨立審查（2026-10-02）：沒有高嚴重度。
+  - 中低（已修）：短原句對應後的字可能先撞到別段，標錯句子。改成對應出來的字只有一段對得上才採用（`findBlocksContaining`），
+    兩段以上算找不到；`tests/edit-target-fixes.test.ts` 補一條。
+  - 低（不修，殘餘）：可查證的觀察靠對應才找到時，卡片有黃底，但「查證這句」後端仍用原句找，會回「找不到」。Task 已把查證排除在外。
+  - 低（不修，殘餘）：原句跨兩段的觀察／查證 finding，`blockIndex` 是 null，「去原文改」會誤報「找不到」。少見。

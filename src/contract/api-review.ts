@@ -70,6 +70,13 @@ export interface ReviewItem {
    * 那一項就沒有「跳到該段」。
    */
   readonly blockIndex: number | null;
+  /**
+   * 後端在目前內容裡**實際找到**的那段字（P5-T037），跟 `blockIndex` 一起每次讀取時算。
+   * change：套用前是 before、套用後（含已經改好了）是 after；觀察：原句找得到就是原句，找不到時用同一份校稿
+   * 已落地的修改對應過的字（`excerptAfterChanges`）；都找不到是 null。畫面的字上標記與「去原文改」游標用它，
+   * null 時退回原本引用的字。
+   */
+  readonly locatedText: string | null;
   readonly resolvedAt: string | null;
   /** 使用者從這張卡片進去直接改文章、存檔時一起結案的（P5-T012）。畫面寫「自己改了」，不是「保留原文」。 */
   readonly resolvedByEdit: boolean;

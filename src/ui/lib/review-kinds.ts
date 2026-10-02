@@ -71,9 +71,13 @@ export function isSafeTypo(item: ReviewItem): boolean {
   return item.state === 'pending' && item.change?.type === 'typo' && item.change.meaningChanged === false;
 }
 
-/** 校樣上要標出來的那段文字。改動標 before，觀察標它引用的片段。 */
+/**
+ * 校樣上要標出來的那段文字。後端實際找到的字（`locatedText`，P5-T037）優先：觀察引用的原句被同一份校稿
+ * 已接受的修改改過時，要標的是改過之後的字。沒有就照舊：改動標 before，觀察標它引用的片段。
+ */
 export function highlightText(item: ReviewItem): string | null {
   if (!isOpen(item)) return null;
+  if (item.locatedText) return item.locatedText;
   if (item.change) return item.change.before;
   if (item.observation) return item.observation.excerpt;
   return null;

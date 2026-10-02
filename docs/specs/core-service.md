@@ -233,6 +233,9 @@ interface CoreService {
 
 以前是整塊刪掉含圖的頂層區塊，前文與後文會一起消失。
 
+`getReview(uuid)` 的每一項帶 `blockIndex` 與 `locatedText`（P5-T037，後端實際找到的那段字），都在讀取時照目前內容算；
+觀察的原句找不到時先用同一份校稿已落地的修改對應一次（規則見 review-proposals.md「`blockIndex` 每次讀取時重算」）。
+
 `getComparison(uuid, against?)`：有未結案提案就跟提案比，沒有就跟上一版比；回傳 `Comparison`，
 除了逐段的 `rows`，還有正文以外的 `fieldChanges`（`src/core/field-diff.ts`，D-019）。
 跟上一版比不需要模板（發布目標被拿掉的舊稿件正文欄位當成 `body`）。

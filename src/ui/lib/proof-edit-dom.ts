@@ -37,10 +37,16 @@ export function showEditTarget(frame: HTMLIFrameElement, target: Range | null): 
   registry.set(EDIT_TARGET, new win.Highlight(target));
 }
 
-/** 打字模式裡標題看得出「可以點進去改」、空正文有提示（P5-T029）。用 CSSOM 插進文件，不動文件的 <style>。 */
-const WRITE_RULES = [
+/**
+ * 打字模式裡標題看得出「可以點進去改」、空正文有提示（P5-T029）。用 CSSOM 插進文件，不動文件的 <style>。
+ *
+ * 正文的焦點框跟標題一樣往外推（P5-T037）：瀏覽器預設的框緊貼文字左緣，游標在段首時疊在框線上看不到。
+ * 推 6px＋框 2px 落在模板左右 1.25rem 的留白裡，不會被 iframe 邊緣切掉。
+ */
+export const WRITE_RULES: readonly string[] = [
   '.preview-title[contenteditable] { outline: 1px dashed #B8B2A6; outline-offset: 6px; border-radius: 2px; cursor: text; }',
   '.preview-title[contenteditable]:focus { outline: 2px solid #1E4F8A; }',
+  '.preview-body[contenteditable]:focus { outline: 2px solid #1E4F8A; outline-offset: 6px; border-radius: 2px; }',
   '.preview-body[data-blank="yes"] > p:first-child::before { content: "從這裡開始寫…"; color: #9A958C; float: left; height: 0; pointer-events: none; }',
 ];
 

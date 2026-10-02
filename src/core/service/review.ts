@@ -10,7 +10,8 @@ import type {
 import { computeComparison } from '../diff.js';
 import { describeMediaForDiff, diffFields } from '../field-diff.js';
 import { ContentChangedError, InvalidInputError } from '../errors.js';
-import { findBlockContaining, splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
+import { excerptAfterChanges } from '../../contract/review-locate.js';
+import { findBlockContaining, findBlocksContaining, splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
 import type { JobRow, RevisionRow, ReviewItemRow, ReviewItemState, ReviewProposalRow } from '../repository.js';
 import type { Observation, ReviewChange, ReviewOutput } from '../../agents/output-contract.js';
 import { applyChanges, isAlreadyDone, type ChangeSlot } from '../review-apply.js';
@@ -483,7 +484,12 @@ export class ReviewModule {
     const blocks = currentHtml.length === 0 ? [] : splitTopLevelBlocks(currentHtml);
     const rows = this.ctx.repo.listReviewItems(proposal.id);
     const done = this.alreadyDoneIds(rows, currentData);
-    const items = rows.map((row) => this.toReviewItem(row, blocks, done.has(row.id)));
+    // 同一份校稿已經落地的修改（已接受、已經改好了），依 ordinal 排：觀察的原句找不到時拿來對應（P5-T037）。
+    const landed = [...rows]
+      .filter((row) => row.item_type === 'change' && (row.state === 'applied' || done.has(row.id)))
+      .sort((a, b) => a.ordinal - b.ordinal)
+      .map((row) => JSON.parse(row.payload_json) as ReviewChange);
+    const items = rows.map((row) => this.toReviewItem(row, blocks, done.has(row.id), landed));
     return {
       id: proposal.id,
       provider: proposal.provider,
@@ -497,10 +503,17 @@ export class ReviewModule {
     };
   }
 
-  private toReviewItem(row: ReviewItemRow, blocks: readonly TopLevelBlock[], alreadyDone: boolean): ReviewItemView {
+  private toReviewItem(
+    row: ReviewItemRow,
+    blocks: readonly TopLevelBlock[],
+    alreadyDone: boolean,
+    landed: readonly ReviewChange[],
+  ): ReviewItemView {
     const payload = JSON.parse(row.payload_json) as unknown;
     const change = row.item_type === 'change' ? (payload as ReviewChange) : null;
     const observation = row.item_type === 'observation' ? (payload as Observation) : null;
+    // 已經改好了的，文章裡現在是 after——跟已套用的一樣照 after 找段落。
+    const located = this.locateItem(blocks, change, observation, alreadyDone ? 'applied' : row.state, landed);
 
     return {
       id: row.id,
@@ -510,8 +523,8 @@ export class ReviewModule {
       state: alreadyDone ? 'skipped' : row.state,
       change,
       observation,
-      // 已經改好了的，文章裡現在是 after——跟已套用的一樣照 after 找段落。
-      blockIndex: this.locateItem(blocks, change, observation, alreadyDone ? 'applied' : row.state),
+      blockIndex: located.blockIndex,
+      locatedText: located.text,
       resolvedAt: row.resolved_at,
       // 略過本身不寫 revision_id；只有「從卡片進去改、存檔結案」會寫。
       resolvedByEdit: row.state === 'skipped' && row.revision_id !== null,
@@ -520,26 +533,41 @@ export class ReviewModule {
   }
 
   /**
-   * 這一項現在落在第幾段。
+   * 這一項現在落在第幾段，以及實際找到的是哪段字（`locatedText`，P5-T037）。
    *
    * **一律以目前的內容為準去找，找不到就是 null。** 觀察雖然自帶一個 `blockIndex`，
    * 但那是 Agent 看它那一版時算的，內容改過就指到別的段落了；拿它當退路等於
    * 回傳一個沒有驗證過的跳轉目標，跳到錯的段落比不能跳更糟。
+   *
+   * 觀察的原句找不到時，拿同一份校稿已經落地的修改對應一次再找（`excerptAfterChanges`）：
+   * 「大腕→大碗」接受之後，引用「…撐出來的大腕」的觀察要找的是「…撐出來的大碗」。
    */
   private locateItem(
     blocks: readonly TopLevelBlock[],
     change: ReviewChange | null,
     observation: Observation | null,
     state: ReviewItemState,
-  ): number | null {
-    if (blocks.length === 0) return null;
+    landed: readonly ReviewChange[],
+  ): { blockIndex: number | null; text: string | null } {
+    const notFound = { blockIndex: null, text: null };
+    if (blocks.length === 0) return notFound;
+    const found = (text: string, blockIndex: number | null): { blockIndex: number | null; text: string | null } =>
+      blockIndex === null ? notFound : { blockIndex, text };
     // 已經套用過的那一項，文章裡現在是 after。還沒套用的找 before，但落在完整 after 裡的不算——
     // 跟套用同一條規則，卡片指的段落才會是按接受真的會改的那一段。
     if (change) {
       return state === 'applied'
-        ? findBlockContaining(blocks, change.after)
-        : findBlockContaining(blocks, change.before, change.after);
+        ? found(change.after, findBlockContaining(blocks, change.after))
+        : found(change.before, findBlockContaining(blocks, change.before, change.after));
     }
-    return observation === null ? null : findBlockContaining(blocks, observation.excerpt);
+    if (observation === null) return notFound;
+    const direct = findBlockContaining(blocks, observation.excerpt);
+    if (direct !== null) return found(observation.excerpt, direct);
+    const mapped = excerptAfterChanges(observation.excerpt, landed);
+    if (mapped === null) return notFound;
+    // 對應出來的字是推的，不是 AI 原本引的：只有一段對得上才算數，兩段以上有歧義就不猜
+    // （短的原句「大腕」對應成「大碗」，可能先撞到別段的「一大碗粥」）。
+    const hits = findBlocksContaining(blocks, mapped);
+    return hits.length === 1 ? found(mapped, hits[0]!) : notFound;
   }
 }
