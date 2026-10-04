@@ -1,7 +1,7 @@
 ---
 id: P8-T003
 phase: 8
-status: in_progress
+status: done
 depends_on: []
 specs: [architecture.md, security.md, wordpress-site.md]
 write_paths: ["src/config/", "src/server/main.ts", "src/server/app.ts", "src/db/", "src/core/", "src/agents/", "src/media/", "src/wordpress/setup.ts", "tests/", "docs/specs/architecture.md", "docs/specs/security.md", "docs/specs/wordpress-site.md", "docs/specs/agent-tasks.md", "docs/known-issues.md", "docs/tasks/P8-T003-user-data-dir.md", "docs/CURRENT_TASK.md", "README.md", "README.zh-TW.md"]

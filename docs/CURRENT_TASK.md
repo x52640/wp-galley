@@ -4,21 +4,22 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **85 檔 / 1877 測試**全綠（2026-10-02，P5-T037 合併後）
-- migration head：`009-factcheck`（2026-10-01 已套到本機 DB；套用前**沒有備份**，套用後 integrity_check ok）
-- 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
+- `npm run verify`：typecheck 通過；Vitest **88 檔 / 1952 測試**全綠（2026-10-04，P8-T003＋P6-T006）
+- 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
+- migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
+- 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
 
 ## 進行中
 
-| Task | 內容 | 狀態 |
-| --- | --- | --- |
-| [P8-T003](tasks/P8-T003-user-data-dir.md) | 使用者資料搬出程式資料夾、DB 改存相對路徑、首次啟動自動複製（D-035） | 實作完成、待審查（worktree verify 87 檔／1916 測試；新 migration 010 合併後首次啟動才套到真的 DB） |
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P8-T003](tasks/P8-T003-user-data-dir.md) | 舊稿件、舊圖都在；開一篇草稿真跑一次校稿＋Codex 生圖（Agent 在新工作目錄不出錯）。設定精靈畫面上仍寫舊路徑（known-issues） |
+| [P6-T006](tasks/P6-T006-check-while-writing.md) | 打字模式寫一句、選起來按「查證這句」→ 查證期間繼續寫、按儲存 → 結果出現、字沒被蓋掉；空白新稿打第一句也能查 |
 | [P5-T037](tasks/P5-T037-edit-target-fixes.md) | job 17「湯匙」卡按「去原文改」→ 那句標黃、游標在句首；任一段段首按 Enter 換段 → 看得到游標 |
 | [P6-T005](tasks/P6-T005-factcheck-ui.md) | **優先**：Codex、Claude 各跑一次一鍵查證＋查證這句，agy 跑一次；看判定合理、看原文對得上、停止有效；順便確認 Codex `web_search="cached"`、Claude `WebSearch`＋`--json-schema`（同 P6-T003 那條）、中文維基是繁體。只在本機，不核准不發布 |
 | [P5-T036](tasks/P5-T036-lock-agent-tools.md) | **優先**：真跑 Codex 校稿、Claude 校稿、Codex 生圖各一次，確認新的不連外參數不讓 CLI 報錯（`-c` 在 `--ignore-user-config` 下是否生效等未證實項見 known-issues） |

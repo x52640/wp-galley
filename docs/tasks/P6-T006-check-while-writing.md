@@ -1,7 +1,7 @@
 ---
 id: P6-T006
 phase: 6
-status: in_progress
+status: done
 depends_on: [P6-T005]
 specs: [factcheck.md, http-api.md, design-system.md]
 write_paths: ["src/ui/", "src/contract/agent-run.ts", "src/contract/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/content.ts", "src/core/service/media.ts", "tests/", "docs/specs/factcheck.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P6-T006-check-while-writing.md"]
