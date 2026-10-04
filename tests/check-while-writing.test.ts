@@ -20,6 +20,7 @@ import {
   type ProofHold,
 } from '../src/ui/lib/check-while-writing.js';
 import { decideProofSave } from '../src/ui/lib/write-in-place.js';
+import { selectionImageContentHash } from '../src/ui/lib/selection-image-view.js';
 
 /**
  * 改字時也能「查證這句」、查證時可以繼續寫（D-036，P6-T006）。畫面的判斷放在純函式，這裡測。
@@ -278,9 +279,9 @@ describe('先存再做：動作出錯不算存檔失敗（P5-T038 審查 3）', 
 
 describe('自動存好但重讀失敗、離開打字模式再進來（P5-T040 #1）：存檔基準與 hold 認那一版', () => {
   it('離開時最後存的那一版工作區還沒讀到：記下來；讀到了或沒存過就不記', () => {
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0' })).toEqual({ uuid: 'a', hash: 'H1', behind: 'H0' });
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H1' })).toBeNull();
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: null, jobHash: 'H0' })).toBeNull();
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0', known: ['H0', 'H1'] })).toEqual({ uuid: 'a', hash: 'H1', behind: 'H0' });
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H1', known: ['H0', 'H1'] })).toBeNull();
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: null, jobHash: 'H0', known: ['H0'] })).toBeNull();
   });
 
   it('工作區快照還停在舊的就留著；讀到新的（自己那版或別處改的）就放掉；別篇不算', () => {
@@ -296,7 +297,7 @@ describe('自動存好但重讀失敗、離開打字模式再進來（P5-T040 #1
   });
 
   it('再進打字模式：存檔基準用存成功的那一版，不是工作區的舊快照（不然 409）', () => {
-    const ahead = carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0' });
+    const ahead = carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0', known: ['H0', 'H1'] });
     // 進打字模式時把它當成這次打字中「最後存成功」的那一版。
     const lastSaved = savedAheadHash(ahead, 'a');
     expect(nextSaveBase(lastSaved, 'H0')).toBe('H1');
@@ -314,5 +315,29 @@ describe('自動存好但重讀失敗、離開打字模式再進來（P5-T040 #1
     expect(settled?.own).toEqual(['H1', 'H2']);
     // 沒有存在前面的版本：不用 hold。
     expect(seedHold(shown, null)).toBeNull();
+  });
+});
+
+describe('Codex 第一輪（PR #28）：外部版本、進打字模式那一刻的有效版本', () => {
+  it('因為別處改出新版本而離開打字模式：工作區已經是更新的版本，不記「存在前面」（不然之後每次都拿舊的當基準、一直 409）', () => {
+    // 進打字模式時是 H0，打字中自動存了 H1，同一分頁放圖產生 H2：工作區讀到 H2、打字模式結束。
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H2', known: ['H0', 'H1'] })).toBeNull();
+    // 工作區還停在進來時的版本、或打字中自己較早存的那一版：才算比自己存的舊。
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H2', jobHash: 'H1', known: ['H0', 'H1', 'H2'] })).toEqual({
+      uuid: 'a',
+      hash: 'H2',
+      behind: 'H1',
+    });
+    // 新稿還沒有版本（undefined）也照樣記。
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: undefined, known: [undefined, 'H1'] })?.hash).toBe('H1');
+  });
+
+  it('打字中的有效版本：進打字模式那一刻（還沒存過）就用「存在前面」的那一版，不等 effect', () => {
+    expect(selectionImageContentHash({ editing: true, lastSaved: null, aheadHash: 'H1', jobHash: 'H0' })).toBe('H1');
+    // 打字中又存過：最後存的優先。
+    expect(selectionImageContentHash({ editing: true, lastSaved: 'H2', aheadHash: 'H1', jobHash: 'H0' })).toBe('H2');
+    expect(selectionImageContentHash({ editing: true, lastSaved: null, aheadHash: null, jobHash: 'H0' })).toBe('H0');
+    // 不在打字模式：工作區的版本。
+    expect(selectionImageContentHash({ editing: false, lastSaved: null, aheadHash: 'H1', jobHash: 'H0' })).toBe('H0');
   });
 });

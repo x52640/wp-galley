@@ -197,6 +197,8 @@ export function Workspace({
     setView('article');
     // 打字中存過的那一版是上一篇的：不帶到這一篇（P5-T040 #1）。
     lastSavedHash.current = null;
+    setLastSaved(null);
+    knownOld.current = [];
     setSavedAhead(null);
   }, [uuid]);
 
@@ -383,8 +385,22 @@ export function Workspace({
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
 
-  /** 這次打字中最後一次存成功的 hash（D-036）；離開打字模式或換篇就清掉。 */
+  /**
+   * 這次打字中最後一次存成功的 hash（D-036）；離開打字模式或換篇就清掉。
+   * ref 給非同步的回呼讀，state 給 render 算「畫面知道的目前版本」（PR #28 Codex P2：只寫 ref 不會重新 render）。
+   */
   const lastSavedHash = useRef<string | null>(null);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  /**
+   * 這次打字中工作區快照「合理地還停在」的版本：進打字模式時的版本、存在前面的那一版、打字中自己存的每一版。
+   * 離開時工作區不是這些（別處改出更新的版本）就不記「存在前面」（PR #28 Codex P2）。
+   */
+  const knownOld = useRef<(string | undefined)[]>([]);
+  const rememberSaved = useCallback((hash: string) => {
+    lastSavedHash.current = hash;
+    setLastSaved(hash);
+    knownOld.current = [...knownOld.current, hash];
+  }, []);
   /**
    * 打字中存成功、工作區還沒重讀到的那一版（P5-T040 #1）：離開打字模式時記下來，
    * 再進打字模式時當成「最後存成功的那一版」（存檔基準、校樣 hold 都認它）。工作區快照換了就放掉。
@@ -400,12 +416,23 @@ export function Workspace({
     wasEditing.current = now;
     if (now) {
       // 進打字模式：之前存在前面的那一版就是這次的起點。
-      lastSavedHash.current = savedAheadHash(savedAhead, uuid);
+      const ahead = savedAheadHash(savedAhead, uuid);
+      lastSavedHash.current = ahead;
+      setLastSaved(ahead);
+      knownOld.current = ahead === null ? [jobHashRef.current] : [jobHashRef.current, ahead];
       return;
     }
-    // 離開打字模式（儲存、取消、版本被換掉）：最後存的那一版工作區還沒讀到，記下來並立刻重讀一次。
-    const carried = carrySavedAhead({ uuid, lastSaved: lastSavedHash.current, jobHash: jobHashRef.current });
+    // 離開打字模式（儲存、取消）：最後存的那一版工作區還沒讀到（快照還是比它舊的那一版），記下來並立刻重讀一次。
+    // 因為別處改出新版本而離開的：快照已經是更新的版本，存的那一版跟著作廢、不帶過去（PR #28 Codex P2）。
+    const carried = carrySavedAhead({
+      uuid,
+      lastSaved: lastSavedHash.current,
+      jobHash: jobHashRef.current,
+      known: knownOld.current,
+    });
     lastSavedHash.current = null;
+    setLastSaved(null);
+    knownOld.current = [];
     setSavedAhead(carried);
     if (carried !== null) void refresh();
     // savedAhead 只在進出打字模式的那一刻讀。
@@ -414,6 +441,12 @@ export function Workspace({
   useEffect(() => {
     setSavedAhead((current) => settleSavedAhead(current, uuid, jobHash));
   }, [uuid, jobHash]);
+  /**
+   * 畫面知道的目前版本（PR #28 Codex P2）：打字中是最後存成功的那一版、還沒存過就是存在前面的那一版，否則工作區的版本。
+   * 在 render 時算：進打字模式那一刻就對，傳給子元件的值與送出的請求用同一個。
+   */
+  const aheadHash = savedAheadHash(savedAhead, uuid);
+  const knownHash = selectionImageContentHash({ editing: editing !== null, lastSaved, aheadHash, jobHash });
 
   /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
   const imageGeneration = useImageGenerationStatus(true);
@@ -640,22 +673,15 @@ export function Workspace({
                 ? {
                     blockedReason: selectionImageBlocked,
                     // 畫面知道的目前版本：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
-                    currentHash: selectionImageContentHash({
-                      editing: editing !== null,
-                      lastSaved: lastSavedHash.current,
-                      jobHash: job.currentRevision?.contentHash,
-                    }),
+                    currentHash: knownHash,
                     loadSpots: async (text) => {
                       // 換篇時沿用同一個元件：不是發起的那一篇就什麼都不做（第二輪審查）。
                       const origin = job.uuid;
                       const stillHere = (): boolean =>
                         stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
                       if (!stillHere()) return null;
-                      const contentHash = selectionImageContentHash({
-                        editing: editing !== null,
-                        lastSaved: lastSavedHash.current,
-                        jobHash: job.currentRevision?.contentHash,
-                      });
+                      // 跟 currentHash 同一個值（PR #28 Codex P2）：查位置用的版本與面板比對的版本一致。
+                      const contentHash = knownHash;
                       if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
                       const result = await api.selectionImageSpots(origin, { selection: text, contentHash });
                       return stillHere() ? result : null;
@@ -712,12 +738,13 @@ export function Workspace({
                   )
                 : null
             }
-            savedAhead={savedAheadHash(savedAhead, job.uuid)}
+            savedAhead={aheadHash}
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
               // 存好之後換到別篇（Workspace 重用）：不碰 lastSavedHash、編輯狀態、refresh（第二輪審查）。
               const origin = job.uuid;
               // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
-              const base = nextSaveBase(lastSavedHash.current, job.currentRevision?.contentHash);
+              // 進打字模式那一刻 ref 可能還沒寫進存在前面的那一版（effect 之前），一起看。
+              const base = nextSaveBase(lastSavedHash.current ?? aheadHash, job.currentRevision?.contentHash);
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
               const saved = await api.createRevision(job.uuid, {
                 ...(editedBody === undefined ? {} : { editedBody }),
@@ -738,12 +765,12 @@ export function Workspace({
               });
               if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return saved.contentHash;
               if (stay) {
-                lastSavedHash.current = saved.contentHash;
+                rememberSaved(saved.contentHash);
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
                 setEditing(afterStaySave);
               } else {
                 // 存好就離開打字模式；重讀若失敗，離開時把這一版記成「存在前面」（P5-T040 #1），下次進來拿它當基準。
-                lastSavedHash.current = saved.contentHash;
+                rememberSaved(saved.contentHash);
                 // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
                 endEdit();
               }

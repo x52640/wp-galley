@@ -88,14 +88,18 @@ export function selectionImageHeading(text: string): { excerpt: string; length: 
 
 /**
  * 送出時帶的 `contentHash`（畫面那一版）：打字模式先存了一版的話，用最後一次存成功的那一版
- * （工作區的快照可能還沒重讀到它，跟打字中存檔的基準同一套）；沒在打字就是工作區目前這一版。
+ * （工作區的快照可能還沒重讀到它，跟打字中存檔的基準同一套）；還沒存過但有「存在前面」的那一版（P5-T040 `SavedAhead`）
+ * 就用它——進打字模式那一刻就要對，不能等 effect 把它寫進 ref（PR #28 Codex P2）；沒在打字就是工作區目前這一版。
+ * Workspace 在 render 時算，傳給子元件的值與送出的請求用同一個。
  */
 export function selectionImageContentHash(state: {
   editing: boolean;
   lastSaved: string | null;
+  aheadHash?: string | null;
   jobHash: string | undefined;
 }): string | undefined {
-  return state.editing ? (state.lastSaved ?? state.jobHash) : state.jobHash;
+  if (!state.editing) return state.jobHash;
+  return state.lastSaved ?? state.aheadHash ?? state.jobHash;
 }
 
 /**

@@ -103,13 +103,19 @@ export interface SavedAhead {
   readonly behind: string | undefined;
 }
 
-/** 離開打字模式：最後存成功的那一版跟工作區快照不一樣就記下來；沒存過或已經讀到就不記。 */
+/**
+ * 離開打字模式：最後存成功的那一版工作區還沒讀到才記下來。「還沒讀到」＝工作區快照還是**比自己存的舊**的那一版：
+ * 進打字模式時的版本、或這次打字中自己較早存的某一版（`known`）。工作區已經是別的版本（同一分頁放圖之類，
+ * 打字模式因外部版本結束，PR #28 Codex P2）就不記：那一版已經被取代，拿它當基準只會一直 409。沒存過或已經讀到也不記。
+ */
 export function carrySavedAhead(input: {
   uuid: string;
   lastSaved: string | null;
   jobHash: string | undefined;
+  known: readonly (string | undefined)[];
 }): SavedAhead | null {
   if (input.lastSaved === null || input.lastSaved === input.jobHash) return null;
+  if (!input.known.includes(input.jobHash)) return null;
   return { uuid: input.uuid, hash: input.lastSaved, behind: input.jobHash };
 }
 

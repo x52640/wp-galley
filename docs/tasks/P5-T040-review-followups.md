@@ -60,9 +60,10 @@ D-039。已合併的 #24（P6-T006）、#25（P5-T039）補跑 Codex 審查，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：三條實作＋測試＋spec／known-issues 同步（2026-10-05，未 commit）
-- 已通過驗證：`npm run verify` 92 檔／2065 測試綠；`?fixtures=1` 截圖：發布面板打網址不存 → × 關掉、點遮罩關掉再開 → 字還在、「網址改了還沒存」擋發布；按取消再關再開 → 清掉
-- 下一步：主 session 審查、`docs/specs/factcheck.md`「打字中存的那一版不重載」段補一句 `SavedAhead`（不在本 Task write_paths）、Codex 審查、commit
+- 最後完成：PR #28 Codex 第一輪兩條 P2（2026-10-05，未 commit）：因外部版本離開打字模式不記 SavedAhead（`carrySavedAhead` 加 `known`）；
+  「畫面知道的目前版本」改在 render 算（`lastSaved` 改成 state＋ref、`selectionImageContentHash` 加 `aheadHash`），`currentHash` 與查位置請求同一個值
+- 已通過驗證：`npm run verify` 92 檔／2067 測試綠（第一輪修正後）；第一版 2065；`?fixtures=1` 截圖：發布面板打網址不存 → × 關掉、點遮罩關掉再開 → 字還在、「網址改了還沒存」擋發布；按取消再關再開 → 清掉
+- 下一步：Codex 第二輪審查；`docs/specs/factcheck.md` 的 SavedAhead 段補「工作區已是更新版本就不記」（不在 write_paths，待主 session）
 - Blocker：無
 
 ## 完成結果
