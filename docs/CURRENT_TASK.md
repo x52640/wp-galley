@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **93 檔 / 2079 測試**全綠（2026-10-05，P5-T040）
+- `npm run verify`：typecheck 通過；Vitest **98 檔 / 2177 測試**全綠（2026-10-05，D-040 拆檔 PR A＋B＋C 三個都合併後；本機試合三個分支量得。只合其中一兩個時數字會不同：A 單獨 96／2136、B 單獨 94／2106、C 單獨 94／2093）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -20,6 +20,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |
 | [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（2026-10-05 使用者確認正常；搬家來的舊標記讀取時視為已建過 DB，不需補記） |
 | [P5-T040](tasks/P5-T040-review-followups.md) | 發布面板打網址不存 → 按 × 關掉再開 → 仍擋發布；「標題與網址」存網址中開發布面板 → 被擋 |
 | [P5-T038](tasks/P5-T038-image-from-selection.md) | 用真的 Codex：選兩三段 → 用此段配圖 → 選「第 N 段之後」→ 圖跟主題相關 → 用這張 → 圖在選的位置 |
@@ -41,23 +42,22 @@
 | [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
 
+## 上次停在哪（2026-10-05 拆檔）
+
+- D-040 拆檔分三個 PR、都從 main 開：A＝P5-T041～P5-T043（ProofView 1560 → 360 行）、B＝P5-T044（MediaPanel 1010 → 222）、C＝P5-T045（Workspace 989 → 714）。每張 Task 實作 → verify → 獨立審查（皆無行為差異）→ Codex。
+- 三個 PR 都改 `docs/specs/architecture.md` 功能地圖相鄰的列：程式碼互不衝突，但後合的會在這個檔衝突，需要 rebase。
+- 殘餘（各 Task 檔「完成結果」）：MediaPanel 暫時轉出 `useImageGenerationStatus`／`assetLabel`；`SelectionActions.tsx` 檔頭兩三處註解仍寫 ProofView（不在任何 Task write_paths，待使用者決定）；`proof-editing`／`proof-frame` 守門測試靠找原始碼字串判斷 hook 順序。
+- Vite 8 沒有 `--cacheDir` 參數：worktree 起 Vite 要另寫 config 指 cacheDir，否則快取寫進主目錄 `node_modules/.vite`（worktree 的 node_modules 是 symlink）。
+- 截圖排隊：同一時間只一個 ui-drive（9333 埠）；示範資料版本 hash 是亂數、計時器看時間、捲軸會淡出，比對前先連跑兩次找出本來就會變的。
+
 ## 上次停在哪（2026-10-05 收官）
 
 - 合併 #23（P8-T003 資料目錄，真實資料 2026-10-04 已搬到 `~/Library/Application Support/Galley/`）、#24（P6-T006）、#25（P5-T039）、#26（P5-T038，Codex 七輪）、#27（P8-T004 補審修正，Codex 三輪）。
 - PR #28（P5-T040）：Codex 四輪，**第四輪的修正（refresh-scheduler、卸載時 sync 收尾）沒有再經過 Codex 審**（使用者指定第四輪為最後一輪）。
 - 新規矩（memory `publisher-github-pr-flow`）：每個 PR Codex 最多三輪，第三輪有問題修完直接推、不再審；**合併由使用者按**，主 session 不 `gh pr merge`。使用者目前無法手動測試。
 - 同時跑 ui-drive 截圖會撞 9333 埠，截圖要排隊。
-- 上一個收官段落（2026-10-02）以下保留。
-
-## 上次停在哪（2026-10-02 收官）
-
-- 合併 #22 P5-T037（去原文改標色、段首游標）；殘餘兩條低嚴重度在 Task 檔「完成結果」，也還沒併進 known-issues.md；`architecture.md` 功能地圖還沒列新檔 `src/contract/review-locate.ts`。
-- 合併 #21 P6-T005 查證畫面（獨立審查一輪＋Codex 一輪，修正寫在 PR）。殘餘在 Task 檔「完成結果」，**還沒併進 known-issues.md**。
-- 啟動 dev server 前先備份 `data/publisher.sqlite`（2026-10-01 套 009 時漏了）。
-- 工作方式不變：subagent 實作 → 主 session 驗證 → 另派審查 → PR → Codex 審查（`codex:codex-rescue`，預設用 `~/.codex/config.toml` 的模型與 effort）→ 修正寫進 PR → 確認 PR head 同步才叫使用者合併。資安類發現先修再用籠統寫法貼 PR。
-- 並行用 git worktree（`../wp-galley-<Task>`，`node_modules` symlink，用完移除）；`CURRENT_TASK`／功能地圖由主 session 統一更新避免衝突。
-- 對話累積很長的 subagent 容易串流逾時停住：先看工作樹留下什麼，再續派或改派新的。
-- 開源在 https://github.com/x52640/wp-galley （D-029），main 有分支保護；收官交接只改文件時不單獨開 PR，留本機給下個 Task 的 PR 帶上。
+- 2026-10-02 留下的文件欠帳：P5-T037、P6-T005 的殘餘還沒併進 known-issues.md；功能地圖還沒列 `src/contract/review-locate.ts`。
+- 工作方式：subagent 實作 → 主 session 驗證 → 另派審查 → PR → Codex（`codex:codex-rescue`）→ 修正寫進 PR → 確認 PR head 同步才交使用者合併。並行用 git worktree（`../wp-galley-<Task>`、`node_modules` symlink）；`CURRENT_TASK`／功能地圖由主 session 統一更新。
 
 ## Ready
 
