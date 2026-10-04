@@ -82,9 +82,11 @@ D-036。使用者 2026-10-04：「我寫完一句想要馬上請 AI 查，還需
 - 最後完成：實作（2026-10-04 subagent）＋獨立審查四條修正：①後端 `resolveFactCheckId` 指向這篇但已非 open 的那條 → 照存不結案（`findingToResolveByEdit`），
   前端重讀時清掉已非 open 的 `editing.factCheckId`（`dropStaleFactCheck`）；②`settleHold` 一律記下存出來的版本（H0→H1→H0 不重載）；
   ③打字中「照樣存」後正文換成整理後 HTML、游標照非空白字數放回（`replaceBodyKeepingCaret`）；④自動存過一版後提示列講「已自動存一版；按取消會回到這一版」
-- 已通過驗證：`npm run verify` 綠（86 檔／1906 測試）；`?fixtures=1` 截圖驗過打字模式膠囊、查證中繼續打字、查證完成字沒被蓋掉、照樣存後底線拿掉且游標續寫在原處、
-  去原文改期間同一句被重查後存檔不報錯
-- 下一步：主 session 審查 → commit；`docs/specs/core-service.md` 第 31 行的 `content.ts` 用的方法名要從 `requireOpenFinding` 改成 `findingToResolveByEdit`（該檔我沒動）；使用者手動驗證
+- 已通過驗證：`npm run verify` 綠（86 檔／1913 測試）；`?fixtures=1` 截圖驗過打字模式膠囊、查證中繼續打字、查證完成字沒被蓋掉、照樣存後底線拿掉且游標續寫在原處、
+  去原文改期間同一句被重查後存檔不報錯、空白新稿打第一句選起來膠囊可按並先存再查
+- 再追加（PR #24 Codex 審查兩條，未 commit）：P1 hold 改成記下這次打字中自己存的每一版（`own`），重讀失敗、快照較舊不換 frame；
+  存檔基準用最後一次存成功的 hash（`nextSaveBase`、Workspace 的 `lastSavedHash`）。P2 打字模式膠囊不看存過的 `bodyEmpty`（`selectionCheckBlockedReason`）
+- 下一步：主 session 審查 → commit 進 PR #24；`docs/specs/core-service.md` 第 31 行 `content.ts` 用的方法名（`findingToResolveByEdit`）若還沒改要改；使用者手動驗證
 - Blocker：無
 
 ## 完成結果

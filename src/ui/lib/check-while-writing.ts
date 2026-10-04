@@ -1,4 +1,5 @@
 import type { ProofSaveDecision } from './write-in-place.js';
+import { factCheckBlockedReason } from './factcheck-view.js';
 
 /**
  * 改字時也能「查證這句」、查證時可以繼續寫（D-036，P6-T006；規格 docs/specs/factcheck.md「觸發與畫面」）。
@@ -38,16 +39,17 @@ export interface ProofFrame {
 
 /**
  * 打字中存了一版、留在打字模式：校樣**不重載**（重載會把游標、捲動、存檔之後又打的字一起丟掉）。
- * `key`／`epoch` 是 iframe 目前載著的那一版；`adopted` 是自己存出來的版本（還在存的時候是 null、`pending`）。
+ * `key`／`epoch` 是 iframe 目前載著的那一版；`own` 是這次打字中自己存出來的每一版；`pending`：還在存。
  */
 export interface ProofHold extends ProofFrame {
-  readonly adopted: string | null;
+  readonly own: readonly string[];
   readonly pending: boolean;
 }
 
 /**
- * iframe 該載哪一版。打字中、而且目前的版本是自己存出來的（或還在存）：維持原本載著的那一版；
- * 其他情況（沒在打字、版本被別處換掉）照目前的版本——後者照既有規則重載並講「有了新版本」。
+ * iframe 該載哪一版。打字中、而且工作區的版本是 iframe 載著的那一版或自己存出來的任何一版（或還在存）：維持原本載著的那一版。
+ * 工作區的快照可能比存檔舊（存好之後重讀失敗、或輪詢的舊回應），那不是外部改動，不換（Codex P1）。
+ * 版本是別處改出來的（不在上面那些裡）、或沒在打字：照目前的版本——前者照既有規則重載並講「有了新版本」。
  */
 export function shownFrame(input: {
   editing: boolean;
@@ -56,7 +58,11 @@ export function shownFrame(input: {
   renderEpoch: number;
 }): ProofFrame {
   const { hold } = input;
-  if (input.editing && hold !== null && (hold.pending || hold.adopted === input.revisionKey)) {
+  if (
+    input.editing &&
+    hold !== null &&
+    (hold.pending || hold.key === input.revisionKey || hold.own.includes(input.revisionKey))
+  ) {
     return { key: hold.key, epoch: hold.epoch };
   }
   return { key: input.revisionKey, epoch: input.renderEpoch };
@@ -64,7 +70,7 @@ export function shownFrame(input: {
 
 /** 要開始「存了留在打字模式」：還沒有 hold 就記下目前載著的那一版。 */
 export function beginHold(current: ProofHold | null, shown: ProofFrame): ProofHold {
-  return current === null ? { ...shown, adopted: null, pending: true } : { ...current, pending: true };
+  return current === null ? { ...shown, own: [], pending: true } : { ...current, pending: true };
 }
 
 /**
@@ -73,8 +79,30 @@ export function beginHold(current: ProofHold | null, shown: ProofFrame): ProofHo
  * 那時渲染世代已經變了，放掉 hold 會換成新的 `r=` 重載、把打字中的字與游標蓋掉（審查 2）。
  */
 export function settleHold(hold: ProofHold, savedHash: string | null): ProofHold | null {
-  if (savedHash === null) return hold.adopted === null ? null : { ...hold, pending: false };
-  return { ...hold, adopted: savedHash, pending: false };
+  if (savedHash === null) return hold.own.length === 0 ? null : { ...hold, pending: false };
+  return { ...hold, own: hold.own.includes(savedHash) ? hold.own : [...hold.own, savedHash], pending: false };
+}
+
+/**
+ * 打字中下一次存檔的基準（`expectedContentHash`）：這次打字中最後一次存成功的 hash 優先，
+ * 工作區的快照可能還沒重讀到它（存好之後重讀失敗，Codex P1），拿舊的當基準會被 409 擋。
+ */
+export function nextSaveBase(lastSaved: string | null, jobHash: string | undefined): string | undefined {
+  return lastSaved ?? jobHash;
+}
+
+/**
+ * 選字「查證這句」的反灰原因。打字模式照樣能按（「正在改字」不算）；正文空不空也不看**存過的**——
+ * 空白新稿在打字模式打了第一句、還沒存，存過的正文是空的（Codex P2）。按下會先存，空的話存檔與後端查證會講。
+ */
+export function selectionCheckBlockedReason(state: {
+  running: boolean;
+  editing: boolean;
+  comparing: boolean;
+  bodyEmpty: boolean;
+  finished: boolean;
+}): string | null {
+  return factCheckBlockedReason({ ...state, editing: false, bodyEmpty: state.editing ? false : state.bodyEmpty });
 }
 
 /**

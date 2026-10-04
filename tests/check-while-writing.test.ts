@@ -6,6 +6,8 @@ import {
   dropStaleFactCheck,
   editBlockedByRun,
   editBarSavedNote,
+  nextSaveBase,
+  selectionCheckBlockedReason,
   locateTextOffset,
   countNonSpace,
   planSelectionCheck,
@@ -93,7 +95,7 @@ describe('打字中存了一版：校樣不重載（游標、捲動、打的字�
 
   it('後端說沒有新版本（整理完跟原本一樣）：hold 照留，frame 不變', () => {
     const hold = settleHold(beginHold(null, loaded), 'h1');
-    expect(hold).toEqual({ ...loaded, adopted: 'h1', pending: false });
+    expect(hold).toEqual({ ...loaded, own: ['h1'], pending: false });
     expect(shownFrame({ editing: true, hold, revisionKey: 'h1', renderEpoch: 4 })).toEqual(loaded);
   });
 
@@ -186,5 +188,52 @@ describe('自動存過一版：打字模式的提示列講清楚（審查 4）',
   it('存過才講，講按取消會回到哪裡', () => {
     expect(editBarSavedNote(false)).toBeNull();
     expect(editBarSavedNote(true)).toBe('已自動存一版；按取消會回到這一版');
+  });
+});
+
+describe('自動存成功但工作區重讀失敗（Codex P1）：iframe 不換、下次存用存進去的那一版當基準', () => {
+  const loaded = { key: 'h0', epoch: 1 };
+
+  it('存了 H1（重讀成功）再存 H2、重讀失敗：工作區還停在 H1，frame 不變、不結束打字模式', () => {
+    let hold: ProofHold | null = settleHold(beginHold(null, loaded), 'h1');
+    expect(shownFrame({ editing: true, hold, revisionKey: 'h1', renderEpoch: 2 })).toEqual(loaded);
+    hold = settleHold(beginHold(hold, loaded), 'h2');
+    // 重讀失敗：job 還是 H1（比存檔舊的快照），不算外部改動。
+    expect(shownFrame({ editing: true, hold, revisionKey: 'h1', renderEpoch: 2 })).toEqual(loaded);
+    // 之後一次重讀成功、讀到 H2：照樣不換。
+    expect(shownFrame({ editing: true, hold, revisionKey: 'h2', renderEpoch: 3 })).toEqual(loaded);
+  });
+
+  it('第一次自動存（H1）重讀就失敗：工作區還是 H0，frame 不變', () => {
+    const hold = settleHold(beginHold(null, loaded), 'h1');
+    expect(shownFrame({ editing: true, hold, revisionKey: 'h0', renderEpoch: 1 })).toEqual(loaded);
+  });
+
+  it('真的被別處改了（不是自己存過的任何一版）：照舊放掉、重載並講', () => {
+    const hold = settleHold(beginHold(null, loaded), 'h1');
+    expect(shownFrame({ editing: true, hold, revisionKey: 'h9', renderEpoch: 4 })).toEqual({ key: 'h9', epoch: 4 });
+  });
+
+  it('下次存的基準：有「最後一次存成功的 hash」就用它，不用可能還沒重讀到的工作區快照', () => {
+    expect(nextSaveBase('h2', 'h1')).toBe('h2');
+    expect(nextSaveBase(null, 'h1')).toBe('h1');
+    expect(nextSaveBase(null, undefined)).toBeUndefined();
+  });
+});
+
+describe('打字模式的「查證這句」：正文空不空看編輯中的內容，不看存過的（Codex P2）', () => {
+  const idle = { running: false, editing: true, comparing: false, bodyEmpty: true, finished: false };
+
+  it('空白新稿在打字模式打了第一句：不因存過的正文是空的而反灰（交給存檔與查證流程驗）', () => {
+    expect(selectionCheckBlockedReason(idle)).toBeNull();
+  });
+
+  it('不在打字模式：照舊看存過的正文', () => {
+    expect(selectionCheckBlockedReason({ ...idle, editing: false })).toBe('正文是空的，先寫點內容再查證');
+  });
+
+  it('其他原因照舊：另一個 AI 動作在跑、稿件已結束', () => {
+    expect(selectionCheckBlockedReason({ ...idle, running: true })).toBe('另一個 AI 動作還在跑，等它跑完再查證');
+    expect(selectionCheckBlockedReason({ ...idle, finished: true })).toBe('這篇稿件已經結束，不能再查證');
   });
 });

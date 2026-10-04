@@ -14,7 +14,13 @@ import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
 import { canInsertImages, canSelectToFactCheck, stageDisplay, type StageView } from '../lib/stage-view.js';
 import { factCheckBlockedReason, hostedSearchNote, isNewCancelledRun, isOpenFinding, isWorkspaceBusy } from '../lib/factcheck-view.js';
-import { afterStaySave, dropStaleFactCheck, editBlockedByRun } from '../lib/check-while-writing.js';
+import {
+  afterStaySave,
+  dropStaleFactCheck,
+  editBlockedByRun,
+  nextSaveBase,
+  selectionCheckBlockedReason,
+} from '../lib/check-while-writing.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
@@ -347,6 +353,12 @@ export function Workspace({
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
 
+  /** 這次打字中最後一次自動存成功的 hash（D-036）；離開打字模式或換篇就清掉。 */
+  const lastSavedHash = useRef<string | null>(null);
+  useEffect(() => {
+    if (editing === null) lastSavedHash.current = null;
+  }, [editing, uuid]);
+
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);
     setEditNotice(notice ?? null);
@@ -409,8 +421,9 @@ export function Workspace({
     finished: isFinished(job.state),
   };
   const factCheckBlocked = factCheckBlockedReason(blockedInput);
-  // 選字「查證這句」在打字模式也能按（D-036）：按下先存一版、留在打字模式再查。
-  const selectionCheckBlocked = factCheckBlockedReason({ ...blockedInput, editing: false });
+  // 選字「查證這句」在打字模式也能按（D-036）：按下先存一版、留在打字模式再查；
+  // 打字模式下正文空不空不看存過的（空白新稿打了第一句還沒存，Codex P2），交給存檔與查證流程驗。
+  const selectionCheckBlocked = selectionCheckBlockedReason(blockedInput);
   // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
   const insertable = canInsertImages(display, {
     editing: editing !== null,
@@ -580,7 +593,8 @@ export function Workspace({
                 : null
             }
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
-              const base = job.currentRevision?.contentHash;
+              // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
+              const base = nextSaveBase(lastSavedHash.current, job.currentRevision?.contentHash);
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
               const saved = await api.createRevision(job.uuid, {
                 ...(editedBody === undefined ? {} : { editedBody }),
@@ -600,6 +614,7 @@ export function Workspace({
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
               if (stay) {
+                lastSavedHash.current = saved.contentHash;
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
                 setEditing(afterStaySave);
               } else {
