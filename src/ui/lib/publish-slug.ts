@@ -100,10 +100,16 @@ export function nextSlugDraft(draft: string, prevSaved: string, nextSaved: strin
 }
 
 /**
- * 在發布面板按 Escape 時網址列要做什麼（審查 #3）：有沒存的改動只還原框內的字、不關面板；
+ * 在發布面板按 Escape 時網址列要做什麼（審查 #3）：存網址進行中一律擋下、什麼都不動（PR #25 審查 P2：
+ * 關掉重開會讓發布按鈕在存檔還在路上時又能按）；有沒存的改動只還原框內的字、不關面板；
  * 按「改」打開而沒改動就收起編輯；其他照常關面板。
  */
-export function slugEscapeAction(input: { readonly dirty: boolean; readonly editing: boolean }): 'revert' | 'close-editor' | 'close-sheet' {
+export function slugEscapeAction(input: {
+  readonly dirty: boolean;
+  readonly editing: boolean;
+  readonly saving?: boolean;
+}): 'block' | 'revert' | 'close-editor' | 'close-sheet' {
+  if (input.saving === true) return 'block';
   if (input.dirty) return 'revert';
   if (input.editing) return 'close-editor';
   return 'close-sheet';

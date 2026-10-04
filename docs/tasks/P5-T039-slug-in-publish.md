@@ -66,9 +66,9 @@ D-038。使用者 2026-10-04 發布「AI未來已來 - 1」（長文）時沒看
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：實作＋測試＋spec＋known-issues；獨立審查四條（沒存的網址照樣能發布、儲存分類清掉打好的字、Escape 關面板丟字、存網址中還能按發布）已修；`npm run verify` 綠（89 檔／1971 測試）
+- 最後完成：實作＋測試＋spec＋known-issues；獨立審查四條（沒存的網址照樣能發布、儲存分類清掉打好的字、Escape 關面板丟字、存網址中還能按發布）已修；PR #25 Codex 審查 P2（存網址中關面板重開後發布鈕又能按）已修；`npm run verify` 綠（89 檔／1975 測試）
 - 已通過驗證：`?fixtures=1` 實測審查四條（打字沒存→發布鈕反灰＋旁邊「存網址」；儲存分類後字還在；Escape 只還原字、面板留著；存網址中發布鈕反灰）；截圖（f-noslug 沒填提醒→建議→點一個→存網址→面板顯示新網址、按鈕回到「核准並存成草稿」；f-approved 改網址先講要重新核准、存後「舊的核准已經作廢」；f-previewed 日記清空網址只顯示說明）
-- 下一步：主 session 複查審查修正、使用者手動驗證（只存草稿）、commit
+- 下一步：主 session 複查 P2 修正、使用者手動驗證（只存草稿）、commit 進 PR #25
 - Blocker：無
 
 ## 完成結果
@@ -77,3 +77,4 @@ D-038。使用者 2026-10-04 發布「AI未來已來 - 1」（長文）時沒看
 - 共用元件 `src/ui/components/SlugSuggest.tsx`（從 SourcePanel 搬出，多 `pickHint`、`disabled`，`useId` 取代寫死的 id）；判斷在 `src/ui/lib/publish-slug.ts`。
 - 示範資料：新增 `f-noslug`（「AI未來已來 - 1」，沒填網址）；`createRevision` 改成 templateData 整份取代（跟後端一樣，清空網址才真的清掉）。
 - 審查修正：網址框的值、開關、存的動作提到 `PublishSheet`；有沒存的改動或正在存時擋發布（`slugPublishBlocker`），發布鈕旁附「存網址」；換版本只在框裡沒改動時同步（`nextSlugDraft`）；Escape 照 `slugEscapeAction`，有改動時在 window 捕獲階段攔下只還原字（沒改 `Sheet.tsx`）。
+- PR #25 Codex 審查 P2：「還在存網址」從元件搬到模組層級 `src/ui/lib/slug-save-store.ts`（`runSlugSave`／`isSlugSaving`），面板關掉重開照樣擋發布；存網址中 Escape 被擋（`slugEscapeAction` 回 `block`）。關閉鈕／遮罩沒擋（要改 `Sheet.tsx`），記在 known-issues。

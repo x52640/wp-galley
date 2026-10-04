@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { api } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
@@ -12,6 +12,7 @@ import {
   withSlug,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
+import { isSlugSaving, runSlugSave, subscribeSlugSave } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
@@ -73,6 +74,9 @@ export function PublishSheet({
   const [slugDraft, setSlugDraft] = useState(savedSlug);
   const [slugEditing, setSlugEditing] = useState(false);
   const slugSave = useAction();
+  // 「還在存」以模組層級為準（PR #25 審查 P2）：存的期間面板被關掉再打開，新的元件照樣知道、照樣擋發布。
+  const slugSavingShared = useSyncExternalStore(subscribeSlugSave, () => isSlugSaving(job.uuid));
+  const slugSaving = slugSavingShared || slugSave.busy;
   const slugDirty = isSlugDirty(slugDraft, savedSlug);
   // 已存的網址換了才同步，而且只在框裡沒改動時（審查 #2：按「儲存分類」不能把打好的字清掉）。
   const prevSavedSlug = useRef(savedSlug);
@@ -81,24 +85,26 @@ export function PublishSheet({
     prevSavedSlug.current = savedSlug;
     setSlugDraft((draft) => nextSlugDraft(draft, prev, savedSlug));
   }, [savedSlug]);
-  // Escape（審查 #3）：Sheet 在 document 上聽 Escape 關面板。框裡有沒存的改動時在 window 的捕獲階段先攔下，
-  // 只還原框內的字；焦點在不在框裡都一樣。沒改動就不攔，照常關面板（按「改」打開的由輸入框自己收起）。
+  // Escape（審查 #3、PR #25 審查 P2）：Sheet 在 document 上聽 Escape 關面板。存網址進行中、或框裡有沒存的改動時，
+  // 在 window 的捕獲階段先攔下：存的期間什麼都不動（不關面板）；有改動只還原框內的字。焦點在不在框裡都一樣。
+  // 其他情況不攔，照常關面板（按「改」打開而沒改動的，由輸入框自己收起）。
   useEffect(() => {
-    if (!slugDirty) return;
+    if (!slugDirty && !slugSaving) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || slugSave.busy) return;
-      if (slugEscapeAction({ dirty: true, editing: slugEditing }) !== 'revert') return;
+      if (event.key !== 'Escape') return;
+      const action = slugEscapeAction({ dirty: slugDirty, editing: slugEditing, saving: slugSaving });
+      if (action !== 'block' && action !== 'revert') return;
       event.stopPropagation();
       event.preventDefault();
-      setSlugDraft(savedSlug);
+      if (action === 'revert') setSlugDraft(savedSlug);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [slugDirty, slugEditing, savedSlug, slugSave.busy]);
+  }, [slugDirty, slugEditing, savedSlug, slugSaving]);
 
   const storeSlug = (): void => {
-    if (!slugDirty || slugSave.busy) return;
-    void slugSave.run(async () => {
+    if (!slugDirty || slugSaving) return;
+    void slugSave.run(() => runSlugSave(job.uuid, async () => {
       const baseHash = job.currentRevision?.contentHash ?? null;
       // 整份取代：其他欄位原樣帶上；帶 expectedContentHash，中間被別處改過就擋下來，不蓋掉。
       await guardEdit(() =>
@@ -112,7 +118,7 @@ export function PublishSheet({
       clearSlugSuggest(job.uuid);
       setSlugEditing(false);
       await refresh();
-    });
+    }));
   };
 
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
@@ -151,7 +157,7 @@ export function PublishSheet({
   const mismatch = hash !== null && previewHash !== null && previewHash !== hash;
   const torn = job.approval !== null && !job.approval.valid;
 
-  const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSave.busy });
+  const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSaving });
   const why: string | null = slugBlocker ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
@@ -213,7 +219,7 @@ export function PublishSheet({
           editing={slugEditing}
           setEditing={setSlugEditing}
           dirty={slugDirty}
-          saving={slugSave.busy}
+          saving={slugSaving}
           error={slugSave.error}
           onSave={storeSlug}
         />
@@ -367,7 +373,7 @@ export function PublishSheet({
           type="button"
           className="btn btn-primary btn-big p-go-btn"
           data-danger={status === 'publish' ? 'yes' : 'no'}
-          disabled={why !== null || go.busy || prepare.busy || slugSave.busy}
+          disabled={why !== null || go.busy || prepare.busy || slugSaving}
           onClick={publish}
         >
           {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
@@ -382,8 +388,8 @@ export function PublishSheet({
           )}
         </p>
         {slugDirty && (
-          <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSave.busy || go.busy} onClick={storeSlug}>
-            {slugSave.busy ? <Spinner /> : <Icon name="check" size={13} />}
+          <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSaving || go.busy} onClick={storeSlug}>
+            {slugSaving ? <Spinner /> : <Icon name="check" size={13} />}
             存網址
           </button>
         )}
@@ -545,6 +551,11 @@ function PublishSlug({
           )}
           <ErrorNote message={error} />
         </div>
+      )}
+      {saving && (
+        <p className="field-hint" role="status">
+          <Spinner /> 正在存網址…存好、成品重新載入之前不能發布。
+        </p>
       )}
     </div>
   );

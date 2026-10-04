@@ -9,6 +9,7 @@ import {
   slugPublishBlocker,
   withSlug,
 } from '../src/ui/lib/publish-slug.js';
+import { isSlugSaving, runSlugSave, subscribeSlugSave } from '../src/ui/lib/slug-save-store.js';
 
 /**
  * 發布面板的「網址」列（D-038，P5-T039）。Vitest 沒有 DOM，只測決定畫面要講什麼的純函式。
@@ -151,5 +152,52 @@ describe('網址框沒存的改動（P5-T039 審查 #1–#4）', () => {
     expect(slugEscapeAction({ dirty: true, editing: true })).toBe('revert');
     expect(slugEscapeAction({ dirty: false, editing: true })).toBe('close-editor');
     expect(slugEscapeAction({ dirty: false, editing: false })).toBe('close-sheet');
+  });
+
+  it('存網址中按 Escape 不關面板、也不還原（PR #25 Codex 審查 P2）', () => {
+    for (const dirty of [true, false]) {
+      for (const editing of [true, false]) {
+        expect(slugEscapeAction({ dirty, editing, saving: true })).toBe('block');
+      }
+    }
+  });
+});
+
+describe('存網址的進行中狀態放在模組層級（PR #25 Codex 審查 P2）', () => {
+  it('面板關掉重開（元件換新）也看得到還在存，存完才放開', async () => {
+    let finish!: () => void;
+    const pending = runSlugSave('job-a', () => new Promise<void>((resolve) => (finish = resolve)));
+    expect(isSlugSaving('job-a')).toBe(true);
+    expect(isSlugSaving('job-b')).toBe(false);
+    // 重開的面板拿到的是同一份狀態，發布照樣被擋。
+    expect(slugPublishBlocker({ dirty: false, saving: isSlugSaving('job-a') })).toContain('正在存網址');
+    finish();
+    await pending;
+    expect(isSlugSaving('job-a')).toBe(false);
+  });
+
+  it('同一篇在存時再按一次不會送第二趟；失敗也會放開並把錯誤丟回給呼叫端', async () => {
+    let calls = 0;
+    let finish!: () => void;
+    const first = runSlugSave('job-c', () => {
+      calls += 1;
+      return new Promise<void>((resolve) => (finish = resolve));
+    });
+    await runSlugSave('job-c', async () => {
+      calls += 1;
+    });
+    expect(calls).toBe(1);
+    finish();
+    await first;
+    await expect(runSlugSave('job-c', () => Promise.reject(new Error('409')))).rejects.toThrow('409');
+    expect(isSlugSaving('job-c')).toBe(false);
+  });
+
+  it('狀態變了會通知訂閱者', async () => {
+    let n = 0;
+    const off = subscribeSlugSave(() => (n += 1));
+    await runSlugSave('job-d', async () => {});
+    off();
+    expect(n).toBe(2);
   });
 });
