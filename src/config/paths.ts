@@ -178,6 +178,14 @@ export function fromStoredPath(dataDir: string, stored: string): string {
 /** 媒體檔在 DB 路徑裡的資料夾名（舊根目錄容錯只認這一段）。 */
 const MEDIA_SEGMENT = '/generated-images/';
 
+/**
+ * 實際位置（解開符號連結）。用 `realpathSync.native`：macOS 預設不分大小寫，JS 版的 `realpathSync` 會保留呼叫者
+ * 給的大小寫（同一個位置拼法不同就比不出相等），native 版回檔案系統上真正的大小寫。所有「實際位置相等／包含」的比對都走這裡。
+ */
+export function realLocation(path: string): string {
+  return realpathSync.native(path);
+}
+
 /** 資料目錄裡的存放位置與檔案：媒體／工作目錄的根不能包含它們，也不能落在別的存放位置裡。 */
 const STORE_ENTRIES = ['.env', 'publish-targets.json', '.galley-data.json', 'data', 'drafts', 'generated-images', 'backups'];
 
@@ -198,8 +206,8 @@ export function lexists(path: string): boolean {
  */
 export function isSafeStoreRoot(dataDir: string, root: string): boolean {
   try {
-    const realRoot = realpathSync(root);
-    const realData = realpathSync(dataDir);
+    const realRoot = realLocation(root);
+    const realData = realLocation(dataDir);
     if (realRoot === realData || isInsideDir(realRoot, realData)) return false;
     for (const name of STORE_ENTRIES) {
       if (lexists(join(realRoot, name))) return false;
@@ -207,7 +215,7 @@ export function isSafeStoreRoot(dataDir: string, root: string): boolean {
       if (resolve(sibling) === resolve(root) || !lexists(sibling)) continue;
       let realSibling: string;
       try {
-        realSibling = realpathSync(sibling);
+        realSibling = realLocation(sibling);
       } catch {
         continue; // 懸空的：指不到東西，不會跟根重疊
       }
@@ -259,7 +267,7 @@ function confirmRealInside(parent: string, target: string): string | null {
       current = join(current, segment);
       if (lstatSync(current).isSymbolicLink()) return null;
     }
-    return isInsideDir(realpathSync(parent), realpathSync(target)) ? target : null;
+    return isInsideDir(realLocation(parent), realLocation(target)) ? target : null;
   } catch {
     return null;
   }

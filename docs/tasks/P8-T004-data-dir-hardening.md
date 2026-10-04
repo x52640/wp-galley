@@ -63,9 +63,9 @@ UI、`docs/archive/`。
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #27 Codex 第一輪三條已修（媒體／drafts 根本身的實際位置要驗、路徑檢查 fail closed＋逐段 lstat、啟動前段不改寫標記）（2026-10-04，實作 subagent）
-- 已通過驗證：`npm run verify` 綠（90 檔／1995 測試）
-- 下一步：主 session commit → Codex 第二輪審查（D-039）
+- 最後完成：PR #27 Codex 第二輪 P1 已修（實際位置比對改用檔案系統真正拼法，擋大小寫不同的根目錄連結）（2026-10-04，實作 subagent）
+- 已通過驗證：`npm run verify` 綠（90 檔／1997 測試）
+- 下一步：主 session commit → Codex 第三輪審查（D-039）
 - Blocker：無
 
 ## 完成結果

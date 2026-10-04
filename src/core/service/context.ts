@@ -5,7 +5,7 @@
  * （`ctx.content`、`ctx.media`…），模組之間透過它互相呼叫。這裡的欄位就是以前 CoreService 的私有欄位。
  */
 
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AgentRunTask, Job, MediaAsset, Revision } from '../../contract/api.js';
 import { computeRevisionHash } from '../content-hash.js';
@@ -28,7 +28,7 @@ import {
 } from '../repository.js';
 import { isContentMutable } from '../state-machine.js';
 import { containsSecret, createSecretScrubber, type Scrubber } from '../../config/secrets.js';
-import { fromStoredMediaPath, fromStoredPath, isInsideDir, isSafeStoreRoot, lexists, resolveDataDir, toStoredPath } from '../../config/paths.js';
+import { fromStoredMediaPath, fromStoredPath, isInsideDir, isSafeStoreRoot, lexists, realLocation, resolveDataDir, toStoredPath } from '../../config/paths.js';
 import { createJobWorkspace, resolveInsideWorkspace, WorkspaceError } from '../../agents/workspace.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import type { AgentId } from '../../agents/types.js';
@@ -392,9 +392,9 @@ export class CoreContext {
       mkdirSync(this.draftsDir, { recursive: true });
       // drafts/ 本身被換成指到資料目錄之類的符號連結：整個不能用。
       if (!isSafeStoreRoot(this.dataDir, this.draftsDir)) return false;
-      const root = realpathSync(this.draftsDir);
+      const root = realLocation(this.draftsDir);
       const inside = (path: string, allowRoot: boolean): boolean => {
-        const real = realpathSync(path);
+        const real = realLocation(path);
         return (allowRoot && real === root) || isInsideDir(root, real);
       };
       let existing = dir;

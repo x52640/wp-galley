@@ -57,6 +57,17 @@ function tempDir(label: string): string {
   return dir;
 }
 
+/** 暫存目錄所在的檔案系統不分大小寫（macOS 預設）：大小寫混用的回歸測試只在這種環境有意義。 */
+function caseInsensitiveTmp(): boolean {
+  const probe = mkdtempSync(join(tmpdir(), 'galley-case-'));
+  try {
+    return existsSync(probe.toUpperCase().replace(tmpdir().toUpperCase(), tmpdir()));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+const CASE_INSENSITIVE = caseInsensitiveTmp();
+
 const marker = (dataDir: string): Record<string, unknown> =>
   JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8')) as Record<string, unknown>;
 
@@ -131,6 +142,14 @@ describe('媒體路徑只能落在 generated-images/ 底下', () => {
     rmSync(media, { force: true });
     symlinkSync(elsewhere, media);
     expect(fromStoredMediaPath(dataDir, media, 'generated-images/a.png')).toBeNull();
+    expect(isSafeStoreRoot(dataDir, media)).toBe(false);
+  });
+
+  it.skipIf(!CASE_INSENSITIVE)('不分大小寫的檔案系統：媒體資料夾連到大小寫不同的 data/ 也擋得下', () => {
+    const { dataDir, media } = layout();
+    rmSync(media, { recursive: true });
+    symlinkSync(join(dataDir, 'DATA'), media);
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/publisher.sqlite')).toBeNull();
     expect(isSafeStoreRoot(dataDir, media)).toBe(false);
   });
 
@@ -232,6 +251,19 @@ describe('刪媒體不經過符號連結刪到外面', () => {
 });
 
 describe('Agent 工作目錄要實體路徑也在 drafts/ 裡', () => {
+  it.skipIf(!CASE_INSENSITIVE)('不分大小寫的檔案系統：drafts/ 連到大小寫不同的 data/ 也不跑 Agent', async () => {
+    const { f, codex, dataDir, draftsDir } = await setup();
+    const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
+    mkdirSync(join(dataDir, 'data'), { recursive: true });
+    writeFileSync(join(dataDir, 'data', 'publisher.sqlite'), 'db');
+    rmSync(draftsDir, { recursive: true, force: true });
+    symlinkSync(join(dataDir, 'DATA'), draftsDir);
+    const before = codex.calls.length;
+    await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(AgentError);
+    expect(codex.calls.length).toBe(before);
+    expect(readdirSync(join(dataDir, 'data'))).toEqual(['publisher.sqlite']);
+  });
+
   it('drafts/ 本身被換成指到資料目錄的符號連結：不跑 Agent', async () => {
     const { f, codex, dataDir, draftsDir } = await setup();
     const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;

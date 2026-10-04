@@ -88,7 +88,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   **媒體路徑**（`media_assets.local_path`、`image_candidates.local_path`）另走 `fromStoredMediaPath`（P8-T004）：有 `..` 段就不解析；
   解析後（含上面的容錯，容錯只認 `/generated-images/` 段）必須在媒體資料夾裡；媒體資料夾以下每一段（含檔案本身）都不能是符號連結、
   實體路徑也要在裡面，解析不了一律不合格（fail closed）；媒體資料夾本身的實際位置也要通過 `isSafeStoreRoot`
-  （不是資料目錄或其上層、不包含 `.env`／`data/` 等其他存放位置、不跟它們重疊）。不合格就當成檔案不見了——
+  （不是資料目錄或其上層、不包含 `.env`／`data/` 等其他存放位置、不跟它們重疊）。實際位置一律取檔案系統上的真正拼法
+  （`realLocation`＝`realpathSync.native`），不分大小寫的檔案系統上拼法不同也比得出是同一處。不合格就當成檔案不見了——
   讀候選圖回「檔案不見了」、刪媒體不動任何檔（`CoreContext.mediaFile`／`requireMediaFile`）。
   Agent 工作目錄解析後一定在 `drafts/` 裡，**字面與實體路徑都是**：逃出去（含路徑上有符號連結指到外面）就改用 `drafts/<uuid>`；
   連 `drafts/<uuid>` 的實體路徑都在外面就不跑 Agent。`drafts/` 本身也要通過 `isSafeStoreRoot`；建資料夾前先確認已存在的祖先
