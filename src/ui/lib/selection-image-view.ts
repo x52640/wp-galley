@@ -1,4 +1,4 @@
-import type { ImageGenerationStatus } from '../service/types.js';
+import type { ImageGenerationStatus, SelectionSpotsResponse } from '../service/types.js';
 import {
   checkSelectionImage,
   excerptOf,
@@ -127,23 +127,48 @@ export function beginRefresh(state: { generation: number; current: string; origi
  * 子元件常把回呼放進 effect 依賴（AgentButton 的 `onError`）：每次 render 給新的包裝，effect 就每次重跑、
  * 把子元件的 null 寫回去，清掉工作區剛設好的錯誤。`isCurrent(origin)` 呼叫當下才判斷還在不在那一篇。
  */
-export function createJobBinder(isCurrent: (origin: string) => boolean): <A extends unknown[]>(
-  origin: string,
-  fn: (...args: A) => void,
-) => (...args: A) => void {
-  const cache = new Map<string, WeakMap<object, unknown>>();
-  return <A extends unknown[]>(origin: string, fn: (...args: A) => void) => {
-    let perJob = cache.get(origin);
-    if (perJob === undefined) {
-      perJob = new WeakMap();
-      cache.set(origin, perJob);
-    }
-    const existing = perJob.get(fn) as ((...args: A) => void) | undefined;
+export interface JobBinder {
+  <A extends unknown[]>(origin: string, fn: (...args: A) => void): (...args: A) => void;
+  /** 快取裡留的是哪一篇（只留目前這一篇；第五輪審查）。 */
+  cachedJob(): string | null;
+}
+
+export function createJobBinder(isCurrent: (origin: string) => boolean): JobBinder {
+  // 只留目前這一篇的包裝：Workspace 換篇不卸載，跨篇一直累積就是漏（第五輪審查）。換篇時整個換掉。
+  let cached: { origin: string; wrapped: WeakMap<object, unknown> } | null = null;
+  const bind = <A extends unknown[]>(origin: string, fn: (...args: A) => void): ((...args: A) => void) => {
+    if (cached === null || cached.origin !== origin) cached = { origin, wrapped: new WeakMap() };
+    const existing = cached.wrapped.get(fn) as ((...args: A) => void) | undefined;
     if (existing !== undefined) return existing;
     const bound = (...args: A): void => {
       if (isCurrent(origin)) fn(...args);
     };
-    perJob.set(fn, bound);
+    cached.wrapped.set(fn, bound);
     return bound;
   };
+  return Object.assign(bind, { cachedJob: () => cached?.origin ?? null });
+}
+
+/** 「用此段配圖」面板的位置選項狀態（問後端的那一段）。 */
+export interface SpotsPickState {
+  /** 這次開面板的請求編號：關掉又重開會換一個，舊請求回來對不上就丟掉（第五輪審查）。 */
+  readonly token: number;
+  readonly spots: SelectionSpotsResponse['spots'] | null;
+  readonly spotsHash: string | null;
+  readonly loadError: string | null;
+}
+
+/**
+ * 問位置選項的結果寫回面板：只收**同一個 token** 的（成功、失敗都是）；成功時清掉錯誤。
+ * 面板已經關掉（null）或是另一次打開的，原樣不動。
+ */
+export function settleSpots<T extends SpotsPickState>(
+  current: T | null,
+  token: number,
+  outcome: { readonly ok: true; readonly result: SelectionSpotsResponse } | { readonly ok: false; readonly error: string },
+): T | null {
+  if (current === null || current.token !== token) return current;
+  return outcome.ok
+    ? { ...current, spots: outcome.result.spots, spotsHash: outcome.result.contentHash, loadError: null }
+    : { ...current, spots: null, spotsHash: null, loadError: outcome.error };
 }

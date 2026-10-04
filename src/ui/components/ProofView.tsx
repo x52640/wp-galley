@@ -48,6 +48,7 @@ import {
   selectionImageHeading,
   selectionImageProblem,
   selectionPickStale,
+  settleSpots,
   stillOnJob,
 } from '../lib/selection-image-view.js';
 import type { SelectionSpotsResponse } from '../service/types.js';
@@ -319,6 +320,8 @@ export function ProofView({
    * 「用此段配圖」打開的面板（P5-T038）：選的那段、畫在哪、後端給的位置選項（`spots` 是 null＝還在問）。
    */
   const [imagePick, setImagePick] = useState<{
+    /** 這次打開的請求編號（`settleSpots`）。 */
+    token: number;
     text: string;
     top: number;
     left: number;
@@ -332,6 +335,8 @@ export function ProofView({
   /** 面板因為文章被別處改了而關掉時要講的話。 */
   const [pickNotice, setPickNotice] = useState<string | null>(null);
   const [imageSending, setImageSending] = useState(false);
+  /** 「用此段配圖」每次打開面板加一（`settleSpots` 的 token）。 */
+  const pickToken = useRef(0);
   const selectionCheckRef = useRef(selectionCheck);
   selectionCheckRef.current = selectionCheck;
   const selectionImageRef = useRef(selectionImage);
@@ -1011,18 +1016,18 @@ export function ProofView({
     const load = selectionImageRef.current?.loadSpots;
     if (load === undefined) return;
     const origin = job.uuid;
+    // 每次打開一個新的請求編號：關掉又重開同一段時，舊請求的結果（成功或失敗）對不上就丟掉（第五輪審查）。
+    const token = (pickToken.current += 1);
     setPickNotice(null);
-    const opened = { ...pick, spots: null, spotsHash: null, loadError: null, openedKey: revisionKey };
-    setImagePick(opened);
-    const same = (current: typeof imagePick): boolean =>
-      current !== null && current.text === opened.text && current.top === opened.top && current.spots === null && jobUuidRef.current === origin;
+    setImagePick({ ...pick, token, spots: null, spotsHash: null, loadError: null, openedKey: revisionKey });
     void load(pick.text).then(
       (result) => {
-        if (result === null) return;
-        setImagePick((current) => (same(current) ? { ...current!, spots: result.spots, spotsHash: result.contentHash } : current));
+        if (result === null || jobUuidRef.current !== origin) return;
+        setImagePick((current) => settleSpots(current, token, { ok: true, result }));
       },
       (cause: unknown) => {
-        setImagePick((current) => (same(current) ? { ...current!, loadError: describeError(cause) } : current));
+        if (jobUuidRef.current !== origin) return;
+        setImagePick((current) => settleSpots(current, token, { ok: false, error: describeError(cause) }));
       },
     );
   };

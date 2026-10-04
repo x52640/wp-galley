@@ -87,9 +87,9 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #26 第四輪 Codex：綁住發起那一篇的回呼改成同一篇內身分不變（`createJobBinder`，Workspace 用 `useRef` 持有），AgentButton 的 `onError` effect 不再每次 render 重跑、清掉錯誤；RestoreBar 的 `onError` 同一套；其他傳給子元件、出現在 effect 依賴裡的回呼（Sheet 的 `onClose`＝`closeSheet`）本來就穩定
-- 已通過驗證：`npm run verify` 綠（91 檔、2029 測試）
-- 下一步：主 session commit、Codex 第五輪；使用者手動驗證（真的 Codex 生圖、只存草稿）
+- 最後完成：PR #26 第五輪 Codex：「用此段配圖」每次開面板給請求編號，位置選項的結果只收同編號的、成功時清掉錯誤（`settleSpots`）；`createJobBinder` 快取只留目前這一篇（換篇整個換掉）
+- 已通過驗證：`npm run verify` 綠（91 檔、2031 測試）
+- 下一步：主 session commit、Codex 第六輪；使用者手動驗證（真的 Codex 生圖、只存草稿）
 - Blocker：無
 
 ## 完成結果

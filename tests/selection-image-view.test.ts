@@ -165,3 +165,41 @@ describe('綁住某一篇的回呼：同一篇內身分不變（第四輪審查�
     expect(calls).toEqual(['409', null]);
   });
 });
+
+describe('位置選項的請求編號（第五輪審查）', () => {
+  it('同一段關掉又重開：第一次的失敗晚回來不寫進重開的面板；第二次成功清掉錯誤、送出鈕可用', async () => {
+    const { settleSpots } = await import('../src/ui/lib/selection-image-view.js');
+    const result = { contentHash: 'h1', spots: [{ spot: 0, kind: 'start' as const, label: '這段開頭' }], basis: '依選取段落' };
+    // 第一次打開（token 1），沒回來就關掉、重開同一段（token 2）。
+    const reopened = { token: 2, text: '同一段', spots: null, spotsHash: null, loadError: null };
+    // 第一次的失敗晚回來：對不上 token，原樣不動。
+    const afterOldFailure = settleSpots(reopened, 1, { ok: false, error: '文章剛被改過' });
+    expect(afterOldFailure).toBe(reopened);
+    // 第二次成功：選項寫進來、沒有錯誤。
+    expect(settleSpots(afterOldFailure, 2, { ok: true, result })).toMatchObject({ spots: result.spots, spotsHash: 'h1', loadError: null });
+    // 就算錯誤已經在（例如舊版本沒有 token 時寫進去的），同 token 的成功也會清掉。
+    expect(settleSpots({ ...reopened, loadError: '舊錯誤' }, 2, { ok: true, result })!.loadError).toBeNull();
+    // 面板已經關掉：不動。
+    expect(settleSpots(null, 2, { ok: true, result })).toBeNull();
+  });
+});
+
+describe('綁稿件的回呼快取只留目前這一篇（第五輪審查）', () => {
+  it('換篇後舊篇的包裝不再留著；同一篇內身分照樣穩定', async () => {
+    const { createJobBinder } = await import('../src/ui/lib/selection-image-view.js');
+    let current = 'a';
+    const bind = createJobBinder((origin) => origin === current);
+    const fn = (_: string | null): void => undefined;
+    const a1 = bind('a', fn);
+    expect(bind('a', fn)).toBe(a1);
+    expect(bind.cachedJob()).toBe('a');
+    current = 'b';
+    const b1 = bind('b', fn);
+    expect(bind.cachedJob()).toBe('b');
+    expect(bind('b', fn)).toBe(b1);
+    // 舊篇的項目已經清掉：再綁 a 是新的包裝（不是原本留著的那個）。
+    current = 'a';
+    expect(bind('a', fn)).not.toBe(a1);
+    expect(bind.cachedJob()).toBe('a');
+  });
+});
