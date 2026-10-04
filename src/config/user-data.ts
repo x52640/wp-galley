@@ -1,7 +1,6 @@
 import {
   chmodSync,
   closeSync,
-  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -31,17 +30,18 @@ import {
  * 第一次啟動把使用者資料從程式資料夾**複製**到資料目錄（D-035，P8-T003）。
  * `npm start`、`npm run dev`、`npm run migrate` 都走 `prepareUserData`，同一段。
  *
- * - **有沒有搬過看標記檔**（`<資料目錄>/.galley-data.json`，記 `createdAt` 與 `migratedFrom`＝舊根目錄或 null＝全新），
- *   不看 DB 在不在。標記檔是搬家（或全新建立）的**最後一步**才寫，任何一步失敗都不會有它，下次啟動整個重來
- *   （舊位置為準，覆蓋上次的半成品）。
+ * - **有沒有搬過看標記檔**（`<資料目錄>/.galley-data.json`，記 `createdAt`、`state`、`migratedFrom`＝舊根目錄或 null＝全新），
+ *   不看 DB 在不在。開始複製前先寫 `state: 'migrating'`，全部做完的最後一步才改成 `done`；
+ *   停在 `migrating`（中途失敗、或寫 done 前當掉）的下次啟動整份重搬（舊位置為準，覆蓋新位置的半成品）。
  * - 已經搬過、但目前這份程式的舊位置還有一份**不是從這裡搬過去的** DB（例如別的 checkout 先建了資料目錄）：
  *   不搬、不擋啟動，回 `warning` 讓啟動訊息大聲講兩邊路徑。
- * - 沒有標記檔、但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記（migratedFrom null），同樣警告。
- * - 只複製、不刪舊的（舊的就是備份）；`.env` 複製後維持 0600。
+ * - **沒有**標記檔、但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記（migratedFrom null），同樣警告。
+ * - 讀不到的舊資料（權限、I/O 錯誤）不當成沒有：停止搬家並說明。只有「不存在」才算沒有。
+ * - 順序：**先快照 DB、再複製資料夾**、最後 `.env` 與站台設定檔。搬家途中舊行程若還在寫，資料夾只會是 DB 引用的超集。
+ * - 只複製、不刪舊的（舊的就是備份）；`.env` 先用 0600 建暫存檔寫入再改名，沒有可讀的空窗。
  * - SQLite 用 `VACUUM INTO` 拿一致的快照（不會是寫入中途的半份），唯讀打開快照做 `integrity_check`、確認有
  *   `schema_migrations`，通過才改名成 `publisher.sqlite`。暫存檔名帶 pid＋亂數，不碰別的行程的暫存檔。
- * - 整段在鎖檔（`<資料目錄>/.migrating.lock`，記 pid）裡做：兩個行程同時啟動只有一個搬，另一個停下來說明；
- *   鎖檔的 pid 已經不在（上次當掉）就接手。
+ * - 整段在鎖檔（`<資料目錄>/.migrating.lock`，記 pid）裡做，規則見 `acquireMoveLock`。
  *
  * 純函式、路徑全部可注入：測試用暫存目錄，不碰真的資料目錄。
  */
@@ -71,20 +71,31 @@ const PLACEHOLDERS = new Set(['.gitkeep', '.gitignore']);
 /** `data/` 裡由 DB 那一步處理的檔。 */
 const DB_SUFFIXES = ['', '-wal', '-shm', '-journal'];
 
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+/** 是不是一般檔案。不存在算 false；其他錯誤（權限、I/O）不吞，停止搬家並說明。 */
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
-  } catch {
-    return false;
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return false;
+    throw new DataMoveError(`讀不到 ${path}：${reason(error)}`);
   }
 }
 
+/**
+ * 資料夾裡要搬的東西。不存在算空的；**其他錯誤（權限、I/O）不吞**——讀不到不等於沒東西，
+ * 當成空的略過、寫上完成標記之後就永遠不會再搬了。
+ */
 function contentOf(dir: string, skip: ReadonlySet<string> = PLACEHOLDERS): string[] {
   try {
     if (!statSync(dir).isDirectory()) return [];
     return readdirSync(dir).filter((name) => !skip.has(name));
-  } catch {
-    return [];
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return [];
+    throw new DataMoveError(`讀不到 ${dir}，沒辦法確認裡面有沒有要搬的東西：${reason(error)}`);
   }
 }
 
@@ -93,27 +104,32 @@ function reason(error: unknown): string {
 }
 
 interface Marker {
+  /** `migrating`：開始搬了但還沒搬完（下次啟動整份重搬）；`done`：搬完或全新建立。 */
+  readonly state: 'migrating' | 'done';
   readonly migratedFrom: string | null;
 }
 
-/** 讀標記檔。沒有是 null；壞掉的當成「搬過、來源不明」。 */
+/** 讀標記檔。沒有是 null；壞掉的當成「搬過、來源不明」；沒有 state 的（舊格式）當成 done。 */
 function readMarker(dataDir: string): Marker | null {
   const file = join(dataDir, MARKER_FILE);
   if (!existsSync(file)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { migratedFrom?: unknown };
-    return { migratedFrom: typeof parsed.migratedFrom === 'string' ? parsed.migratedFrom : null };
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { state?: unknown; migratedFrom?: unknown };
+    return {
+      state: parsed.state === 'migrating' ? 'migrating' : 'done',
+      migratedFrom: typeof parsed.migratedFrom === 'string' ? parsed.migratedFrom : null,
+    };
   } catch {
-    return { migratedFrom: null };
+    return { state: 'done', migratedFrom: null };
   }
 }
 
-/** 寫標記檔（暫存檔＋改名）。搬家的最後一步。 */
-function writeMarker(dataDir: string, migratedFrom: string | null): void {
+/** 寫標記檔（暫存檔＋改名）。開始複製前寫 migrating，最後一步改成 done。 */
+function writeMarker(dataDir: string, marker: Marker): void {
   const file = join(dataDir, MARKER_FILE);
   const temp = `${file}.${process.pid}-${randomBytes(4).toString('hex')}`;
   try {
-    writeFileSync(temp, `${JSON.stringify({ createdAt: new Date().toISOString(), migratedFrom }, null, 2)}\n`);
+    writeFileSync(temp, `${JSON.stringify({ createdAt: new Date().toISOString(), ...marker }, null, 2)}\n`);
     renameSync(temp, file);
   } catch (error) {
     rmSync(temp, { force: true });
@@ -139,56 +155,107 @@ function isAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
+    return errorCode(error) === 'EPERM';
   }
 }
 
-/** 拿搬家的鎖；回傳放掉鎖的函式。拿不到（別的行程正在搬）就丟 DataMoveError。 */
-function acquireLock(dataDir: string): () => void {
+function readQuietly(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 拿搬家的鎖（`<資料目錄>/.migrating.lock`，內容是 pid）；回傳放掉鎖的函式。
+ *
+ * - 別的行程正在搬（鎖檔的 pid 還活著；或還沒寫進 pid、建立不到 60 秒）：丟 DataMoveError。
+ * - 過期的鎖（pid 已經不在）：先 `rename` 成只有自己知道的檔名，再讀它確認**還是當初判定過期的那一把**——
+ *   兩個行程同時接手時，慢的那個改名到的會是快的那個剛建的活鎖，這時把它放回去、停止並說明。確認後才 `wx` 建自己的。
+ * - 放鎖時只刪內容是自己 pid 的鎖。
+ */
+export function acquireMoveLock(dataDir: string): () => void {
   const file = join(dataDir, LOCK_FILE);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const mine = String(process.pid);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const fd = openSync(file, 'wx');
+      const fd = openSync(file, 'wx', 0o600);
       try {
-        writeSync(fd, String(process.pid));
+        writeSync(fd, mine);
       } finally {
         closeSync(fd);
       }
-      return () => rmSync(file, { force: true });
+      return () => {
+        if (readQuietly(file) === mine) rmSync(file, { force: true });
+      };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      if (errorCode(error) !== 'EEXIST') {
         throw new DataMoveError(`建立搬家的鎖檔 ${file} 失敗：${reason(error)}`);
       }
     }
-    let pid = Number.NaN;
+
+    const seen = readQuietly(file);
+    if (seen === null) continue; // 剛好被對方放掉了，再試一次
     let young = false;
     try {
-      pid = Number(readFileSync(file, 'utf8').trim());
       young = Date.now() - statSync(file).mtimeMs < LOCK_GRACE_MS;
     } catch {
-      continue; // 剛好被對方放掉了，再試一次
+      continue;
     }
-    const busy = Number.isInteger(pid) && pid > 0 ? isAlive(pid) : young;
-    if (busy) {
+    const pid = Number(seen.trim());
+    const validPid = Number.isInteger(pid) && pid > 0;
+    if (validPid ? isAlive(pid) : young) {
       throw new DataMoveError(
-        `另一個發布台${Number.isInteger(pid) && pid > 0 ? `（pid ${pid}）` : ''}正在搬資料到 ${dataDir}。` +
+        `另一個發布台${validPid ? `（pid ${pid}）` : ''}正在搬資料到 ${dataDir}。` +
           `等它跑完再啟動；確定沒有別的發布台在跑的話，刪掉 ${file} 再試。`,
       );
     }
-    rmSync(file, { force: true }); // 上次當掉留下的鎖：接手
+
+    // 上次當掉留下的鎖：改名成自己的檔再確認，不直接刪（可能已經被別人換成活的鎖）。
+    const stale = `${file}.stale-${process.pid}-${randomBytes(4).toString('hex')}`;
+    try {
+      renameSync(file, stale);
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') continue; // 別人先接手了
+      throw new DataMoveError(`接手過期的鎖檔 ${file} 失敗：${reason(error)}`);
+    }
+    const taken = readQuietly(stale);
+    if (taken !== seen) {
+      // 改名到的不是那把過期的（別的行程剛接手、建了活的鎖）：放回去，停下來。
+      try {
+        if (!existsSync(file)) renameSync(stale, file);
+        else rmSync(stale, { force: true });
+      } catch {
+        // 放不回去也照樣停下來，訊息會講
+      }
+      throw new DataMoveError(
+        `另一個發布台剛好也在接手搬資料到 ${dataDir} 的鎖。等它跑完再啟動；確定沒有別的發布台在跑的話，刪掉 ${file} 再試。`,
+      );
+    }
+    rmSync(stale, { force: true });
   }
-  throw new DataMoveError(`拿不到搬家的鎖 ${file}，請再啟動一次`);
+  throw new DataMoveError(`拿不到搬家的鎖 ${join(dataDir, LOCK_FILE)}，請再啟動一次`);
 }
 
-export function moveLegacyData(options: { legacyRoot: string; dataDir: string }): MoveOutcome {
+/** 搬家的各步驟（測試用來確認順序）。 */
+export type MoveStep = 'database' | 'folders' | 'files';
+
+export interface MoveOptions {
+  readonly legacyRoot: string;
+  readonly dataDir: string;
+  /** 每一步做完時呼叫（測試用）。 */
+  readonly onStep?: (step: MoveStep) => void;
+}
+
+export function moveLegacyData(options: MoveOptions): MoveOutcome {
   const legacyRoot = resolve(options.legacyRoot);
   const dataDir = resolve(options.dataDir);
   if (legacyRoot === dataDir) return { kind: 'same-dir' };
 
-  const target = dataPaths(dataDir);
   const legacy = legacyDataPaths(legacyRoot);
   const marker = readMarker(dataDir);
-  if (marker !== null) {
+  if (marker?.state === 'done') {
     return { kind: 'already', warning: leftoverWarning(legacyRoot, legacy.databaseFile, dataDir, marker) };
   }
 
@@ -197,32 +264,27 @@ export function moveLegacyData(options: { legacyRoot: string; dataDir: string })
   } catch (error) {
     throw new DataMoveError(`建立資料目錄 ${dataDir} 失敗：${reason(error)}`);
   }
-  const release = acquireLock(dataDir);
+  const release = acquireMoveLock(dataDir);
   try {
-    return moveLocked(legacyRoot, dataDir, target, legacy);
+    return moveLocked(legacyRoot, dataDir, options.onStep ?? (() => undefined));
   } finally {
     release();
   }
 }
 
-function moveLocked(
-  legacyRoot: string,
-  dataDir: string,
-  target: DataPaths,
-  legacy: ReturnType<typeof legacyDataPaths>,
-): MoveOutcome {
+function moveLocked(legacyRoot: string, dataDir: string, onStep: (step: MoveStep) => void): MoveOutcome {
+  const target = dataPaths(dataDir);
+  const legacy = legacyDataPaths(legacyRoot);
   // 拿鎖之前別的行程可能剛搬完。
   const marker = readMarker(dataDir);
-  if (marker !== null) {
+  if (marker?.state === 'done') {
     return { kind: 'already', warning: leftoverWarning(legacyRoot, legacy.databaseFile, dataDir, marker) };
   }
-  // 沒有標記、卻已經有 DB（手動放的）：絕不覆蓋。
-  if (existsSync(target.databaseFile)) {
-    writeMarker(dataDir, null);
-    return {
-      kind: 'already',
-      warning: leftoverWarning(legacyRoot, legacy.databaseFile, dataDir, { migratedFrom: null }),
-    };
+  // 沒有標記、卻已經有 DB：手動放的，絕不覆蓋。（標記是 migrating 的是上次沒搬完的半成品，照下面整份重搬。）
+  if (marker === null && existsSync(target.databaseFile)) {
+    const adopted: Marker = { state: 'done', migratedFrom: null };
+    writeMarker(dataDir, adopted);
+    return { kind: 'already', warning: leftoverWarning(legacyRoot, legacy.databaseFile, dataDir, adopted) };
   }
 
   const dbName = basename(legacy.databaseFile);
@@ -241,18 +303,16 @@ function moveLocked(
   const hasDatabase = isFile(legacy.databaseFile);
 
   if (files.length === 0 && dirs.length === 0 && !hasDatabase) {
-    writeMarker(dataDir, null);
+    writeMarker(dataDir, { state: 'done', migratedFrom: null });
     return { kind: 'fresh' };
   }
 
-  for (const item of files) {
-    try {
-      copyFileSync(item.from, item.to);
-      if (item.secret) chmodSync(item.to, 0o600);
-    } catch (error) {
-      throw new DataMoveError(`複製 ${item.from} 到 ${item.to} 失敗：${reason(error)}`);
-    }
-  }
+  // 開始複製前先標 migrating：之後任何一步失敗（含最後寫 done 失敗），下次啟動都整份重搬。
+  writeMarker(dataDir, { state: 'migrating', migratedFrom: legacyRoot });
+
+  // 先快照 DB、再複製資料夾：搬家途中舊行程若還在寫，資料夾只會是 DB 引用到的東西的超集。
+  if (hasDatabase) snapshotDatabase(legacy.databaseFile, target.databaseFile);
+  onStep('database');
 
   for (const item of dirs) {
     try {
@@ -267,9 +327,18 @@ function moveLocked(
       throw new DataMoveError(`複製 ${item.from} 到 ${item.to} 失敗：${reason(error)}`);
     }
   }
+  onStep('folders');
 
-  if (hasDatabase) snapshotDatabase(legacy.databaseFile, target.databaseFile);
-  writeMarker(dataDir, legacyRoot);
+  for (const item of files) {
+    try {
+      copyPrivately(item.from, item.to, item.secret ? 0o600 : 0o644);
+    } catch (error) {
+      throw new DataMoveError(`複製 ${item.from} 到 ${item.to} 失敗：${reason(error)}`);
+    }
+  }
+  onStep('files');
+
+  writeMarker(dataDir, { state: 'done', migratedFrom: legacyRoot });
 
   const copied = [...files.map((item) => item.from), ...dirs.map((item) => item.from)];
   if (hasDatabase && !dirs.some((item) => item.from === legacy.data)) copied.push(legacy.data);
@@ -278,6 +347,22 @@ function moveLocked(
     copied,
     envFile: files.some((item) => item.secret) ? legacy.envFile : null,
   };
+}
+
+/**
+ * 複製一個檔：先用指定權限建暫存檔（`wx`，一建立就是這個權限，沒有可讀的空窗）寫入內容，再改名成目標。
+ * `.env` 用 0600：當掉也不會留下 0644 的密碼檔。
+ */
+function copyPrivately(from: string, to: string, mode: number): void {
+  const temp = `${to}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, readFileSync(from), { mode, flag: 'wx' });
+    chmodSync(temp, mode); // umask 只會更嚴；明確設一次
+    renameSync(temp, to);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 /**
@@ -309,6 +394,8 @@ function snapshotDatabase(from: string, to: string): void {
     } finally {
       copy.close();
     }
+    // 上次沒搬完的半成品若被開過，旁邊可能留著它的 -wal／-shm：不能讓它們套到新快照上。
+    for (const suffix of DB_SUFFIXES.slice(1)) rmSync(`${to}${suffix}`, { force: true });
     renameSync(temp, to);
   } catch (error) {
     try {

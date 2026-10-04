@@ -116,6 +116,31 @@ describe('讀到舊的絕對路徑照舊能用', () => {
   });
 });
 
+describe('別的根目錄留下的絕對路徑（重 clone 後把舊資料複製過來，010 沒轉到）', () => {
+  it('圖讀得到資料目錄裡的同一個相對位置；Agent 工作目錄是資料目錄的 drafts/<uuid>', async () => {
+    const { f, codex, dataDir } = await setup();
+    const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
+    await f.core.runAgentReview(uuid, { provider: 'codex', task: 'images' });
+    const briefId = f.core.getJob(uuid).imageBriefs[0]!.id;
+    const candidate = await f.core.generateBriefImage(uuid, briefId);
+
+    const moved = join(dataDir, 'generated-images', uuid, 'candidates', 'c.png');
+    mkdirSync(dirname(moved), { recursive: true });
+    writeFileSync(moved, TINY_PNG);
+    const oldRoot = '/Users/someone/old clone';
+    f.db.handle
+      .prepare('UPDATE image_candidates SET local_path = ? WHERE id = ?')
+      .run(`${oldRoot}/generated-images/${uuid}/candidates/c.png`, candidate.id);
+    f.db.handle.prepare('UPDATE jobs SET workspace_path = ? WHERE uuid = ?').run(`${oldRoot}/drafts/${uuid}`, uuid);
+
+    expect(f.core.imageCandidateFile(uuid, candidate.id).path).toBe(moved);
+    await f.core.useImageCandidate(uuid, candidate.id); // 上傳時讀得到檔
+
+    await f.core.runAgentReview(uuid, { provider: 'codex' });
+    expect(codex.calls.at(-1)!.request.workspaceDir).toBe(join(dataDir, 'drafts', uuid));
+  });
+});
+
 describe('Agent 工作目錄仍限制在 drafts/ 裡', () => {
   it('相對路徑解析到資料目錄的 drafts/<uuid>（路徑含空白）', async () => {
     const { f, codex, dataDir } = await setup();

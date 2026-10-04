@@ -12,6 +12,7 @@ import {
   toStoredPath,
 } from '../src/config/paths.js';
 import {
+  acquireMoveLock,
   DataMoveError,
   LOCK_FILE,
   MARKER_FILE,
@@ -42,6 +43,13 @@ function tempDir(label: string): string {
 }
 
 const mode = (path: string): number => statSync(path).mode & 0o777;
+
+/** 標記檔不存在、或還是 migrating（沒搬完）：下次啟動一定會重搬。 */
+function expectNotDone(dataDir: string): void {
+  const file = join(dataDir, MARKER_FILE);
+  if (!existsSync(file)) return;
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ state: 'migrating' });
+}
 
 /** 做一份「P8-T003 之前」的程式資料夾：.env、站台設定檔、DB（絕對路徑）、稿件、圖片、備份。 */
 function seedLegacyRoot(root: string): void {
@@ -147,6 +155,24 @@ describe('DB 存的路徑：寫相對、讀時以資料目錄解析', () => {
     expect(toStoredPath('/a b/Galley', '/a b/Galley/drafts/x')).toBe('drafts/x');
     expect(toStoredPath('/a b/Galley', '/elsewhere/x.png')).toBe('/elsewhere/x.png');
     expect(toStoredPath('/a b/Galley', '/a b/Galley-other/x')).toBe('/a b/Galley-other/x');
+  });
+
+  it('別的根目錄留下的絕對路徑：取最後一個 drafts／generated-images 段，資料目錄裡有那個檔才換過去', () => {
+    const dataDir = tempDir('data');
+    mkdirSync(join(dataDir, 'generated-images', 'j', 'candidates'), { recursive: true });
+    writeFileSync(join(dataDir, 'generated-images', 'j', 'candidates', 'c.png'), 'x');
+    mkdirSync(join(dataDir, 'drafts', 'u'), { recursive: true });
+    expect(fromStoredPath(dataDir, '/old clone/generated-images/j/candidates/c.png')).toBe(
+      join(dataDir, 'generated-images', 'j', 'candidates', 'c.png'),
+    );
+    // 路徑裡出現兩次時取最後一個。
+    expect(fromStoredPath(dataDir, '/home/drafts/old clone/generated-images/j/candidates/c.png')).toBe(
+      join(dataDir, 'generated-images', 'j', 'candidates', 'c.png'),
+    );
+    expect(fromStoredPath(dataDir, '/old clone/drafts/u')).toBe(join(dataDir, 'drafts', 'u'));
+    // 資料目錄裡沒有：照原路徑。
+    expect(fromStoredPath(dataDir, '/old clone/generated-images/j/none.png')).toBe('/old clone/generated-images/j/none.png');
+    expect(fromStoredPath(dataDir, '/elsewhere/x.png')).toBe('/elsewhere/x.png');
   });
 
   it('相對的以資料目錄解析；舊的絕對路徑照舊能用', () => {
@@ -262,7 +288,7 @@ describe('第一次啟動自動搬家', () => {
     expect((error as Error).message).toContain(join(legacy, 'data', 'publisher.sqlite'));
     expect(existsSync(join(dataDir, 'data', 'publisher.sqlite'))).toBe(false);
     expect(readdirSync(join(dataDir, 'data')).filter((name) => name.includes('moving'))).toEqual([]);
-    expect(existsSync(join(dataDir, MARKER_FILE))).toBe(false);
+    expectNotDone(dataDir);
     expect(existsSync(join(dataDir, LOCK_FILE))).toBe(false);
 
     // 修好再跑一次：照常搬完。
@@ -276,7 +302,7 @@ describe('第一次啟動自動搬家', () => {
     }
   });
 
-  it('複製檔案那一步失敗也一樣：訊息講是哪個、沒有 DB 標記', () => {
+  it('複製檔案那一步失敗也一樣：訊息講是哪個、標記停在 migrating（DB 快照已經在也不算搬完）', () => {
     const legacy = tempDir('legacy');
     const dataDir = join(tempDir('home'), 'Galley');
     seedLegacyRoot(legacy);
@@ -284,8 +310,7 @@ describe('第一次啟動自動搬家', () => {
     try {
       expect(() => moveLegacyData({ legacyRoot: legacy, dataDir })).toThrow(DataMoveError);
       expect(() => moveLegacyData({ legacyRoot: legacy, dataDir })).toThrow(/backups/);
-      expect(existsSync(join(dataDir, 'data', 'publisher.sqlite'))).toBe(false);
-      expect(existsSync(join(dataDir, MARKER_FILE))).toBe(false);
+      expect(JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8'))).toMatchObject({ state: 'migrating' });
     } finally {
       chmodSync(join(legacy, 'backups', 'publish-targets-old.json'), 0o644);
     }
@@ -299,6 +324,7 @@ describe('第一次啟動自動搬家', () => {
     moveLegacyData({ legacyRoot: legacy, dataDir });
     const marker = JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8')) as Record<string, unknown>;
     expect(marker['migratedFrom']).toBe(legacy);
+    expect(marker['state']).toBe('done');
     expect(typeof marker['createdAt']).toBe('string');
 
     const empty = tempDir('empty');
@@ -400,7 +426,93 @@ describe('第一次啟動自動搬家', () => {
     const dataDir = join(tempDir('home'), 'Galley');
     expect(() => moveLegacyData({ legacyRoot: legacy, dataDir })).toThrow(/schema_migrations/);
     expect(existsSync(join(dataDir, 'data', 'publisher.sqlite'))).toBe(false);
-    expect(existsSync(join(dataDir, MARKER_FILE))).toBe(false);
+    expectNotDone(dataDir);
+  });
+
+  it('讀不到的舊資料夾（權限錯誤）不當成空的：停止搬家並說明，不寫完成標記', () => {
+    const legacy = tempDir('legacy');
+    const dataDir = join(tempDir('home'), 'Galley');
+    seedLegacyRoot(legacy);
+    chmodSync(join(legacy, 'generated-images'), 0o000);
+    try {
+      expect(() => moveLegacyData({ legacyRoot: legacy, dataDir })).toThrow(DataMoveError);
+      expect(() => moveLegacyData({ legacyRoot: legacy, dataDir })).toThrow(/generated-images/);
+      expectNotDone(dataDir);
+    } finally {
+      chmodSync(join(legacy, 'generated-images'), 0o755);
+    }
+    expect(moveLegacyData({ legacyRoot: legacy, dataDir }).kind).toBe('moved');
+    expect(readFileSync(join(dataDir, 'generated-images', 'job-a', 'sha.png'), 'utf8')).toBe('png');
+  });
+
+  it('標記停在 migrating（上次寫完成標記前當掉）：整份重搬，不採用新位置的半成品', () => {
+    const legacy = tempDir('legacy');
+    const dataDir = join(tempDir('home'), 'Galley');
+    seedLegacyRoot(legacy);
+    moveLegacyData({ legacyRoot: legacy, dataDir });
+    // 模擬：快照改名成 publisher.sqlite 之後、寫完成標記之前當掉，而且那份是壞的半成品。
+    writeFileSync(join(dataDir, MARKER_FILE), JSON.stringify({ state: 'migrating', migratedFrom: legacy }));
+    writeFileSync(join(dataDir, 'data', 'publisher.sqlite'), 'half');
+    rmSync(join(dataDir, 'drafts'), { recursive: true });
+
+    expect(moveLegacyData({ legacyRoot: legacy, dataDir }).kind).toBe('moved');
+    expect(JSON.parse(readFileSync(join(dataDir, MARKER_FILE), 'utf8'))).toMatchObject({ state: 'done', migratedFrom: legacy });
+    expect(existsSync(join(dataDir, 'drafts', 'job-a', 'note.txt'))).toBe(true);
+    const db = openDatabase(join(dataDir, 'data', 'publisher.sqlite'));
+    try {
+      expect(db.prepare('SELECT count(*) AS n FROM jobs').get()).toEqual({ n: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('.env 從一開始就是 0600（舊的是 0644 也一樣）', () => {
+    const legacy = tempDir('legacy');
+    writeFileSync(join(legacy, '.env'), 'A=1\n', { mode: 0o644 });
+    chmodSync(join(legacy, '.env'), 0o644);
+    const dataDir = join(tempDir('home'), 'Galley');
+    moveLegacyData({ legacyRoot: legacy, dataDir });
+    expect(mode(join(dataDir, '.env'))).toBe(0o600);
+    expect(readFileSync(join(dataDir, '.env'), 'utf8')).toBe('A=1\n');
+    expect(readdirSync(dataDir).filter((name) => name.startsWith('.env.'))).toEqual([]);
+  });
+
+  it('先快照 DB、再複製資料夾：搬家途中舊位置新增的圖也會被搬到', () => {
+    const legacy = tempDir('legacy');
+    const dataDir = join(tempDir('home'), 'Galley');
+    seedLegacyRoot(legacy);
+    // 以快照完成的時間點為界：DB 一定先於資料夾複製（資料夾是 DB 引用的超集）。
+    const order: string[] = [];
+    const outcome = moveLegacyData({
+      legacyRoot: legacy,
+      dataDir,
+      onStep: (step) => {
+        order.push(step);
+        if (step === 'database') writeFileSync(join(legacy, 'generated-images', 'job-a', 'late.png'), 'late');
+      },
+    });
+    expect(outcome.kind).toBe('moved');
+    expect(order.indexOf('database')).toBeLessThan(order.indexOf('folders'));
+    expect(readFileSync(join(dataDir, 'generated-images', 'job-a', 'late.png'), 'utf8')).toBe('late');
+  });
+
+  it('鎖只放自己的：鎖檔內容換成別人的 pid 時，放鎖不刪', () => {
+    const dataDir = tempDir('lock');
+    const release = acquireMoveLock(dataDir);
+    expect(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).toBe(String(process.pid));
+    writeFileSync(join(dataDir, LOCK_FILE), '12345');
+    release();
+    expect(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).toBe('12345');
+  });
+
+  it('接手過期的鎖：先改名成自己的檔確認還是那把過期的，再建新鎖；不留下改名的殘檔', () => {
+    const dataDir = tempDir('lock');
+    writeFileSync(join(dataDir, LOCK_FILE), '2147483646');
+    const release = acquireMoveLock(dataDir);
+    expect(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).toBe(String(process.pid));
+    expect(readdirSync(dataDir)).toEqual([LOCK_FILE]);
+    release();
+    expect(existsSync(join(dataDir, LOCK_FILE))).toBe(false);
   });
 
   it('prepareUserData：GALLEY_DATA_DIR 覆寫、搬家、建好子目錄（npm start／dev／migrate 共用這一段）', () => {

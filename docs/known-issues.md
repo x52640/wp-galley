@@ -54,9 +54,11 @@
   精靈回應的備份路徑改成完整路徑後，`SetupFiles.rootDir`／`writeSiteConfig` 的 `rootDir` 已經用不到，但 `src/server/routes/setup.ts` 還在傳（不在 write_paths），留著沒拿掉；
   搬家時如果新資料目錄還沒有 DB、卻已經有使用者手放的 `.env`（手動設定完才第一次啟動、而且程式資料夾還有舊資料），會被舊位置的覆蓋（舊位置為準）；
   換了 clone 的位置（重 clone 到別的資料夾）再啟動，新程式資料夾沒有舊資料、就當全新安裝，舊 clone 裡的資料不會自動找到。
-  **不要**把 `GALLEY_DATA_DIR` 指到舊 clone（舊佈局的站台設定檔在 `config/publish-targets.json`，資料目錄要的是 `publish-targets.json`，會讓精靈重跑）；
-  要接回舊資料：關掉發布台、把資料目錄整個移走，再把舊 clone 的 `data/`、`drafts/`、`generated-images/`、`backups/`、`.env`、`config/publish-targets.json`
-  複製進**新** clone 的同一位置後啟動一次，就會照正常流程搬進資料目錄（DB 路徑也會轉成相對）；
+  **不要**把 `GALLEY_DATA_DIR` 指到舊 clone（舊佈局的站台設定檔在 `config/publish-targets.json`，資料目錄要的是 `publish-targets.json`，會讓精靈重跑）。
+  要接回舊資料：關掉發布台、把資料目錄整個移走（或改名），把舊 clone 的 `data/`、`drafts/`、`generated-images/`、`backups/`、`.env`、`config/publish-targets.json`
+  複製進**新** clone 的同一位置，啟動一次就照正常流程搬進資料目錄。注意這時 migration 010 拿到的是新 clone 的根目錄，DB 裡舊 clone 的絕對路徑
+  **一筆都不會轉**（010 照樣記成已套用）；讀取時的容錯（取最後一個 `/drafts/`／`/generated-images/` 段、資料目錄裡有那個檔才用）讓圖與工作目錄照樣找得到，
+  所以舊 clone 之後可以刪。DB 裡那些路徑會一直是舊 clone 的絕對路徑（不影響使用；要轉成相對得另寫一次性的修正）；
   git worktree（`.git` 是檔案）沒設 `GALLEY_DATA_DIR` 時預設用 `<worktree>/.galley-data`（已進 `.gitignore`），跟主 checkout 的資料完全分開，worktree 裡看不到真的稿件；
   搬家的鎖檔 `.migrating.lock` 記 pid，pid 還活著就停止啟動；pid 還沒寫進去（對方剛建立）的鎖 60 秒內視為忙碌；pid 被別的程式重用時會誤判為忙碌，訊息有教怎麼刪鎖；
   Agent 工作目錄只限制在 `drafts/` 底下，沒限制一定是 `drafts/<自己的 uuid>`（DB 被手改成別篇的資料夾仍會用）；

@@ -154,7 +154,23 @@ export function toStoredPath(dataDir: string, absolute: string): string {
   return isInsideDir(base, target) ? relative(base, target) : target;
 }
 
-/** DB 讀出的路徑：相對的以資料目錄解析；舊資料的絕對路徑照舊用。 */
+/** 資料目錄裡、DB 會存路徑的那兩個資料夾。 */
+const STORED_DIRS = ['drafts', 'generated-images'];
+
+/**
+ * DB 讀出的路徑：相對的以資料目錄解析；舊資料的絕對路徑照舊用。
+ *
+ * 容錯：絕對路徑不在資料目錄底下時（例如重 clone 到別的資料夾、把舊 clone 的資料複製過來，migration 010
+ * 拿到的是新根目錄、這些舊根目錄的路徑一筆都沒轉），取路徑裡**最後一個** `/drafts/` 或 `/generated-images/`
+ * 段，對應到資料目錄的同一個相對位置；**那裡真的有檔才用**，沒有就照原路徑。
+ */
 export function fromStoredPath(dataDir: string, stored: string): string {
-  return isAbsolute(stored) ? stored : resolve(dataDir, stored);
+  if (!isAbsolute(stored)) return resolve(dataDir, stored);
+  const base = resolve(dataDir);
+  if (isInsideDir(base, resolve(stored))) return stored;
+  let cut = -1;
+  for (const dir of STORED_DIRS) cut = Math.max(cut, stored.lastIndexOf(`/${dir}/`));
+  if (cut < 0) return stored;
+  const candidate = resolve(base, stored.slice(cut + 1));
+  return isInsideDir(base, candidate) && existsSync(candidate) ? candidate : stored;
 }

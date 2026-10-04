@@ -81,16 +81,21 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   並行開發的 worktree 不共用全機那一個（不讀到真的 `.env`／DB，也不會搶先建出資料目錄）。主 checkout（`.git` 是資料夾）照舊。
   啟動時終端機印一行「資料目錄：…」。
 - **DB 存相對路徑**：`jobs.workspace_path`、`media_assets.local_path`、`image_candidates.local_path` 存相對資料目錄
-  （`drafts/<uuid>`），讀時以資料目錄解析；讀到絕對路徑（舊資料、使用者自己設過別處）照舊能用。migration 010
+  （`drafts/<uuid>`），讀時以資料目錄解析；讀到絕對路徑（舊資料、使用者自己設過別處）照舊能用。
+  絕對路徑不在資料目錄底下時另有容錯：取路徑裡最後一個 `/drafts/` 或 `/generated-images/` 段，資料目錄的同一個相對位置
+  **真的有檔**才改用它（重 clone 後把舊資料複製過來、010 沒轉到的情況；`fromStoredPath`）。migration 010
   把「舊程式資料夾＋`/`」開頭的舊值改成相對（舊根目錄由 `runMigrations` 的 `legacyRoot` 傳入）。
   Agent 工作目錄解析後一定在 `drafts/` 裡，逃出去就改用 `drafts/<uuid>`（`CoreContext.jobWorkspace`）。
 - **第一次啟動自動搬家**：有沒有搬過看資料目錄的**標記檔** `.galley-data.json`（`createdAt`、`migratedFrom`＝舊根目錄或 null＝全新），
-  不看 DB 在不在。沒有標記、且程式資料夾的舊位置有任何一項（下表「資料目錄」那幾列；git 佔位檔不算）時，**複製**過去、舊的不刪；
-  舊位置沒東西就只建目錄。不論哪種，標記檔都是**最後一步**才寫，失敗時不會被下次啟動當成已搬過。
+  不看 DB 在不在。沒有標記（或標記停在 `migrating`）、且程式資料夾的舊位置有任何一項（下表「資料目錄」那幾列；git 佔位檔不算）時，
+  **複製**過去、舊的不刪；舊位置沒東西就只建目錄（標 `done`）。開始複製前先標 `state: 'migrating'`，全部做完最後一步才改成 `done`；
+  停在 `migrating` 的下次啟動整份重搬（覆蓋新位置的半成品）。讀不到的舊資料（權限、I/O 錯誤）停止搬家，不當成沒有。
+  順序是**先快照 DB、再複製資料夾**、最後 `.env`（先用 0600 建暫存檔再改名）與站台設定檔。
   SQLite 用 `VACUUM INTO` 寫成帶 pid＋亂數的暫存檔，唯讀開啟做 `integrity_check`、確認有 `schema_migrations`，通過才改名成 `publisher.sqlite`。
-  整段在鎖檔 `.migrating.lock`（記 pid）裡做：別的行程正在搬就停止啟動並說明；pid 已經不在（上次當掉）就接手。
+  整段在鎖檔 `.migrating.lock`（記 pid）裡做：別的行程正在搬就停止啟動並說明；pid 已經不在（上次當掉）就接手——
+  先把過期的鎖改名成自己的檔、確認還是那一把才建新鎖；放鎖只刪內容是自己 pid 的。
   失敗就停止啟動、講卡在哪；成功就印出資料搬到哪、舊資料在哪、可以自己刪哪些（提醒 `.env` 有密碼）。
-  沒有標記但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記。
+  **沒有**標記但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記。
 - **已經搬過、但舊位置還有沒搬過去的 DB**（`data/publisher.sqlite` 存在、且標記的 `migratedFrom` 不是這個程式資料夾，例如別的 checkout
   先建了資料目錄）：不搬、不擋啟動，終端機大聲警告兩邊路徑與怎麼處理。
 
