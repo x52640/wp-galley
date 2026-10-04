@@ -34,6 +34,7 @@ import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
 import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
 import {
   beginRefresh,
+  createJobBinder,
   refreshStillCurrent,
   selectionImageBlockedReason,
   selectionImageContentHash,
@@ -169,14 +170,11 @@ export function Workspace({
 
   /**
    * 把會改工作區畫面的回呼綁住現在這一篇（第三輪審查）：子元件的非同步動作（AgentButton 的錯誤、恢復這篇的錯誤…）
-   * 回來時已經換到別篇，就不動畫面。每次 render 給新的包裝，子元件在動作開始時抓住的是發起那一篇的。
+   * 回來時已經換到別篇，就不動畫面。同一篇內身分不變（第四輪審查）：子元件把它放進 effect 依賴時，
+   * 每次 render 換新的會讓 effect 每次重跑、把錯誤清掉（AgentButton 的 `onError`）。
    */
-  const onThisJob = <A extends unknown[]>(fn: (...args: A) => void): ((...args: A) => void) => {
-    const origin = uuid;
-    return (...args: A) => {
-      if (stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) fn(...args);
-    };
-  };
+  const binder = useRef(createJobBinder((origin) => stillOnJob({ alive: alive.current, current: uuidRef.current, origin })));
+  const onThisJob = <A extends unknown[]>(fn: (...args: A) => void): ((...args: A) => void) => binder.current(uuid, fn);
 
   // 換一篇稿件就把上一篇的畫面丟掉，不要讓舊資料留在畫面上。
   useEffect(() => {

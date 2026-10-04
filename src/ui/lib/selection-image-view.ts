@@ -121,3 +121,29 @@ export function beginRefresh(state: { generation: number; current: string; origi
   if (state.current !== state.origin) return null;
   return state.generation + 1;
 }
+
+/**
+ * 把回呼綁住某一篇，**同一篇、同一個回呼拿到的包裝身分不變**（P5-T038 第四輪審查）。
+ * 子元件常把回呼放進 effect 依賴（AgentButton 的 `onError`）：每次 render 給新的包裝，effect 就每次重跑、
+ * 把子元件的 null 寫回去，清掉工作區剛設好的錯誤。`isCurrent(origin)` 呼叫當下才判斷還在不在那一篇。
+ */
+export function createJobBinder(isCurrent: (origin: string) => boolean): <A extends unknown[]>(
+  origin: string,
+  fn: (...args: A) => void,
+) => (...args: A) => void {
+  const cache = new Map<string, WeakMap<object, unknown>>();
+  return <A extends unknown[]>(origin: string, fn: (...args: A) => void) => {
+    let perJob = cache.get(origin);
+    if (perJob === undefined) {
+      perJob = new WeakMap();
+      cache.set(origin, perJob);
+    }
+    const existing = perJob.get(fn) as ((...args: A) => void) | undefined;
+    if (existing !== undefined) return existing;
+    const bound = (...args: A): void => {
+      if (isCurrent(origin)) fn(...args);
+    };
+    perJob.set(fn, bound);
+    return bound;
+  };
+}

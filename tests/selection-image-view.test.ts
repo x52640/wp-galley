@@ -143,3 +143,25 @@ describe('舊篇的 refresh 不得推進世代（第三輪審查）', () => {
     expect(refreshStillCurrent({ alive: true, mine: bMine, latest: generation, current: 'b', origin: 'b' })).toBe(true);
   });
 });
+
+describe('綁住某一篇的回呼：同一篇內身分不變（第四輪審查）', () => {
+  it('同一篇、同一個回呼拿到同一個包裝；換篇是新的包裝；舊篇的包裝回來時不呼叫', async () => {
+    const { createJobBinder } = await import('../src/ui/lib/selection-image-view.js');
+    let current = 'a';
+    const bind = createJobBinder((origin) => origin === current);
+    const calls: (string | null)[] = [];
+    const setError = (message: string | null): void => {
+      calls.push(message);
+    };
+    const first = bind('a', setError);
+    // 每次 render 都再綁一次：身分不變，子元件依賴它的 effect 不會每次重跑。
+    expect(bind('a', setError)).toBe(first);
+    first('409');
+    current = 'b';
+    const forB = bind('b', setError);
+    expect(forB).not.toBe(first);
+    first('舊篇的錯誤');
+    forB(null);
+    expect(calls).toEqual(['409', null]);
+  });
+});
