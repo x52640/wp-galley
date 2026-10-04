@@ -111,3 +111,13 @@ export function refreshStillCurrent(state: {
 }): boolean {
   return state.mine === state.latest && stillOnJob({ alive: state.alive, current: state.current, origin: state.origin });
 }
+
+/**
+ * 要不要開始一次重讀（P5-T038 第三輪審查）：呼叫的是**舊篇**的 `refresh`（換篇前抓住的）就不開始，
+ * 而且**不推進世代**——推進了，新篇第一次載入的回應會被當成過期丟掉、舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。
+ * 回傳新的世代（開始）或 null（不開始，世代不動）。
+ */
+export function beginRefresh(state: { generation: number; current: string; origin: string }): number | null {
+  if (state.current !== state.origin) return null;
+  return state.generation + 1;
+}

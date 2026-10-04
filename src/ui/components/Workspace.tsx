@@ -33,6 +33,7 @@ import { Sheet } from './Sheet.js';
 import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
 import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
 import {
+  beginRefresh,
   refreshStillCurrent,
   selectionImageBlockedReason,
   selectionImageContentHash,
@@ -144,9 +145,13 @@ export function Workspace({
   }, []);
 
   const refresh = useCallback(async () => {
-    const mine = ++generation.current;
     // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
+    // 舊篇的 refresh（換篇前抓住的）在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉，
+    // 舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。所有 `refresh(` 呼叫處（含子元件）都經過這裡。
     const origin = uuid;
+    const mine = beginRefresh({ generation: generation.current, current: uuidRef.current, origin });
+    if (mine === null) return;
+    generation.current = mine;
     const isCurrent = (): boolean =>
       refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
     try {
@@ -161,6 +166,17 @@ export function Workspace({
       if (isCurrent()) setError(describeError(cause));
     }
   }, [uuid]);
+
+  /**
+   * 把會改工作區畫面的回呼綁住現在這一篇（第三輪審查）：子元件的非同步動作（AgentButton 的錯誤、恢復這篇的錯誤…）
+   * 回來時已經換到別篇，就不動畫面。每次 render 給新的包裝，子元件在動作開始時抓住的是發起那一篇的。
+   */
+  const onThisJob = <A extends unknown[]>(fn: (...args: A) => void): ((...args: A) => void) => {
+    const origin = uuid;
+    return (...args: A) => {
+      if (stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) fn(...args);
+    };
+  };
 
   // 換一篇稿件就把上一篇的畫面丟掉，不要讓舊資料留在畫面上。
   useEffect(() => {
@@ -492,7 +508,7 @@ export function Workspace({
             <AgentButton
               job={job}
               refresh={refresh}
-              onError={setAgentError}
+              onError={onThisJob(setAgentError)}
               provider={provider}
               onProvider={setProvider}
               sending={factCheckSending}
@@ -535,19 +551,21 @@ export function Workspace({
           cancelling={cancelling}
           onCancel={() => {
             setCancelling(true);
+            // 停止回來時已經換篇：不動新篇的畫面（第三輪審查）。
+            const here = onThisJob((run: () => void) => run());
             void api
               .cancelAgent(job.uuid)
-              .catch((cause: unknown) => setError(describeError(cause)))
+              .catch((cause: unknown) => here(() => setError(describeError(cause))))
               .finally(() => {
                 setCancelling(false);
-                void refresh();
+                here(() => void refresh());
               });
           }}
         />
       )}
 
       {job.state === 'CANCELLED' ? (
-        <RestoreBar job={job} refresh={refresh} onError={setError} />
+        <RestoreBar job={job} refresh={refresh} onError={onThisJob(setError)} />
       ) : isTerminal(job.state) && (
         <div className="terminal-bar" role="status">
           <Icon name="alert" size={15} />
@@ -652,6 +670,8 @@ export function Workspace({
                       onClose={close}
                       onAiStarted={async (briefId) => {
                         // 生圖在背後跑：面板關掉，進度在右欄那張卡片與頂端長條（重讀之後開始輪詢）。
+                        // 送出期間已經換篇（第三輪審查）：不打開右欄、不捲卡片、不重讀。
+                        if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin: job.uuid })) return;
                         close();
                         setImagesOpen(true);
                         setFocusBriefId(briefId);

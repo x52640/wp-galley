@@ -129,3 +129,17 @@ describe('送出後換到別篇：不動畫面（Codex 審查 P2）', () => {
     expect(stillOnJob({ alive: false, current: 'a', origin: 'a' })).toBe(false);
   });
 });
+
+describe('舊篇的 refresh 不得推進世代（第三輪審查）', () => {
+  it('換到 B 之後，A 的舊 refresh 不開始、世代不動；B 第一次載入的回應照樣寫得進畫面', async () => {
+    const { beginRefresh, refreshStillCurrent } = await import('../src/ui/lib/selection-image-view.js');
+    // B 第一次載入開始：世代 5 → 6。
+    let generation = 5;
+    const bMine = beginRefresh({ generation, current: 'b', origin: 'b' })!;
+    generation = bMine;
+    // A 的舊 refresh（例如「請 AI 配一張」完成後才跑）在這時被叫到：不開始、世代不動。
+    expect(beginRefresh({ generation, current: 'b', origin: 'a' })).toBeNull();
+    // B 的回應回來：仍是最新一次、仍在 B → 寫進畫面（不會卡在「載入稿件…」）。
+    expect(refreshStillCurrent({ alive: true, mine: bMine, latest: generation, current: 'b', origin: 'b' })).toBe(true);
+  });
+});
