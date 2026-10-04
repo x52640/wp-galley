@@ -55,23 +55,24 @@ D-039。已合併的 #24（P6-T006）、#25（P5-T039）補跑 Codex 審查，�
 
 ## 完成定義
 - [x] `npm run verify` 綠
-- [x] 擁有這些行為的 spec 已更新（factcheck.md 的 SavedAhead 由主 session 補）
+- [x] 擁有這些行為的 spec 已更新（factcheck.md 的待同步段由主 session 改）
 - [x] 留下的殘餘已寫進 `docs/known-issues.md`
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #28 Codex 第一輪兩條 P2（2026-10-05，未 commit）：因外部版本離開打字模式不記 SavedAhead（`carrySavedAhead` 加 `known`）；
-  「畫面知道的目前版本」改在 render 算（`lastSaved` 改成 state＋ref、`selectionImageContentHash` 加 `aheadHash`），`currentHash` 與查位置請求同一個值
-- 已通過驗證：`npm run verify` 92 檔／2067 測試綠（第一輪修正後）；第一版 2065；`?fixtures=1` 截圖：發布面板打網址不存 → × 關掉、點遮罩關掉再開 → 字還在、「網址改了還沒存」擋發布；按取消再關再開 → 清掉
-- 下一步：Codex 第二輪審查；`docs/specs/factcheck.md` 的 SavedAhead 段補「工作區已是更新版本就不記」（不在 write_paths，待主 session）
+- 最後完成：PR #28 Codex 第二輪兩條 P2（2026-10-05，未 commit）：#1 改設計，拿掉 SavedAhead 整套，改成「待同步」（`syncPending`，看重讀序號、不比 hash）；
+  #2 `runSlugSave` 成功時一律清掉該篇網址草稿（面板關著也清）
+- 已通過驗證：`npm run verify` 92 檔／2068 測試綠（第二輪修正後）；`?fixtures=1` 截圖（第一版）：發布面板打網址不存 → × 關掉、點遮罩關掉再開 → 字還在、擋發布
+- 下一步：Codex 第三輪審查；`docs/specs/factcheck.md` 的 SavedAhead 段改成待同步（不在 write_paths，待主 session）
 - Blocker：無
 
 ## 完成結果
-1. 自動存後重讀失敗：`check-while-writing.ts` 加 `SavedAhead`（`carrySavedAhead`／`settleSavedAhead`／`savedAheadHash`／`seedHold`）。
-   `Workspace` 離開打字模式（含一般儲存）時，最後存成功但工作區還沒讀到的那一版記成 savedAhead 並立刻重讀；再進打字模式時當成
-   `lastSavedHash` 起點（存檔基準不再用舊快照）；`ProofView` 進打字模式時用 `seedHold` 讓 hold 一開始就認它。快照換了或換篇就放掉。
+1. 自動存後重讀失敗：「待同步」（PR #28 第二輪改設計，取代 SavedAhead）。`Workspace` 記「最近一次成功重讀的序號」與「打字中最後存成功時已送出的重讀序號」，
+   `check-while-writing.ts` 的 `syncPending` 判斷：不在打字模式、存過、而且之後沒有序號更大的重讀成功 → 擋所有進打字模式的入口（「正在同步最新版本…」）、
+   每 3 秒重讀；任何一次重讀成功就解除，之後基準就是工作區版本（伺服器的真實版本）。打字中的 hold 與 `lastSavedHash` 照 P6-T006 不動；
+   `lastSaved` 另有 state，render 時算畫面知道的目前版本（`selectionImageContentHash`），`currentHash` 與查位置請求同一個值（第一輪 #2）。
 2. 發布面板沒存的網址：`slug-save-store.ts` 加 `slugDraftFor`／`keepSlugDraft`／`clearSlugDraft`（模組層級、以稿件為 key）；
-   `PublishSheet` 開面板時還原、框或已存值變了就同步（跟已存的一樣就清，涵蓋取消與存成功）。
+   `PublishSheet` 開面板時還原、框或已存值變了就同步（跟已存的一樣就清，涵蓋取消）；`runSlugSave` 成功時一律清掉該篇草稿（面板關著也清，第二輪 #2）。
 3. 「標題與網址」存檔中擋發布：`slug-save-store.ts` 加 `sourceSaveTouchesSlug`、`runSourceSave`；`SourcePanel` 的「儲存」「渲染」改到網址時
    整段（存＋重讀／渲染）登記成「存網址進行中」，失敗也放開、錯誤照樣顯示；發布面板那邊在存時不默默跳過，按鈕反灰、硬按會講。
-- 測試：`tests/check-while-writing.test.ts`（#1 四條）、`tests/publish-slug.test.ts`（#2 三條、#3 四條）。
+- 測試：`tests/check-while-writing.test.ts`（#1 待同步四條）、`tests/publish-slug.test.ts`（#2 六條、#3 四條）。

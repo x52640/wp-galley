@@ -92,48 +92,18 @@ export function nextSaveBase(lastSaved: string | null, jobHash: string | undefin
 }
 
 /**
- * 打字中存成功、但工作區還沒重讀到的那一版（P5-T040 #1，#24 補審）。離開打字模式時記下來，
- * 再進打字模式時當成「最後存成功的那一版」：存檔基準用它（不然拿舊快照當基準會 409），
- * 校樣的 hold 也認它（之後輪詢讀到它不是外部改動，不重載、不蓋掉新打的字）。
- * `behind`：記下來時工作區快照的 hash；快照換了（讀到它、或讀到別處改的）就不用再記。
+ * 待同步（P5-T040 #1，PR #28 第二輪改設計）：打字中存成功之後，還沒有任何一次「在存好之後才送出」的重讀成功，
+ * 工作區的快照可能比伺服器舊。這時離開打字模式就先**不給再進打字模式**（存檔基準會是舊快照 → 409、
+ * 之後讀到自己存的那版又被當成外部改動），等下一次重讀成功（不管讀到的 hash 是什麼，那就是伺服器的真實版本）。
+ * 用重讀的序號判斷、不比 hash：`savedAt`＝存成功那一刻**已經送出**的最新重讀序號（null＝這篇還沒在打字中存過），
+ * `okSeq`＝最近一次成功重讀的序號。存好之前就送出、存好之後才回來的重讀（序號 ≤ savedAt）讀的是舊資料，不算。
  */
-export interface SavedAhead {
-  readonly uuid: string;
-  readonly hash: string;
-  readonly behind: string | undefined;
+export function syncPending(state: { editing: boolean; savedAt: number | null; okSeq: number }): boolean {
+  return !state.editing && state.savedAt !== null && state.okSeq <= state.savedAt;
 }
 
-/**
- * 離開打字模式：最後存成功的那一版工作區還沒讀到才記下來。「還沒讀到」＝工作區快照還是**比自己存的舊**的那一版：
- * 進打字模式時的版本、或這次打字中自己較早存的某一版（`known`）。工作區已經是別的版本（同一分頁放圖之類，
- * 打字模式因外部版本結束，PR #28 Codex P2）就不記：那一版已經被取代，拿它當基準只會一直 409。沒存過或已經讀到也不記。
- */
-export function carrySavedAhead(input: {
-  uuid: string;
-  lastSaved: string | null;
-  jobHash: string | undefined;
-  known: readonly (string | undefined)[];
-}): SavedAhead | null {
-  if (input.lastSaved === null || input.lastSaved === input.jobHash) return null;
-  if (!input.known.includes(input.jobHash)) return null;
-  return { uuid: input.uuid, hash: input.lastSaved, behind: input.jobHash };
-}
-
-/** 工作區快照變了（重讀成功）或換了篇：放掉；還停在記下來時的舊快照就留著（沒變回原物件）。 */
-export function settleSavedAhead(ahead: SavedAhead | null, uuid: string, jobHash: string | undefined): SavedAhead | null {
-  if (ahead === null || ahead.uuid !== uuid || ahead.behind !== jobHash) return null;
-  return ahead;
-}
-
-/** 這一篇有沒有存在前面、工作區還沒讀到的那一版。 */
-export function savedAheadHash(ahead: SavedAhead | null, uuid: string): string | null {
-  return ahead !== null && ahead.uuid === uuid ? ahead.hash : null;
-}
-
-/** 進打字模式時已經有存在前面的那一版：一開始就用 hold 認它（之後再存沿用同一個 hold）。 */
-export function seedHold(shown: ProofFrame, aheadHash: string | null): ProofHold | null {
-  return aheadHash === null ? null : { ...shown, own: [aheadHash], pending: false };
-}
+/** 待同步時進打字模式入口的說明。 */
+export const SYNC_PENDING_NOTE = '正在同步最新版本…（剛存的那一版還沒讀回來，讀到之後就能再改）';
 
 /**
  * 選字「查證這句」的反灰原因。打字模式照樣能按（「正在改字」不算）；正文空不空也不看**存過的**——

@@ -280,3 +280,30 @@ describe('「標題與網址」抽屜存到網址時也算「存網址進行中�
     await pending;
   });
 });
+
+describe('面板關著時存網址成功：草稿在存檔成功的路徑就清掉（PR #28 第二輪 Codex P2）', () => {
+  it('存 B、關面板、存完、別處另存 C、重開：框是 C、不擋發布', async () => {
+    keepSlugDraft('sync-a', 'b-slug', 'a-slug');
+    let finish!: () => void;
+    const pending = runSlugSave('sync-a', () => new Promise<void>((resolve) => (finish = resolve)));
+    // 面板關掉（不再有 effect 同步草稿），存檔在背後完成。
+    finish();
+    await pending;
+    // 別處（標題與網址）另存成 C。
+    const reopened = slugDraftFor('sync-a', 'c-slug');
+    expect(reopened).toBe('c-slug');
+    expect(slugPublishBlocker({ dirty: isSlugDirty(reopened, 'c-slug'), saving: false })).toBeNull();
+  });
+
+  it('「標題與網址」改到網址存成功也清掉發布面板的舊草稿', async () => {
+    keepSlugDraft('sync-b', 'old-draft', 'a-slug');
+    await runSourceSave('sync-b', true, async () => {});
+    expect(slugDraftFor('sync-b', 'new-slug')).toBe('new-slug');
+  });
+
+  it('存失敗：草稿留著（網址就是沒存上，重開照樣擋）', async () => {
+    keepSlugDraft('sync-c', 'b-slug', 'a-slug');
+    await expect(runSlugSave('sync-c', () => Promise.reject(new Error('409')))).rejects.toThrow('409');
+    expect(slugDraftFor('sync-c', 'a-slug')).toBe('b-slug');
+  });
+});

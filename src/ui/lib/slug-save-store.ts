@@ -11,6 +11,8 @@
 import { isSlugDirty } from './publish-slug.js';
 
 const saving = new Set<string>();
+/** 發布面板網址框沒存的字，以稿件為 key（見 `slugDraftFor`）。 */
+const drafts = new Map<string, string>();
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -30,6 +32,7 @@ export function subscribeSlugSave(listener: () => void): () => void {
 
 /**
  * 跑一趟存網址。同一篇已經在存就什麼都不做；結束（成功或失敗）才放開。錯誤原樣丟回給呼叫端顯示。
+ * 成功時清掉這篇的網址草稿（`drafts`）。
  */
 export async function runSlugSave(uuid: string, task: () => Promise<void>): Promise<void> {
   if (saving.has(uuid)) return;
@@ -37,6 +40,9 @@ export async function runSlugSave(uuid: string, task: () => Promise<void>): Prom
   notify();
   try {
     await task();
+    // 存成功：這篇的網址草稿一律清掉（PR #28 第二輪 Codex P2）。面板關著時沒有元件替它清，
+    // 留著的舊草稿重開會被當成沒存、按「存網址」還會蓋掉之後別處存的值。面板開著時框跟已存的值一樣，effect 也不會再記回來。
+    drafts.delete(uuid);
   } finally {
     saving.delete(uuid);
     notify();
@@ -45,10 +51,9 @@ export async function runSlugSave(uuid: string, task: () => Promise<void>): Prom
 
 /**
  * 發布面板網址框沒存的字（P5-T040 #2，#25 補審）：按 × 或點遮罩關掉面板，元件換新，框裡的字跟「沒存」的擋發布會一起不見。
- * 記在這裡，以稿件為 key：重開時拿回來、照樣擋發布；按取消（框回到已存的值）或存成功（已存的值跟上框）就清掉。
+ * 記在這裡，以稿件為 key：重開時拿回來、照樣擋發布；按取消（框回到已存的值）或存成功（`runSlugSave` 成功時一律清，不靠面板）就清掉。
  * 只在記憶體裡，重新整理頁面就沒了（那時本來就沒有開著的面板）。
  */
-const drafts = new Map<string, string>();
 
 /** 面板打開時框裡該放什麼：這篇有沒存的字就用它，沒有就用已存的網址。別篇的不會拿到。 */
 export function slugDraftFor(uuid: string, saved: string): string {

@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **92 檔 / 2067 測試**全綠（2026-10-05，P5-T040）
+- `npm run verify`：typecheck 通過；Vitest **92 檔 / 2068 測試**全綠（2026-10-05，P5-T040）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。

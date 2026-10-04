@@ -3,10 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   afterStaySave,
   beginHold,
-  carrySavedAhead,
-  savedAheadHash,
-  seedHold,
-  settleSavedAhead,
   dropStaleFactCheck,
   editBlockedByRun,
   editBarSavedNote,
@@ -16,11 +12,11 @@ import {
   countNonSpace,
   planSelectionCheck,
   settleHold,
+  syncPending,
   shownFrame,
   type ProofHold,
 } from '../src/ui/lib/check-while-writing.js';
 import { decideProofSave } from '../src/ui/lib/write-in-place.js';
-import { selectionImageContentHash } from '../src/ui/lib/selection-image-view.js';
 
 /**
  * 改字時也能「查證這句」、查證時可以繼續寫（D-036，P6-T006）。畫面的判斷放在純函式，這裡測。
@@ -277,67 +273,25 @@ describe('先存再做：動作出錯不算存檔失敗（P5-T038 審查 3）', 
   });
 });
 
-describe('自動存好但重讀失敗、離開打字模式再進來（P5-T040 #1）：存檔基準與 hold 認那一版', () => {
-  it('離開時最後存的那一版工作區還沒讀到：記下來；讀到了或沒存過就不記', () => {
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0', known: ['H0', 'H1'] })).toEqual({ uuid: 'a', hash: 'H1', behind: 'H0' });
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H1', known: ['H0', 'H1'] })).toBeNull();
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: null, jobHash: 'H0', known: ['H0'] })).toBeNull();
+describe('自動存好但重讀失敗（P5-T040 #1）：待同步，重讀成功之前不給再進打字模式', () => {
+  it('存好之後重讀失敗、離開打字模式：待同步（擋進入）；之後任何一次重讀成功就解除，不看讀到的 hash', () => {
+    // 存好那一刻已經送出的重讀是第 5 個；存好之後那一個（第 6 個）失敗了，最近成功的還是第 4 個。
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 4 })).toBe(true);
+    // 輪詢的第 7 個成功（就算讀到的版本剛好跟進打字模式前的 H0 一模一樣，那就是伺服器的真實版本）。
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 7 })).toBe(false);
   });
 
-  it('工作區快照還停在舊的就留著；讀到新的（自己那版或別處改的）就放掉；別篇不算', () => {
-    const ahead = { uuid: 'a', hash: 'H1', behind: 'H0' };
-    expect(settleSavedAhead(ahead, 'a', 'H0')).toBe(ahead);
-    expect(settleSavedAhead(ahead, 'a', 'H1')).toBeNull();
-    expect(settleSavedAhead(ahead, 'a', 'H2')).toBeNull();
-    expect(settleSavedAhead(ahead, 'b', 'H0')).toBeNull();
-    expect(settleSavedAhead(null, 'a', 'H0')).toBeNull();
-    expect(savedAheadHash(ahead, 'a')).toBe('H1');
-    expect(savedAheadHash(ahead, 'b')).toBeNull();
-    expect(savedAheadHash(null, 'a')).toBeNull();
+  it('存好之前就送出、存好之後才回來的重讀讀的是舊資料，不算同步', () => {
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 5 })).toBe(true);
   });
 
-  it('再進打字模式：存檔基準用存成功的那一版，不是工作區的舊快照（不然 409）', () => {
-    const ahead = carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0', known: ['H0', 'H1'] });
-    // 進打字模式時把它當成這次打字中「最後存成功」的那一版。
-    const lastSaved = savedAheadHash(ahead, 'a');
-    expect(nextSaveBase(lastSaved, 'H0')).toBe('H1');
+  it('打字中不擋（打字中的基準是最後存成功的那一版）；這篇沒在打字中存過也不擋', () => {
+    expect(syncPending({ editing: true, savedAt: 5, okSeq: 4 })).toBe(false);
+    expect(syncPending({ editing: false, savedAt: null, okSeq: 0 })).toBe(false);
   });
 
-  it('再進打字模式就把那一版當自己的：之後輪詢讀到它，校樣不重載、不蓋掉新打的字', () => {
-    const shown = { key: 'H0', epoch: 3 };
-    const hold = seedHold(shown, 'H1');
-    expect(hold).toEqual({ key: 'H0', epoch: 3, own: ['H1'], pending: false });
-    expect(shownFrame({ editing: true, hold, revisionKey: 'H1', renderEpoch: 4 })).toEqual(shown);
-    // 別處改出來的版本照舊重載。
-    expect(shownFrame({ editing: true, hold, revisionKey: 'H9', renderEpoch: 4 })).toEqual({ key: 'H9', epoch: 4 });
-    // 接著再存一版：沿用同一個 hold，兩版都認。
-    const settled = settleHold(beginHold(hold, shown), 'H2');
-    expect(settled?.own).toEqual(['H1', 'H2']);
-    // 沒有存在前面的版本：不用 hold。
-    expect(seedHold(shown, null)).toBeNull();
-  });
-});
-
-describe('Codex 第一輪（PR #28）：外部版本、進打字模式那一刻的有效版本', () => {
-  it('因為別處改出新版本而離開打字模式：工作區已經是更新的版本，不記「存在前面」（不然之後每次都拿舊的當基準、一直 409）', () => {
-    // 進打字模式時是 H0，打字中自動存了 H1，同一分頁放圖產生 H2：工作區讀到 H2、打字模式結束。
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H2', known: ['H0', 'H1'] })).toBeNull();
-    // 工作區還停在進來時的版本、或打字中自己較早存的那一版：才算比自己存的舊。
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H2', jobHash: 'H1', known: ['H0', 'H1', 'H2'] })).toEqual({
-      uuid: 'a',
-      hash: 'H2',
-      behind: 'H1',
-    });
-    // 新稿還沒有版本（undefined）也照樣記。
-    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: undefined, known: [undefined, 'H1'] })?.hash).toBe('H1');
-  });
-
-  it('打字中的有效版本：進打字模式那一刻（還沒存過）就用「存在前面」的那一版，不等 effect', () => {
-    expect(selectionImageContentHash({ editing: true, lastSaved: null, aheadHash: 'H1', jobHash: 'H0' })).toBe('H1');
-    // 打字中又存過：最後存的優先。
-    expect(selectionImageContentHash({ editing: true, lastSaved: 'H2', aheadHash: 'H1', jobHash: 'H0' })).toBe('H2');
-    expect(selectionImageContentHash({ editing: true, lastSaved: null, aheadHash: null, jobHash: 'H0' })).toBe('H0');
-    // 不在打字模式：工作區的版本。
-    expect(selectionImageContentHash({ editing: false, lastSaved: null, aheadHash: 'H1', jobHash: 'H0' })).toBe('H0');
+  it('同步之後再進打字模式：基準就是工作區的版本（H0 還原的情境也不會拿 H1 當基準而 409）', () => {
+    // 進打字模式時打字中還沒存過，lastSaved 是 null。
+    expect(nextSaveBase(null, 'H0')).toBe('H0');
   });
 });

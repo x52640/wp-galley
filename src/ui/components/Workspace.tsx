@@ -19,10 +19,8 @@ import {
   dropStaleFactCheck,
   editBlockedByRun,
   nextSaveBase,
-  carrySavedAhead,
-  savedAheadHash,
-  settleSavedAhead,
-  type SavedAhead,
+  syncPending,
+  SYNC_PENDING_NOTE,
   selectionCheckBlockedReason,
 } from '../lib/check-while-writing.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
@@ -138,6 +136,10 @@ export function Workspace({
    * 會把畫面倒退回去。
    */
   const generation = useRef(0);
+  /** 最近一次成功的重讀是第幾個（`generation` 的序號）；待同步用（P5-T040 #1）。 */
+  const [okSeq, setOkSeq] = useState(0);
+  /** 打字中最後一次存成功時，已經送出的最新重讀序號；null＝這篇還沒在打字中存過（P5-T040 #1）。 */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   // 換到這一篇：別篇已經結束的「建議網址」結果丟掉（還在跑的留著，D-026）。
   useEffect(() => forgetOtherSlugSuggests(uuid), [uuid]);
@@ -164,6 +166,8 @@ export function Workspace({
       const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
       if (isCurrent()) {
         setJob(next);
+        // 待同步（P5-T040 #1）看的是「哪一個序號的重讀成功了」，不比 hash。
+        setOkSeq(mine);
         if (checks !== undefined) setFactChecks(checks);
         setError(null);
       }
@@ -195,11 +199,10 @@ export function Workspace({
     setEditNotice(null);
     setFocusBriefId(null);
     setView('article');
-    // 打字中存過的那一版是上一篇的：不帶到這一篇（P5-T040 #1）。
+    // 打字中存過的那一版、待同步是上一篇的：不帶到這一篇（P5-T040 #1）。
     lastSavedHash.current = null;
     setLastSaved(null);
-    knownOld.current = [];
-    setSavedAhead(null);
+    setSavedAt(null);
   }, [uuid]);
 
   useEffect(() => {
@@ -216,9 +219,22 @@ export function Workspace({
    * 進打字模式要不要擋：發布中、或查證以外的 Agent 動作在跑（D-036：查證不改文章，跑的時候照樣可以寫、可以存）。
    * 「改原文」、卡片的自己改／去原文改共用這一個條件。
    */
-  const editBlocked = editBlockedByRun({ publishing: job?.state === 'PUBLISHING', agentRun: job?.agentRun });
-  const editBlockedRef = useRef(editBlocked);
-  editBlockedRef.current = editBlocked;
+  const runBlocked = editBlockedByRun({ publishing: job?.state === 'PUBLISHING', agentRun: job?.agentRun });
+  /**
+   * 待同步（P5-T040 #1）：打字中存成功之後還沒有一次成功的重讀，工作區快照可能比伺服器舊，
+   * 這時再進打字模式存檔基準會是舊的 → 409。所有進打字模式的入口先擋，同時一直重讀到成功為止。
+   */
+  const pendingSync = syncPending({ editing: editing !== null, savedAt, okSeq });
+  const editBlocked = runBlocked || pendingSync;
+  const editBlockedNote = pendingSync && !runBlocked ? SYNC_PENDING_NOTE : 'AI 還在處理這篇，等它跑完再改。';
+  const editBlockedRef = useRef({ blocked: editBlocked, note: editBlockedNote });
+  editBlockedRef.current = { blocked: editBlocked, note: editBlockedNote };
+  useEffect(() => {
+    if (!pendingSync) return;
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => window.clearInterval(timer);
+  }, [pendingSync, refresh]);
   useEffect(() => {
     if (!working) return;
     const timer = window.setInterval(() => void refresh(), 1500);
@@ -322,8 +338,8 @@ export function Workspace({
 
   const startEdit = useCallback((item: ReviewItem | null) => {
     // AI 跑完會產生新版本、校樣會重載，編到一半的字就沒了。等它跑完再改（查證不在此列，D-036）。
-    if (editBlockedRef.current) {
-      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+    if (editBlockedRef.current.blocked) {
+      setEditNotice(editBlockedRef.current.note);
       return;
     }
     // 按過接受、後端在每個欄位（標題、正文…）都找不到原句的（unappliable，P5-T017）：字上標不出來，
@@ -349,8 +365,8 @@ export function Workspace({
   }, []);
   /** 查證卡片的「去原文改」：游標停在那句前面（找不到就停在那一段開頭），存檔後那條結案（resolved-by-edit）。 */
   const startFactCheckEdit = useCallback((finding: FactCheckFinding) => {
-    if (editBlockedRef.current) {
-      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+    if (editBlockedRef.current.blocked) {
+      setEditNotice(editBlockedRef.current.note);
       return;
     }
     setEditNotice(null);
@@ -391,62 +407,21 @@ export function Workspace({
    */
   const lastSavedHash = useRef<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
-  /**
-   * 這次打字中工作區快照「合理地還停在」的版本：進打字模式時的版本、存在前面的那一版、打字中自己存的每一版。
-   * 離開時工作區不是這些（別處改出更新的版本）就不記「存在前面」（PR #28 Codex P2）。
-   */
-  const knownOld = useRef<(string | undefined)[]>([]);
   const rememberSaved = useCallback((hash: string) => {
     lastSavedHash.current = hash;
     setLastSaved(hash);
-    knownOld.current = [...knownOld.current, hash];
+    // 存好那一刻已經送出的最新重讀序號：之後要有序號比它大的重讀成功，才算讀到存好的那一版（待同步，P5-T040 #1）。
+    setSavedAt(generation.current);
   }, []);
-  /**
-   * 打字中存成功、工作區還沒重讀到的那一版（P5-T040 #1）：離開打字模式時記下來，
-   * 再進打字模式時當成「最後存成功的那一版」（存檔基準、校樣 hold 都認它）。工作區快照換了就放掉。
-   */
-  const [savedAhead, setSavedAhead] = useState<SavedAhead | null>(null);
-  const jobHash = job?.currentRevision?.contentHash;
-  const jobHashRef = useRef(jobHash);
-  jobHashRef.current = jobHash;
-  const wasEditing = useRef(false);
   useEffect(() => {
-    const now = editing !== null;
-    if (now === wasEditing.current) return;
-    wasEditing.current = now;
-    if (now) {
-      // 進打字模式：之前存在前面的那一版就是這次的起點。
-      const ahead = savedAheadHash(savedAhead, uuid);
-      lastSavedHash.current = ahead;
-      setLastSaved(ahead);
-      knownOld.current = ahead === null ? [jobHashRef.current] : [jobHashRef.current, ahead];
-      return;
+    if (editing === null) {
+      lastSavedHash.current = null;
+      setLastSaved(null);
     }
-    // 離開打字模式（儲存、取消）：最後存的那一版工作區還沒讀到（快照還是比它舊的那一版），記下來並立刻重讀一次。
-    // 因為別處改出新版本而離開的：快照已經是更新的版本，存的那一版跟著作廢、不帶過去（PR #28 Codex P2）。
-    const carried = carrySavedAhead({
-      uuid,
-      lastSaved: lastSavedHash.current,
-      jobHash: jobHashRef.current,
-      known: knownOld.current,
-    });
-    lastSavedHash.current = null;
-    setLastSaved(null);
-    knownOld.current = [];
-    setSavedAhead(carried);
-    if (carried !== null) void refresh();
-    // savedAhead 只在進出打字模式的那一刻讀。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, uuid, refresh]);
-  useEffect(() => {
-    setSavedAhead((current) => settleSavedAhead(current, uuid, jobHash));
-  }, [uuid, jobHash]);
-  /**
-   * 畫面知道的目前版本（PR #28 Codex P2）：打字中是最後存成功的那一版、還沒存過就是存在前面的那一版，否則工作區的版本。
-   * 在 render 時算：進打字模式那一刻就對，傳給子元件的值與送出的請求用同一個。
-   */
-  const aheadHash = savedAheadHash(savedAhead, uuid);
-  const knownHash = selectionImageContentHash({ editing: editing !== null, lastSaved, aheadHash, jobHash });
+  }, [editing, uuid]);
+  const jobHash = job?.currentRevision?.contentHash;
+  /** 畫面知道的目前版本：打字中是最後存成功的那一版，否則工作區的版本。render 時算，傳給子元件的值與送出的請求用同一個。 */
+  const knownHash = selectionImageContentHash({ editing: editing !== null, lastSaved, jobHash });
 
   /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
   const imageGeneration = useImageGenerationStatus(true);
@@ -738,13 +713,11 @@ export function Workspace({
                   )
                 : null
             }
-            savedAhead={aheadHash}
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
               // 存好之後換到別篇（Workspace 重用）：不碰 lastSavedHash、編輯狀態、refresh（第二輪審查）。
               const origin = job.uuid;
               // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
-              // 進打字模式那一刻 ref 可能還沒寫進存在前面的那一版（effect 之前），一起看。
-              const base = nextSaveBase(lastSavedHash.current ?? aheadHash, job.currentRevision?.contentHash);
+              const base = nextSaveBase(lastSavedHash.current, job.currentRevision?.contentHash);
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
               const saved = await api.createRevision(job.uuid, {
                 ...(editedBody === undefined ? {} : { editedBody }),
@@ -769,7 +742,7 @@ export function Workspace({
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
                 setEditing(afterStaySave);
               } else {
-                // 存好就離開打字模式；重讀若失敗，離開時把這一版記成「存在前面」（P5-T040 #1），下次進來拿它當基準。
+                // 存好就離開打字模式；之後的重讀若失敗，會進入待同步、擋住再進打字模式（P5-T040 #1）。
                 rememberSaved(saved.contentHash);
                 // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
                 endEdit();
@@ -789,12 +762,17 @@ export function Workspace({
                       type="button"
                       className="btn btn-quiet btn-tiny"
                       disabled={editBlocked}
-                      title={editBlocked ? 'AI 還在處理這篇，等它跑完再改' : undefined}
+                      title={editBlocked ? editBlockedNote : undefined}
                       onClick={() => startEdit(null)}
                     >
                       <Icon name="file-text" size={13} />
                       {job.bodyEmpty ? '開始寫' : '改原文'}
                     </button>
+                    {pendingSync && (
+                      <span className="field-hint" role="status">
+                        正在同步最新版本…
+                      </span>
+                    )}
                   </>
                 )}
               </>
