@@ -23,7 +23,7 @@
 | `agent.ts` | 校稿與一鍵配圖、建議英文網址、取消 Agent；system／user prompt | `runAgentReview`、`suggestSlugs`、`cancelAgentRun` | — |
 | `review.ts` | 待處理清單：逐項處理、整份採用、丟棄、對照 | `getReview`、`resolveReviewItems`、`acceptWholeProposal`、`discardReview`、`getComparison` | `getReview`、`openProposal`、`closeProposalIfDone`、`reviewView`、`pendingReviewCount` |
 | `briefs.ts` | 配圖需求：存 Agent 給的需求、卡片上改描述、不要了 | `dismissImageBrief`、`updateImageBrief` | `storeImageBriefs`、`imageBriefViews`、`requireOpenBrief`、`toCandidate` |
-| `images.ts` | 用 Codex 生候選圖、用這張、在文章上請 AI 配一張 | `imageGenerationStatus`、`generateBriefImage`、`imageCandidateFile`、`useImageCandidate`、`requestImageAtPosition` | — |
+| `images.ts` | 用 Codex 生候選圖、用這張、在文章上請 AI 配一張、選一段用此段配圖 | `imageGenerationStatus`、`generateBriefImage`、`imageCandidateFile`、`useImageCandidate`、`requestImageAtPosition`、`requestImageFromSelection` | — |
 | `media.ts` | 上傳、換圖、移除、放位置、精選圖片；上傳後自動放位置／設精選 | `addMedia`、`addMediaWithOutcome`、`replaceMedia`、`removeMedia`、`setFeaturedMedia`、`placeMedia` | `addMediaWithOutcome` |
 | `approval.ts` | 核准、撤銷；**核准失效的唯一入口 `invalidateApproval`** | `approve`、`revokeApproval` | `invalidateApproval`、`assertApprovalUnchanged` |
 | `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
@@ -148,6 +148,15 @@ interface CoreService {
   requestImageAtPosition(
     uuid: string,
     input: { afterBlockIndex: number; contentHash: string; note?: string | null; timeoutMs?: number },
+  ): Promise<{ brief: ImageBrief; generation: Promise<ImageCandidate> }>;
+  /**
+   * 選一段文字「用此段配圖」（D-037，P5-T038）：選取 10～3000 字、用目前這一版定位（可跨段；找不到或不只一處拒絕）、
+   * `spot` 決定圖放選取範圍的哪裡（0＝開頭）。其餘同 requestImageAtPosition（同一套先擋與建需求）。
+   * prompt 由 buildSelectionImagePrompt 組；選取、標題、小節標題、那句話、prompt 有密碼一律先擋。
+   */
+  requestImageFromSelection(
+    uuid: string,
+    input: { selection: string; spot?: number; contentHash: string; note?: string | null; timeoutMs?: number },
   ): Promise<{ brief: ImageBrief; generation: Promise<ImageCandidate> }>;
   /**
    * 在卡片上改配圖需求（D-025，P5-T025）：Agent 那條送 `prompt`（非空、≤ 2000 字）、使用者那條送 `note`

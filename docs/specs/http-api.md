@@ -48,7 +48,7 @@
 | `POST` | `/api/jobs/:uuid/review/accept-all` | 採用整份稿 | `ProposalRefRequest` → `ReviewResolveResult` |
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
 | `GET` | `/api/jobs/:uuid/compare` | 對照（逐段差異＋正文以外的欄位差異），`?against=proposal\|previous` | → `Comparison` |
-| `POST` | `/api/jobs/:uuid/briefs` | 在文章上「請 AI 配一張」：建使用者發起的配圖需求並開始生圖（**不等畫完**） | `ImageAtPositionRequest` → `ImageBriefResponse`（202） |
+| `POST` | `/api/jobs/:uuid/briefs` | 在文章上「請 AI 配一張」或選一段「用此段配圖」：建使用者發起的配圖需求並開始生圖（**不等畫完**） | `ImageAtPositionRequest`／`ImageFromSelectionRequest` → `ImageBriefResponse`（202） |
 | `PATCH` | `/api/jobs/:uuid/briefs/:id` | 在卡片上改配圖需求：Agent 那條改 `prompt`、使用者那條改 `note`（D-025） | `UpdateImageBriefRequest` → `UpdateImageBriefResponse` |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
@@ -142,6 +142,11 @@
   `candidates/:id/use` 可以帶 `{ altText }`（`.strict()`，上限 300）：卡片上填的替代文字，沒帶就用需求上的。
   `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
   規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
+- 選一段文字「用此段配圖」（D-037，P5-T038，新增、不改既有欄位）：同一條 `POST /briefs`，body 有 `selection` 就是這一種
+  （`ImageFromSelectionRequest`：`selection`、選填 `spot`（整數 ≥ 0，預設 0＝這段開頭）、選填 `spotCount`（畫面上看到的位置個數，≥ 1）、`contentHash`、選填 `note`），否則照位置那一種。
+  兩種都是 `.strict()`：選取那種多送 `afterBlockIndex`、`prompt` 都 400。zod 只擋超大 body（`selection` ≤ 20000 字元）；字數 10～3000 由
+  CoreService 照共用規則驗（400，講太短／太長）。找不到選取、出現不只一次、`spot` 不在範圍、`spotCount` 跟後端用目前這一版算的個數不一樣（「段落整理後位置變了，請再選一次」）400；其餘狀態碼同上一條。
+  `ImageBrief` 多一個欄位 `fromSelection`（boolean；照選取配的才 true）。規則見 [agent-tasks.md](agent-tasks.md)「選一段文字『用此段配圖』」。
 - 在卡片上改配圖需求（D-025，P5-T025）：`PATCH /briefs/:id` 的 body 是 `.strict()`，`prompt`／`note` **只能送一個**
   （都送、都不送、多送欄位例如 `aspectRatio` 都是 400）；長度跟畫面計數同一套（`prompt` 去頭尾後數 code point、上限 2000，
   `contract/brief-prompt.ts`；`note` 同 `POST /briefs`）。哪一種需求該送哪一個由 CoreService 判斷（送錯 400）。

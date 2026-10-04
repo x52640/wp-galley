@@ -2,6 +2,14 @@
 
 import { positionAnchor } from '../../../contract/position-anchor.js';
 import { checkUserNote } from '../../../contract/user-note.js';
+import {
+  checkSelectionImage,
+  locateSelection,
+  selectionBasisLabel,
+  selectionSpotAnchor,
+  selectionSpots,
+  SELECTION_SPOTS_CHANGED_MESSAGE,
+} from '../../../contract/selection-image.js';
 import type { ImageBrief, ImageCandidate, ImageGenerationStatus, MediaUploadResult, PublisherApi } from '../types.js';
 import { GREY_PNG } from './data.js';
 import type { FixtureJob } from './store.js';
@@ -41,7 +49,7 @@ async function fixtureGenerate(job: FixtureJob, briefId: number): Promise<ImageC
   return clone(candidate);
 }
 
-export const imagesApi: Pick<PublisherApi, 'getImageGenerationStatus' | 'generateBriefImage' | 'requestImageAtPosition' | 'useImageCandidate'> = {
+export const imagesApi: Pick<PublisherApi, 'getImageGenerationStatus' | 'generateBriefImage' | 'requestImageAtPosition' | 'requestImageFromSelection' | 'useImageCandidate'> = {
   async getImageGenerationStatus(): Promise<ImageGenerationStatus> {
     await delay(120);
     if (fixtureCodexOff()) {
@@ -108,6 +116,56 @@ export const imagesApi: Pick<PublisherApi, 'getImageGenerationStatus' | 'generat
       anchorPosition: position,
       note,
       promptEdited: false,
+      fromSelection: false,
+    };
+    job.imageBriefs = [...job.imageBriefs, brief];
+    void fixtureGenerate(job, brief.id).catch(() => undefined);
+    return clone(brief);
+  },
+
+  /**
+   * 「用此段配圖」（P5-T038）：規則跟後端同一份（字數、跨段定位、位置選項、錨點、卡片依據）；prompt 只放說明。
+   */
+  async requestImageFromSelection(uuid, input): Promise<ImageBrief> {
+    await delay(200);
+    const job = mustGet(uuid);
+    if (fixtureCodexOff()) throw new Error('只有 Codex 能生圖，但它現在不能用：尚未登入，請在終端機執行 `codex login`');
+    if (job.agentRun?.status === 'running') throw new Error('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
+    const checkedNote = checkUserNote(input.note);
+    if (!checkedNote.ok) throw new Error(checkedNote.message);
+    const checked = checkSelectionImage(input.selection);
+    if (!checked.ok) throw new Error(checked.message);
+    if (input.contentHash !== job.currentRevision?.contentHash) {
+      throw new Error('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。');
+    }
+    const blocks = bodyBlocks(readBody(job)).map((html) => ({ text: blockText(html).replace(/\s+/g, ' ').trim() }));
+    const located = locateSelection(blocks, input.selection);
+    if (!located.ok) throw new Error(located.message);
+    const spots = selectionSpots(blocks, located.first, located.last);
+    if (input.spotCount !== undefined && input.spotCount !== spots.length) throw new Error(SELECTION_SPOTS_CHANGED_MESSAGE);
+    const spot = spots.find((candidate) => candidate.spot === (input.spot ?? 0));
+    if (spot === undefined) throw new Error(`位置 ${input.spot} 不在選取範圍內`);
+    const { anchor, position } = selectionSpotAnchor(blocks, spot);
+    const brief: ImageBrief = {
+      id: Math.floor(Math.random() * 90_000) + 10_000,
+      key: `user-${Math.random().toString(16).slice(2, 10)}`,
+      purpose: selectionBasisLabel(input.selection),
+      prompt: '（示範資料：後端會用你選的那段、文章標題與小節標題、你的那句話組成生圖指令）',
+      aspectRatio: '16:9',
+      altText: '',
+      caption: null,
+      placement: null,
+      anchor,
+      fulfilled: false,
+      dismissed: false,
+      createdAt: new Date().toISOString(),
+      isFeatured: false,
+      candidate: null,
+      origin: 'user',
+      anchorPosition: position,
+      note: checkedNote.note,
+      promptEdited: false,
+      fromSelection: true,
     };
     job.imageBriefs = [...job.imageBriefs, brief];
     void fixtureGenerate(job, brief.id).catch(() => undefined);

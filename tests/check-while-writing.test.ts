@@ -237,3 +237,37 @@ describe('打字模式的「查證這句」：正文空不空看編輯中的內�
     expect(selectionCheckBlockedReason({ ...idle, finished: true })).toBe('這篇稿件已經結束，不能再查證');
   });
 });
+
+describe('先存再做：動作出錯不算存檔失敗（P5-T038 審查 3）', () => {
+  it('存好之後動作出錯：只講動作的錯，不走存檔失敗（不放掉 hold）', async () => {
+    const { saveThenAct } = await import('../src/ui/lib/check-while-writing.js');
+    const calls: string[] = [];
+    await saveThenAct({
+      save: async () => 'h2',
+      onSaved: (hash) => calls.push(`saved:${hash}`),
+      onSaveFailed: () => calls.push('save-failed'),
+      act: async () => {
+        throw new Error('配圖沒開始');
+      },
+      onActFailed: (cause) => calls.push(`act-failed:${(cause as Error).message}`),
+    });
+    expect(calls).toEqual(['saved:h2', 'act-failed:配圖沒開始']);
+  });
+
+  it('存檔失敗：不做動作', async () => {
+    const { saveThenAct } = await import('../src/ui/lib/check-while-writing.js');
+    const calls: string[] = [];
+    await saveThenAct({
+      save: async () => {
+        throw new Error('409');
+      },
+      onSaved: () => calls.push('saved'),
+      onSaveFailed: () => calls.push('save-failed'),
+      act: () => {
+        calls.push('act');
+      },
+      onActFailed: () => calls.push('act-failed'),
+    });
+    expect(calls).toEqual(['save-failed']);
+  });
+});

@@ -5,6 +5,7 @@ import type {
   FactCheckRunResult,
   AuthorsResponse,
   ImageAtPositionRequest,
+  ImageFromSelectionRequest,
   ImageBriefResponse,
   ImageCandidateResponse,
   ImageGenerationStatus,
@@ -293,6 +294,11 @@ const httpApi: PublisherApi = {
   },
 
   async requestImageAtPosition(uuid: string, input: ImageAtPositionRequest) {
+    const body = await sendJson<ImageBriefResponse>(`/api/jobs/${uuid}/briefs`, 'POST', input);
+    return body.brief;
+  },
+
+  async requestImageFromSelection(uuid: string, input: ImageFromSelectionRequest) {
     const body = await sendJson<ImageBriefResponse>(`/api/jobs/${uuid}/briefs`, 'POST', input);
     return body.brief;
   },

@@ -31,7 +31,8 @@ import { InsertImagePanel } from './InsertImagePanel.js';
 import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
-import { MediaPanel } from './panels/MediaPanel.js';
+import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
+import { selectionImageBlockedReason, selectionImageContentHash } from '../lib/selection-image-view.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -359,6 +360,9 @@ export function Workspace({
     if (editing === null) lastSavedHash.current = null;
   }, [editing, uuid]);
 
+  /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
+  const imageGeneration = useImageGenerationStatus(true);
+
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);
     setEditNotice(notice ?? null);
@@ -424,6 +428,12 @@ export function Workspace({
   // 選字「查證這句」在打字模式也能按（D-036）：按下先存一版、留在打字模式再查；
   // 打字模式下正文空不空不看存過的（空白新稿打了第一句還沒存，Codex P2），交給存檔與查證流程驗。
   const selectionCheckBlocked = selectionCheckBlockedReason(blockedInput);
+  // 選字「用此段配圖」（P5-T038）：跟「請 AI 配一張」同一套反灰條件；打字模式照樣給（按下先存）。
+  const selectionImageBlocked = selectionImageBlockedReason({
+    generation: imageGeneration,
+    running: working === true,
+    finished: isFinished(job.state),
+  });
   // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
   const insertable = canInsertImages(display, {
     editing: editing !== null,
@@ -568,6 +578,38 @@ export function Workspace({
                   }
                 : null
             }
+            selectionImage={
+              canSelectToFactCheck(display, { finished: isFinished(job.state) })
+                ? {
+                    blockedReason: selectionImageBlocked,
+                    onRequest: async ({ text, note, spot, spotCount }) => {
+                      // 畫面那一版：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
+                      const contentHash = selectionImageContentHash({
+                        editing: editing !== null,
+                        lastSaved: lastSavedHash.current,
+                        jobHash: job.currentRevision?.contentHash,
+                      });
+                      setAgentError(null);
+                      try {
+                        if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
+                        const brief = await api.requestImageFromSelection(job.uuid, {
+                          selection: text,
+                          spot,
+                          ...(spotCount === undefined ? {} : { spotCount }),
+                          contentHash,
+                          ...(note === null ? {} : { note }),
+                        });
+                        // 生圖在背後跑：打開右欄圖片區並捲到那張卡片（跟「請 AI 配一張」一樣）。
+                        setImagesOpen(true);
+                        setFocusBriefId(brief.id);
+                        await refresh();
+                      } catch (cause) {
+                        setAgentError(`用此段配圖沒有開始：${describeError(cause)}`);
+                      }
+                    },
+                  }
+                : null
+            }
             insertImage={
               insertable
                 ? (afterBlockIndex, close) => (
@@ -698,7 +740,7 @@ export function Workspace({
             </h2>
             {showImages && (
               <div className="margin-section-body">
-                <MediaPanel job={job} refresh={refresh} blocks={blocks} focusBriefId={focusBriefId} />
+                <MediaPanel job={job} refresh={refresh} blocks={blocks} focusBriefId={focusBriefId} editing={editing !== null} />
               </div>
             )}
           </section>

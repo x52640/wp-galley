@@ -29,13 +29,21 @@ export const ANCHOR_MIN_CHARS = 20;
  *   引用後面那段，圖放在它**之前**。同一個位置，只是換一邊對。
  * - 兩邊都不行：null（用這張時講找不到、請使用者自己放）。
  *
+ * `prefer = 'before'`：先試後面那段（放在它之前），不行才換前面那段——「用此段配圖」的「這段開頭」用（P5-T038）。
+ *
  * 引用的是段落**開頭**一小段：從 20 字起，在整篇只出現在這一段為止（每次加 10 字），最後是整段。短一點
  * 比較不怕使用者之後改了那段的後半。不跨段接字：比對是一段一段做的，跨段的引用永遠對不上。
  */
-export function positionAnchor(blocks: readonly PositionBlock[], afterBlockIndex: number): PositionAnchor {
+export function positionAnchor(
+  blocks: readonly PositionBlock[],
+  afterBlockIndex: number,
+  prefer: 'after' | 'before' = 'after',
+): PositionAnchor {
   const before = afterBlockIndex >= 0 ? uniquePrefix(blocks, afterBlockIndex) : null;
-  if (before !== null) return { anchor: before, position: 'after' };
   const after = uniquePrefix(blocks, afterBlockIndex + 1);
+  // `prefer = 'before'`（P5-T038「這段開頭」）：先引用後面那段（選取開頭那段）、放在它之前；不行再換前面那段。
+  if (prefer === 'before' && after !== null) return { anchor: after, position: 'before' };
+  if (before !== null) return { anchor: before, position: 'after' };
   if (after !== null) return { anchor: after, position: 'before' };
   return { anchor: null, position: 'after' };
 }

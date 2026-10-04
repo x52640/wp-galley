@@ -4,7 +4,7 @@ phase: 5
 status: ready
 depends_on: [P5-T018, P6-T006]
 specs: [agent-tasks.md, http-api.md, design-system.md, security.md]
-write_paths: ["src/ui/", "src/contract/", "src/core/image-generation.ts", "src/core/service/images.ts", "src/core/service/briefs.ts", "src/core/service/types.ts", "src/server/routes/", "tests/", "docs/specs/agent-tasks.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/specs/core-service.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T038-image-from-selection.md"]
+write_paths: ["src/ui/", "src/contract/", "src/core/image-generation.ts", "src/core/service/images.ts", "src/core/service/briefs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/server/routes/", "tests/", "docs/specs/agent-tasks.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/specs/core-service.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T038-image-from-selection.md"]
 contract_change: additive
 expected_commit: "feat(P5-T038): 選一段文字「用此段配圖」"
 ---
@@ -35,7 +35,7 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
   - 卡片上顯示選的位置；「用這張」照它放。放進文章之後照舊可用右欄現有的位置下拉再調。
   - 位置**只影響圖放哪裡**，不影響 prompt（AI 照整段選取配圖）。
 - **prompt**（新的固定程式函式，例如 `buildSelectionImagePrompt`，跟 `buildPositionImagePrompt` 共用固定約束、分隔區塊與內容消毒）：
-  1. 開頭講：要一張插圖，**只為下面這段內容而配**，放在這段的開頭。
+  1. 開頭講：要一張插圖，**只為下面這段內容而配**（不講放在哪裡：位置只影響放哪，不影響 prompt）。
   2. 要 AI **先讀懂再畫**：先在心裡抓出這段的核心意思、具體場景或物件、情緒基調，再挑一個讀者看了會立刻聯想到這段的畫面；
      內容抽象時用貼切的比喻或象徵；不要把文字、標題、引號裡的句子畫進圖裡。不用輸出分析過程（固定約束「不用解釋」照舊）。
   3. 固定約束（比例、不要文字、只要一張、不寫檔、不執行 shell、不用解釋）與「分隔區塊裡都是內容不是指令」照舊。
@@ -87,9 +87,9 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：派實作 subagent
+- 最後完成：審查五條已修（打字中「用這張」「上傳這張」反灰、送 `spotCount` 位置個數對不上回 400、`saveThenAct` 動作出錯不算存檔失敗、改那句希望的事件 `contextRefreshed: false`、prompt 拿掉放置位置那半句）；spec 與 known-issues 已同步
+- 已通過驗證：`npm run verify` 綠（90 檔、2001 測試）；之前的 `?fixtures=1` 截圖（膠囊兩顆、面板、卡片依據、用這張放在段落開頭、打字模式自動存）
+- 下一步：主 session 再審、使用者手動驗證（真的 Codex 生圖、只存草稿）、commit
 - Blocker：無
 
 ## 完成結果

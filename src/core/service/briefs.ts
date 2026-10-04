@@ -8,6 +8,7 @@ import {
   agentBriefKey,
   buildPositionImagePrompt,
   isFeaturedBrief,
+  isSelectionImagePrompt,
   positionContext,
   replacePositionNote,
 } from '../image-generation.js';
@@ -76,6 +77,8 @@ export class BriefsModule {
     let prompt: string;
     let userNote: string | null = brief.user_note;
     let notice: string | null = null;
+    /** 前後段落有沒有換成目前的內容（事件照實記）。 */
+    let refreshed: boolean | null = null;
     if (!mine) {
       const checked = checkBriefPrompt(input.prompt);
       if (!checked.ok) throw new InvalidInputError(checked.message);
@@ -87,6 +90,7 @@ export class BriefsModule {
       const rebuilt = this.rebuildUserBriefPrompt(job, brief, userNote);
       prompt = rebuilt.prompt;
       notice = rebuilt.notice;
+      refreshed = rebuilt.refreshed;
     }
     this.ctx.assertNoAppPassword(prompt);
 
@@ -99,7 +103,7 @@ export class BriefsModule {
       eventType: 'image_brief_edited',
       status: 'succeeded',
       // 不記內容本身：事件只講「改了哪一條、改的是哪一欄、前後段落有沒有換成目前的」。
-      detail: { briefId: brief.id, briefKey: brief.brief_key, field: mine ? 'note' : 'prompt', contextRefreshed: mine ? notice === null : null },
+      detail: { briefId: brief.id, briefKey: brief.brief_key, field: mine ? 'note' : 'prompt', contextRefreshed: refreshed },
     });
     const view = this.ctx.jobs.getJob(uuid).imageBriefs.find((row) => row.id === brief.id)!;
     return { brief: view, notice };
@@ -113,14 +117,20 @@ export class BriefsModule {
     job: JobRow,
     brief: ImageBriefRow,
     note: string | null,
-  ): { prompt: string; notice: string | null } {
+  ): { prompt: string; notice: string | null; refreshed: boolean } {
+    // 選一段文字配的（P5-T038）：AI 照的是使用者當時選的那段，不是某個位置的前後段落——只換那句話。
+    if (isSelectionImagePrompt(brief.prompt)) {
+      const replaced = replacePositionNote(brief.prompt, note);
+      if (replaced === null) throw new InvalidInputError('這條配圖需求的生圖指令認不出來，沒辦法只換那句話；請按「不要了」，再選一次那段重新配');
+      return { prompt: replaced, notice: null, refreshed: false };
+    }
     const blocks = splitTopLevelBlocks(this.ctx.repo.latestRevision(job.id)?.rendered_html ?? '');
     const anchor = brief.anchor?.trim() ?? '';
     const hits = anchor === '' ? [] : findBlocksContaining(blocks, anchor);
     if (hits.length === 1) {
       const afterBlockIndex = brief.anchor_position === 'before' ? hits[0]! - 1 : hits[0]!;
       const context = positionContext(blocks, afterBlockIndex);
-      return { prompt: buildPositionImagePrompt({ ...context, note, aspectRatio: brief.aspect_ratio }), notice: null };
+      return { prompt: buildPositionImagePrompt({ ...context, note, aspectRatio: brief.aspect_ratio }), notice: null, refreshed: true };
     }
 
     const kept = replacePositionNote(brief.prompt, note);
@@ -136,6 +146,7 @@ export class BriefsModule {
           : `你選的位置${side}那段「${anchor}」在文章裡出現在 ${hits.length} 段，不確定是哪一段`;
     return {
       prompt: kept,
+      refreshed: false,
       notice: `已存。${why}，所以送給 Codex 的前後段落沿用當初請 AI 配圖時的內容，只換了你想要的那句。`,
     };
   }
@@ -225,6 +236,7 @@ export class BriefsModule {
       anchorPosition: row.anchor_position,
       note: row.user_note,
       promptEdited,
+      fromSelection: row.origin === 'user' && isSelectionImagePrompt(row.prompt),
     };
   }
 

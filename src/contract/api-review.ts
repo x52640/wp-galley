@@ -161,6 +161,11 @@ export interface ImageBrief {
    * 只有 Agent 那條（`origin = 'agent'`）可能是 true；使用者那條改的是 `note`，永遠是 false。
    */
   readonly promptEdited: boolean;
+  /**
+   * 使用者選一段文字「用此段配圖」建的（D-037，P5-T038）：卡片上的依據寫在 `purpose`
+   * （「依選取段落：『…』（共 N 字）」）。在卡片上改那句話時只換使用者的希望，選取段落不變。
+   */
+  readonly fromSelection: boolean;
 }
 
 /**

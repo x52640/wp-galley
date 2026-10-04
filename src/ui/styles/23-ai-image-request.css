@@ -37,3 +37,17 @@
 .brief-editor { margin: 0 0 .35rem; }
 .brief-editor .brief-actions { margin-top: .3rem; }
 .brief-editor-text { width: 100%; min-height: 7rem; font-size: .85rem; line-height: 1.65; }
+
+/* --- 選一段文字「用此段配圖」（P5-T038）：膠囊第二顆＋送出前的面板 ------------- */
+.fc-pick-row { display: flex; gap: .35rem; }
+.fc-pick-btn[data-kind='image'] { border-color: var(--accent); color: var(--accent-strong); }
+.fc-pick-btn[data-kind='image']:hover:not(:disabled) { background: #E4EDE8; }
+.fc-pick-btn[data-kind='image']:disabled { border-color: #8A8994; color: #5F5E5A; }
+.sel-image-pop { position: absolute; z-index: 9; pointer-events: auto; transform: translateX(-50%); width: min(26rem, calc(100% - 1rem)); }
+.sel-image-spots { margin: 0; padding: 0; border: 0; min-width: 0; }
+.sel-image-spots legend { padding: 0; margin-bottom: .25rem; }
+.sel-image-spot { display: flex; align-items: flex-start; gap: .4rem; font-size: .8rem; line-height: 1.5; cursor: pointer; overflow-wrap: anywhere; }
+.sel-image-spot input { margin-top: .25rem; flex: none; }
+.sel-image-default { color: var(--shell-text-dim); }
+/* 卡片上「依選取段落：『…』（共 N 字）」：這張是照哪段配的。 */
+.brief-basis { margin: 0; font-size: .78rem; color: var(--shell-text-dim); overflow-wrap: anywhere; }

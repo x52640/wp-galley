@@ -373,6 +373,7 @@ export function diaryBriefs(): ImageBrief[] {
       anchorPosition: 'after',
       note: null,
       promptEdited: false,
+      fromSelection: false,
     },
     {
       id: 602,
@@ -396,6 +397,7 @@ export function diaryBriefs(): ImageBrief[] {
       anchorPosition: 'after',
       note: null,
       promptEdited: false,
+      fromSelection: false,
     },
   ];
 }
@@ -427,6 +429,7 @@ export function longformBriefs(): ImageBrief[] {
       anchorPosition: 'after',
       note: null,
       promptEdited: false,
+      fromSelection: false,
     },
     {
       id: 612,
@@ -447,6 +450,7 @@ export function longformBriefs(): ImageBrief[] {
       anchorPosition: 'after',
       note: null,
       promptEdited: false,
+      fromSelection: false,
     },
   ];
 }
