@@ -453,16 +453,14 @@ function hasDatabaseFile(file: string): boolean {
 /**
  * 已搬完（標記 `done`）而且有過資料庫（`databaseCreated`），資料庫卻不見了（或是空檔）：丟 `DataDirError`，
  * 呼叫端停止啟動，**不建新 DB、不套 migration**——不然稿件會像全部消失，使用者還會在空的上面繼續寫（P8-T004）。
- * 資料庫在、但標記還沒記 `databaseCreated`（P8-T004 之前的標記、手動放的）：補記上。
+ * 只讀不寫：標記還沒記 `databaseCreated` 的，由啟動套完 migration 後的 `markDatabaseCreated` 補記（失敗只警告）。
  */
 export function assertDatabasePresent(dataDir: string): void {
   const marker = readMarker(dataDir);
   if (marker === null || marker.state !== 'done') return;
   const file = dataPaths(dataDir).databaseFile;
-  if (hasDatabaseFile(file)) {
-    if (!marker.databaseCreated) writeMarker(dataDir, { ...marker, databaseCreated: true });
-    return;
-  }
+  // 資料庫在：這裡不改寫標記（資料目錄不可寫時不能因此擋住啟動），留給套完 migration 後的 `markDatabaseCreated`。
+  if (hasDatabaseFile(file)) return;
   if (!marker.databaseCreated) return; // 全新安裝、還沒建過：照常建
   throw new DataDirError(
     [

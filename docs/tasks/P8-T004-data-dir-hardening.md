@@ -63,9 +63,9 @@ UI、`docs/archive/`。
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：五條實作＋測試（`tests/data-dir-hardening.test.ts`），spec（security、architecture 本機資料）與 known-issues 同步（2026-10-04，實作 subagent）
-- 已通過驗證：`npm run verify` 綠（90 檔／1990 測試）
-- 下一步：主 session 監工審查 → Codex 審查（D-039）→ commit
+- 最後完成：PR #27 Codex 第一輪三條已修（媒體／drafts 根本身的實際位置要驗、路徑檢查 fail closed＋逐段 lstat、啟動前段不改寫標記）（2026-10-04，實作 subagent）
+- 已通過驗證：`npm run verify` 綠（90 檔／1995 測試）
+- 下一步：主 session commit → Codex 第二輪審查（D-039）
 - Blocker：無
 
 ## 完成結果

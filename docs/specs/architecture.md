@@ -86,10 +86,13 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   **真的有檔**才改用它（重 clone 後把舊資料複製過來、010 沒轉到的情況；`fromStoredPath`）。migration 010
   把「舊程式資料夾＋`/`」開頭的舊值改成相對（舊根目錄由 `runMigrations` 的 `legacyRoot` 傳入）。
   **媒體路徑**（`media_assets.local_path`、`image_candidates.local_path`）另走 `fromStoredMediaPath`（P8-T004）：有 `..` 段就不解析；
-  解析後（含上面的容錯，容錯只認 `/generated-images/` 段）必須在媒體資料夾裡、檔案存在時實體路徑也在裡面，否則當成檔案不見了——
+  解析後（含上面的容錯，容錯只認 `/generated-images/` 段）必須在媒體資料夾裡；媒體資料夾以下每一段（含檔案本身）都不能是符號連結、
+  實體路徑也要在裡面，解析不了一律不合格（fail closed）；媒體資料夾本身的實際位置也要通過 `isSafeStoreRoot`
+  （不是資料目錄或其上層、不包含 `.env`／`data/` 等其他存放位置、不跟它們重疊）。不合格就當成檔案不見了——
   讀候選圖回「檔案不見了」、刪媒體不動任何檔（`CoreContext.mediaFile`／`requireMediaFile`）。
   Agent 工作目錄解析後一定在 `drafts/` 裡，**字面與實體路徑都是**：逃出去（含路徑上有符號連結指到外面）就改用 `drafts/<uuid>`；
-  連 `drafts/<uuid>` 的實體路徑都在外面就不跑 Agent。建資料夾前先確認已存在的祖先在 `drafts/` 裡（`CoreContext.jobWorkspace`）。
+  連 `drafts/<uuid>` 的實體路徑都在外面就不跑 Agent。`drafts/` 本身也要通過 `isSafeStoreRoot`；建資料夾前先確認已存在的祖先
+  （懸空的符號連結也算存在）在 `drafts/` 裡；任何錯誤都當成不合格（`CoreContext.jobWorkspace`）。
 - **第一次啟動自動搬家**：有沒有搬過看資料目錄的**標記檔** `.galley-data.json`（`createdAt`、`state`、`migratedFrom`＝舊根目錄或 null＝全新、
   `databaseCreated`＝這裡有過資料庫），
   不看 DB 在不在。沒有標記（或標記停在 `migrating`）、且程式資料夾的舊位置有任何一項（下表「資料目錄」那幾列；git 佔位檔不算）時，
@@ -103,8 +106,8 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   **沒有**標記但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記。
 - **有過資料庫、現在不見了**（P8-T004）：標記 `done` 且 `databaseCreated`，`data/publisher.sqlite` 卻不存在或是空檔 → 停止啟動並說明
   （資料庫應該在哪、可能被移走、找不回來要重新開始就把資料目錄整個移走再啟動），不建新 DB、不套 migration（`assertDatabasePresent`）。
-  `databaseCreated` 的來源：搬家時搬了 DB、手動放的 DB、或啟動建好 DB 套完 migration 後（`markDatabaseCreated`，`main.ts`／`cli-migrate.ts`）；
-  啟動時看到 DB 在、標記還沒記的也補上。沒有這個欄位的舊標記：`migratedFrom` 有值的當成有過，全新的當成沒有。
+  `databaseCreated` 的來源：搬家時搬了 DB、手動放的 DB、或啟動建好 DB 套完 migration 後（`markDatabaseCreated`，`main.ts`／`cli-migrate.ts`；
+  標記還沒記的也在這時補上，寫不進去只警告、不擋啟動）。`assertDatabasePresent` 只讀不寫。沒有這個欄位的舊標記：`migratedFrom` 有值的當成有過，全新的當成沒有。
   全新安裝（還沒建過 DB）照常建立。
 - **已經搬過、但舊位置還有沒搬過去的 DB**（`data/publisher.sqlite` 存在、且標記的 `migratedFrom` 不是這個程式資料夾，例如別的 checkout
   先建了資料目錄）：不搬、不擋啟動，終端機大聲警告兩邊路徑與怎麼處理。`migratedFrom` 就是這個程式資料夾的不探舊位置；

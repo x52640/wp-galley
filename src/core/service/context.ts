@@ -5,7 +5,7 @@
  * （`ctx.content`、`ctx.media`…），模組之間透過它互相呼叫。這裡的欄位就是以前 CoreService 的私有欄位。
  */
 
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AgentRunTask, Job, MediaAsset, Revision } from '../../contract/api.js';
 import { computeRevisionHash } from '../content-hash.js';
@@ -28,7 +28,7 @@ import {
 } from '../repository.js';
 import { isContentMutable } from '../state-machine.js';
 import { containsSecret, createSecretScrubber, type Scrubber } from '../../config/secrets.js';
-import { fromStoredMediaPath, fromStoredPath, isInsideDir, resolveDataDir, toStoredPath } from '../../config/paths.js';
+import { fromStoredMediaPath, fromStoredPath, isInsideDir, isSafeStoreRoot, lexists, resolveDataDir, toStoredPath } from '../../config/paths.js';
 import { createJobWorkspace, resolveInsideWorkspace, WorkspaceError } from '../../agents/workspace.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import type { AgentId } from '../../agents/types.js';
@@ -384,18 +384,21 @@ export class CoreContext {
 
   /**
    * 建好 `dir`（drafts/ 底下、字面上已檢查過）並確認實體路徑也在 drafts/ 的實體路徑底下。
-   * 建之前先確認已經存在的那一段祖先在 drafts/ 裡，免得透過符號連結在外面建出資料夾。
+   * 建之前先確認已經存在的那一段祖先（懸空的符號連結也算存在）在 drafts/ 裡，免得透過符號連結在外面建出資料夾。
+   * 任何錯誤都當成不合格。
    */
   private ensureRealDraftDir(dir: string): boolean {
     try {
       mkdirSync(this.draftsDir, { recursive: true });
+      // drafts/ 本身被換成指到資料目錄之類的符號連結：整個不能用。
+      if (!isSafeStoreRoot(this.dataDir, this.draftsDir)) return false;
       const root = realpathSync(this.draftsDir);
       const inside = (path: string, allowRoot: boolean): boolean => {
         const real = realpathSync(path);
         return (allowRoot && real === root) || isInsideDir(root, real);
       };
       let existing = dir;
-      while (!existsSync(existing)) existing = dirname(existing);
+      while (!lexists(existing)) existing = dirname(existing);
       if (!inside(existing, true)) return false;
       mkdirSync(dir, { recursive: true });
       return inside(dir, false);
@@ -552,3 +555,4 @@ export class CoreContext {
     return this.wordpress;
   }
 }
+

@@ -10,10 +10,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DataDirError, fromStoredMediaPath } from '../src/config/paths.js';
+import { DataDirError, fromStoredMediaPath, isSafeStoreRoot } from '../src/config/paths.js';
 import {
   acquireMoveLock,
   DataMoveError,
@@ -115,6 +115,37 @@ describe('媒體路徑只能落在 generated-images/ 底下', () => {
     expect(fromStoredMediaPath(dataDir, media, 'generated-images/j/link.png')).toBeNull();
   });
 
+  it('媒體資料夾本身被換成指到資料目錄（或其上層、或別的存放位置）的符號連結：整個當成不見了', () => {
+    const { dataDir, media } = layout();
+    rmSync(media, { recursive: true });
+    for (const pointTo of [dataDir, dirname(dataDir), join(dataDir, 'data')]) {
+      rmSync(media, { force: true });
+      symlinkSync(pointTo, media);
+      expect(fromStoredMediaPath(dataDir, media, 'generated-images/.env'), pointTo).toBeNull();
+      expect(fromStoredMediaPath(dataDir, media, 'generated-images/publisher.sqlite'), pointTo).toBeNull();
+    }
+    // 指到一個含 .env 的別處資料夾也不行。
+    const elsewhere = tempDir('elsewhere');
+    writeFileSync(join(elsewhere, '.env'), 'SECRET=1\n');
+    writeFileSync(join(elsewhere, 'a.png'), 'png');
+    rmSync(media, { force: true });
+    symlinkSync(elsewhere, media);
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/a.png')).toBeNull();
+    expect(isSafeStoreRoot(dataDir, media)).toBe(false);
+  });
+
+  it('fail closed：懸空的符號連結、經過目錄連結的不存在檔、檔案不存在，一律 null', () => {
+    const { dataDir, media } = layout();
+    const outside = tempDir('outside');
+    symlinkSync(join(outside, 'gone.png'), join(media, 'j', 'dangling.png'));
+    symlinkSync(outside, join(media, 'dirlink'));
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/j/dangling.png')).toBeNull();
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/dirlink/new.png')).toBeNull();
+    writeFileSync(join(outside, 'real.png'), 'x');
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/dirlink/real.png')).toBeNull();
+    expect(fromStoredMediaPath(dataDir, media, 'generated-images/j/missing.png')).toBeNull();
+  });
+
   it('資料目錄本身是透過符號連結進來的：照常可用', () => {
     const { dataDir } = layout();
     const alias = join(tempDir('alias'), 'Galley');
@@ -176,7 +207,42 @@ describe('CoreService 讀刪媒體檔只在媒體資料夾裡', () => {
   });
 });
 
+describe('刪媒體不經過符號連結刪到外面', () => {
+  it('DB 路徑經過指到外面的目錄連結：外面的檔不刪；媒體資料夾本身指到資料目錄：.env 不刪', async () => {
+    const { f, dataDir, mediaDir } = await setup();
+    const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
+    const outside = tempDir('outside');
+    writeFileSync(join(outside, 'victim.png'), 'keep');
+    mkdirSync(mediaDir, { recursive: true });
+    symlinkSync(outside, join(mediaDir, 'dirlink'));
+
+    const first = await f.core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'x' });
+    f.db.handle.prepare('UPDATE media_assets SET local_path = ? WHERE id = ?').run('media/dirlink/victim.png', first.id);
+    f.core.removeMedia(uuid, first.id);
+    expect(readFileSync(join(outside, 'victim.png'), 'utf8')).toBe('keep');
+
+    const second = await f.core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'y' });
+    writeFileSync(join(dataDir, '.env'), 'SECRET=1\n');
+    rmSync(mediaDir, { recursive: true, force: true });
+    symlinkSync(dataDir, mediaDir);
+    f.db.handle.prepare('UPDATE media_assets SET local_path = ? WHERE id = ?').run('media/.env', second.id);
+    f.core.removeMedia(uuid, second.id);
+    expect(existsSync(join(dataDir, '.env'))).toBe(true);
+  });
+});
+
 describe('Agent 工作目錄要實體路徑也在 drafts/ 裡', () => {
+  it('drafts/ 本身被換成指到資料目錄的符號連結：不跑 Agent', async () => {
+    const { f, codex, dataDir, draftsDir } = await setup();
+    const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
+    rmSync(draftsDir, { recursive: true, force: true });
+    symlinkSync(dataDir, draftsDir);
+    const before = codex.calls.length;
+    await expect(f.core.runAgentReview(uuid, { provider: 'codex' })).rejects.toThrow(AgentError);
+    expect(codex.calls.length).toBe(before);
+    expect(existsSync(join(dataDir, uuid))).toBe(false);
+  });
+
   it('工作目錄被換成指到外面的符號連結：不在那裡跑，也不在外面建東西', async () => {
     const { f, codex, draftsDir } = await setup();
     const outside = tempDir('outside');
@@ -306,7 +372,7 @@ describe('已經有過資料庫、現在卻不見了：停止啟動，不默默�
     expect(() => prepareUserData({ legacyRoot: legacy, env })).toThrow(DataDirError);
   });
 
-  it('舊格式標記（沒有 databaseCreated）：有 DB 就補記；搬過來的（migratedFrom 有值）當成建過', () => {
+  it('舊格式標記（沒有 databaseCreated）：套完 migration 後補記；搬過來的（migratedFrom 有值）當成建過', () => {
     const dataDir = join(tempDir('home'), 'Galley');
     const legacy = tempDir('empty');
     const env = { GALLEY_DATA_DIR: dataDir };
@@ -314,6 +380,9 @@ describe('已經有過資料庫、現在卻不見了：停止啟動，不默默�
     writeFileSync(join(dataDir, 'data', 'publisher.sqlite'), 'x');
     writeFileSync(join(dataDir, MARKER_FILE), JSON.stringify({ createdAt: '2026-10-04T00:00:00.000Z', state: 'done', migratedFrom: null }));
     prepareUserData({ legacyRoot: legacy, env });
+    // 啟動前段只讀不寫；套完 migration 後那次才補記。
+    expect(marker(dataDir)['databaseCreated']).toBeUndefined();
+    markDatabaseCreated(dataDir);
     expect(marker(dataDir)).toMatchObject({ databaseCreated: true, createdAt: '2026-10-04T00:00:00.000Z' });
 
     const other = join(tempDir('home'), 'Galley');
@@ -321,6 +390,21 @@ describe('已經有過資料庫、現在卻不見了：停止啟動，不默默�
     writeFileSync(join(other, MARKER_FILE), JSON.stringify({ state: 'done', migratedFrom: '/old clone' }));
     expect(() => prepareUserData({ legacyRoot: legacy, env: { GALLEY_DATA_DIR: other } })).toThrow(DataDirError);
     expect(existsSync(join(other, 'data', 'publisher.sqlite'))).toBe(false);
+  });
+
+  it('舊格式的全新標記、資料目錄不可寫：照常啟動（補記留到套完 migration 後，失敗也只警告）', () => {
+    const dataDir = join(tempDir('home'), 'Galley');
+    const legacy = tempDir('empty');
+    for (const sub of ['data', 'drafts', 'generated-images', 'backups']) mkdirSync(join(dataDir, sub), { recursive: true });
+    writeFileSync(join(dataDir, 'data', 'publisher.sqlite'), 'x');
+    writeFileSync(join(dataDir, MARKER_FILE), JSON.stringify({ state: 'done', migratedFrom: null }));
+    chmodSync(dataDir, 0o500);
+    try {
+      expect(() => prepareUserData({ legacyRoot: legacy, env: { GALLEY_DATA_DIR: dataDir } })).not.toThrow();
+      expect(() => markDatabaseCreated(dataDir)).toThrow(DataMoveError); // 呼叫端（main／cli-migrate）接住只警告
+    } finally {
+      chmodSync(dataDir, 0o700);
+    }
   });
 
   it('舊位置只有 .env（沒有 DB）搬過來：還沒建過 DB，照常啟動', () => {

@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 
 /**
@@ -178,6 +178,47 @@ export function fromStoredPath(dataDir: string, stored: string): string {
 /** 媒體檔在 DB 路徑裡的資料夾名（舊根目錄容錯只認這一段）。 */
 const MEDIA_SEGMENT = '/generated-images/';
 
+/** 資料目錄裡的存放位置與檔案：媒體／工作目錄的根不能包含它們，也不能落在別的存放位置裡。 */
+const STORE_ENTRIES = ['.env', 'publish-targets.json', '.galley-data.json', 'data', 'drafts', 'generated-images', 'backups'];
+
+/** 路徑本身存在（含懸空的符號連結，`existsSync` 會說不存在）。 */
+export function lexists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 媒體資料夾或 `drafts/` 這種「存放位置的根」能不能用（P8-T004）：根本身可能被換成符號連結，所以看它的**實際位置**——
+ * 不能是資料目錄本身或它的上層、不能直接包含資料目錄的其他存放位置或檔案（`.env`、`data/` 等）、
+ * 也不能跟別的存放位置是同一處或在它裡面。解析不了（不存在、權限）一律不能用。
+ */
+export function isSafeStoreRoot(dataDir: string, root: string): boolean {
+  try {
+    const realRoot = realpathSync(root);
+    const realData = realpathSync(dataDir);
+    if (realRoot === realData || isInsideDir(realRoot, realData)) return false;
+    for (const name of STORE_ENTRIES) {
+      if (lexists(join(realRoot, name))) return false;
+      const sibling = join(dataDir, name);
+      if (resolve(sibling) === resolve(root) || !lexists(sibling)) continue;
+      let realSibling: string;
+      try {
+        realSibling = realpathSync(sibling);
+      } catch {
+        continue; // 懸空的：指不到東西，不會跟根重疊
+      }
+      if (realSibling === realRoot || isInsideDir(realRoot, realSibling) || isInsideDir(realSibling, realRoot)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * DB 讀出的**媒體**路徑（`media_assets.local_path`、`image_candidates.local_path`）→ 實際檔案位置（P8-T004）。
  *
@@ -185,7 +226,9 @@ const MEDIA_SEGMENT = '/generated-images/';
  * - 路徑裡有任何 `..` 段（或 NUL）就不解析。
  * - 相對的以資料目錄解析、絕對的照用；兩者都要落在媒體資料夾裡。
  * - 舊根目錄容錯（絕對路徑、不在資料目錄底下）：只取最後一個 `/generated-images/` 之後那段，對應到媒體資料夾，那裡真的有檔才用。
- * - 檔案已經存在時，再確認**實體路徑**（解開符號連結）也在媒體資料夾的實體路徑底下。
+ * - 媒體資料夾本身要通過 `isSafeStoreRoot`（它被換成指到資料目錄之類的符號連結，就整個當成不見了）。
+ * - **fail closed**：媒體資料夾之下任何一段（含檔案本身）是符號連結、或實體路徑解析不了（不存在、懸空連結、權限），都回 null；
+ *   實體路徑也要在媒體資料夾的實體路徑底下。
  *
  * 讀檔、刪檔都只用這裡回傳的路徑：DB 被改過也碰不到 `.env`、資料庫或資料目錄裡的其他檔。
  */
@@ -193,6 +236,7 @@ export function fromStoredMediaPath(dataDir: string, mediaDir: string, stored: s
   if (stored === '' || stored.includes('\0') || stored.split(/[\\/]/).includes('..')) return null;
   const base = resolve(dataDir);
   const media = resolve(mediaDir);
+  if (!isSafeStoreRoot(base, media)) return null;
   const target = isAbsolute(stored) ? resolve(stored) : resolve(base, stored);
   if (isInsideDir(media, target)) return confirmRealInside(media, target);
   if (!isAbsolute(stored) || isInsideDir(base, target)) return null;
@@ -203,17 +247,19 @@ export function fromStoredMediaPath(dataDir: string, mediaDir: string, stored: s
   return confirmRealInside(media, candidate);
 }
 
-/** 檔案存在時，實體路徑也要在 `parent` 的實體路徑底下；不存在就回原路徑（讀會失敗、刪不到東西）。 */
+/**
+ * `target` 在 `parent` 之下的每一段（含最後一段）都存在、都不是符號連結，而且實體路徑在 `parent` 的實體路徑底下；
+ * 否則 null。任何錯誤都當成不合格（fail closed）：讀不到、刪不到，總比讀刪到外面好。
+ */
 function confirmRealInside(parent: string, target: string): string | null {
-  let real: string;
   try {
-    real = realpathSync(target);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? target : null;
-  }
-  try {
-    return isInsideDir(realpathSync(parent), real) ? target : null;
+    const segments = relative(parent, target).split(sep);
+    let current = parent;
+    for (const segment of segments) {
+      current = join(current, segment);
+      if (lstatSync(current).isSymbolicLink()) return null;
+    }
+    return isInsideDir(realpathSync(parent), realpathSync(target)) ? target : null;
   } catch {
     return null;
   }
