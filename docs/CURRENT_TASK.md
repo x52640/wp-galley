@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **84 檔 / 1860 測試**全綠（2026-10-02，P6-T005 合併後）
+- `npm run verify`：typecheck 通過；Vitest **85 檔 / 1877 測試**全綠（2026-10-02，P5-T037 合併後）
 - migration head：`009-factcheck`（2026-10-01 已套到本機 DB；套用前**沒有備份**，套用後 integrity_check ok）
 - 站台設定 `config/publish-targets.json` 已改成本機檔（不進 git）；測試讀 `config/examples/remusplus.json`。
 - 跑出來對不上就是環境漂移，先查清楚再動手。
@@ -13,12 +13,13 @@
 
 | Task | 內容 | 狀態 |
 | --- | --- | --- |
-| [P5-T037](tasks/P5-T037-edit-target-fixes.md) | 去原文改：被同份校稿改過的原句也標得出來、找不到要明講；段首游標不被框線蓋住 | PR 審查中 |
+| [P8-T003](tasks/P8-T003-user-data-dir.md) | 使用者資料搬出程式資料夾、DB 改存相對路徑、首次啟動自動複製（D-035） | 實作中 |
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T037](tasks/P5-T037-edit-target-fixes.md) | job 17「湯匙」卡按「去原文改」→ 那句標黃、游標在句首；任一段段首按 Enter 換段 → 看得到游標 |
 | [P6-T005](tasks/P6-T005-factcheck-ui.md) | **優先**：Codex、Claude 各跑一次一鍵查證＋查證這句，agy 跑一次；看判定合理、看原文對得上、停止有效；順便確認 Codex `web_search="cached"`、Claude `WebSearch`＋`--json-schema`（同 P6-T003 那條）、中文維基是繁體。只在本機，不核准不發布 |
 | [P5-T036](tasks/P5-T036-lock-agent-tools.md) | **優先**：真跑 Codex 校稿、Claude 校稿、Codex 生圖各一次，確認新的不連外參數不讓 CLI 報錯（`-c` 在 `--ignore-user-config` 下是否生效等未證實項見 known-issues） |
 | [P6-T003](tasks/P6-T003-factcheck-contract.md) | Claude `--tools ""` 搭 `--json-schema` 能否回結構化輸出（主 session 已給一行 `! claude --print …` 測試指令；不相容就拿掉 `claude.ts` strictNoTools 的 `--tools ""`） |
@@ -35,6 +36,7 @@
 
 ## 上次停在哪（2026-10-02 收官）
 
+- 合併 #22 P5-T037（去原文改標色、段首游標）；殘餘兩條低嚴重度在 Task 檔「完成結果」，也還沒併進 known-issues.md；`architecture.md` 功能地圖還沒列新檔 `src/contract/review-locate.ts`。
 - 合併 #21 P6-T005 查證畫面（獨立審查一輪＋Codex 一輪，修正寫在 PR）。殘餘在 Task 檔「完成結果」，**還沒併進 known-issues.md**。
 - 啟動 dev server 前先備份 `data/publisher.sqlite`（2026-10-01 套 009 時漏了）。
 - 工作方式不變：subagent 實作 → 主 session 驗證 → 另派審查 → PR → Codex 審查（`codex:codex-rescue`，預設用 `~/.codex/config.toml` 的模型與 effort）→ 修正寫進 PR → 確認 PR head 同步才叫使用者合併。資安類發現先修再用籠統寫法貼 PR。
