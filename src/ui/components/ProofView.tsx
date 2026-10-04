@@ -47,10 +47,12 @@ import {
   capsuleNotes,
   selectionImageHeading,
   selectionImageProblem,
-  selectionImageSpotCount,
+  selectionImageSpotHints,
+  selectionPickStale,
   selectionImageSpots,
 } from '../lib/selection-image-view.js';
 import type { SelectionSpot } from '../../contract/selection-image.js';
+import type { PositionBlock } from '../../contract/position-anchor.js';
 import { missingTargetNotice } from '../lib/edit-target.js';
 import {
   attachEditInterceptors,
@@ -294,7 +296,14 @@ export function ProofView({
    */
   selectionImage?: {
     blockedReason: string | null;
-    onRequest: (input: { text: string; note: string | null; spot: number; spotCount: number | undefined }) => Promise<void>;
+    onRequest: (input: {
+      text: string;
+      note: string | null;
+      spot: number;
+      spotCount?: number;
+      spotBefore?: string;
+      spotAfter?: string;
+    }) => Promise<void>;
   } | null;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
@@ -318,7 +327,12 @@ export function ProofView({
     left: number;
     spots: SelectionSpot[];
     spotMessage: string | null;
+    blocks: PositionBlock[];
+    /** 打開時校樣是哪一版：之後被別處改了就關掉請重選（Codex 審查 P2）。 */
+    openedKey: string;
   } | null>(null);
+  /** 面板因為文章被別處改了而關掉時要講的話。 */
+  const [pickNotice, setPickNotice] = useState<string | null>(null);
   const [imageSending, setImageSending] = useState(false);
   const selectionCheckRef = useRef(selectionCheck);
   selectionCheckRef.current = selectionCheck;
@@ -977,9 +991,19 @@ export function ProofView({
   const openImagePick = (pick: { text: string; top: number; left: number }): void => {
     const body = editBody();
     const texts = body ? Array.from(body.children).map((element) => element.textContent ?? '') : [];
-    const { spots, message } = selectionImageSpots(texts, pick.text);
-    setImagePick({ ...pick, spots, spotMessage: message });
+    const { spots, message, blocks: seen } = selectionImageSpots(texts, pick.text);
+    setPickNotice(null);
+    setImagePick({ ...pick, spots, spotMessage: message, blocks: seen, openedKey: revisionKey });
   };
+
+  // 面板開著時文章被別處改了（不是這次打字中自己存的、也不是正在送出時的自動存）：位置選項是照舊版算的，關掉請重選。
+  useEffect(() => {
+    if (imagePick === null) return;
+    if (selectionPickStale({ openedKey: imagePick.openedKey, currentKey: revisionKey, own: hold?.own ?? [], sending: imageSending })) {
+      setImagePick(null);
+      setPickNotice('文章剛被改過，「用此段配圖」的位置可能不對了，請重新選一次那段。');
+    }
+  }, [revisionKey, imagePick, hold, imageSending]);
 
   const sendImage = (input: { note: string | null; spot: number }): void => {
     const pick = imagePick;
@@ -991,7 +1015,7 @@ export function ProofView({
         note: input.note,
         spot: input.spot,
         // 畫面上看到幾個位置：後端用存好的那一版算出來不一樣就拒絕（審查 2）。
-        spotCount: selectionImageSpotCount({ spots: pick.spots, message: pick.spotMessage }),
+        ...selectionImageSpotHints({ spots: pick.spots, message: pick.spotMessage, blocks: pick.blocks }, input.spot),
       });
     };
     setImageSending(true);
@@ -1131,6 +1155,14 @@ export function ProofView({
       {saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 沒存成功：{saveError}
+        </p>
+      )}
+      {pickNotice && (
+        <p className="proof-status proof-status-warn" role="status">
+          <Icon name="alert" size={15} /> {pickNotice}
+          <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setPickNotice(null)}>
+            知道了
+          </button>
         </p>
       )}
       {actError && !saveError && (

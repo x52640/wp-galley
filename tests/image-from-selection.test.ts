@@ -20,6 +20,8 @@ import {
   selectionImageLength,
   selectionSpotAnchor,
   selectionSpots,
+  spotEdges,
+  spotEdgesMatch,
   SELECTION_IMAGE_MAX,
   SELECTION_IMAGE_MIN,
 } from '../src/contract/selection-image.js';
@@ -508,5 +510,55 @@ describe('HTTP：POST /api/jobs/:uuid/briefs（選取那種 body）', () => {
     expect(moved.statusCode).toBe(400);
     expect(moved.json().error.message).toContain('段落整理後位置變了');
     expect(briefCount(fixture!)).toBe(0);
+  });
+});
+
+describe('位置的兩側指紋（Codex 審查 P2）', () => {
+  it('取邊界前那塊的結尾、後那塊的開頭；最前面／最後面一側是空的', () => {
+    const blocks = [{ text: '甲'.repeat(25) + '前段結尾' }, { text: '後段開頭' + '乙'.repeat(25) }];
+    expect(spotEdges(blocks, 0)).toEqual({ before: '甲'.repeat(16) + '前段結尾', after: '後段開頭' + '乙'.repeat(16) });
+    expect(spotEdges(blocks, -1)).toEqual({ before: '', after: '甲'.repeat(20) });
+    expect(spotEdges(blocks, 1).after).toBe('');
+  });
+
+  it('wrapper 拆成兩段：位置個數一樣，但「結尾」的兩側指紋不一樣', () => {
+    const a = '第一段很長的內容一二三四五六七八九十，講的是早上的事。';
+    const b = '第二段講的是下午的雨，下得很急。';
+    const edited = [{ text: `${a}${b}` }, { text: '下一節。' }];
+    const saved = [{ text: a }, { text: b }, { text: '下一節。' }];
+    const before = selectionSpots(edited, 0, 0);
+    const after = selectionSpots(saved, 0, 0);
+    expect(before.length).toBe(after.length);
+    const end = (spots: ReturnType<typeof selectionSpots>) => spots.find((spot) => spot.kind === 'end')!;
+    expect(spotEdgesMatch(spotEdges(edited, end(before).afterBlockIndex), spotEdges(saved, end(after).afterBlockIndex))).toBe(false);
+    // 沒變的開頭照樣對得上。
+    expect(spotEdgesMatch(spotEdges(edited, before[0]!.afterBlockIndex), spotEdges(saved, after[0]!.afterBlockIndex))).toBe(true);
+  });
+
+  it('後端：送來的兩側指紋跟目前這一版不一樣就 400，不建需求；一樣就建', async () => {
+    const { f, codex, uuid } = await setup();
+    const contentHash = hashOf(f.core, uuid);
+    await expect(
+      f.core.requestImageFromSelection(uuid, {
+        selection: ACROSS,
+        spot: 3,
+        spotCount: 4,
+        spotBefore: '別的段落結尾',
+        spotAfter: '第五段：睡前寫下這一篇。',
+        contentHash,
+      }),
+    ).rejects.toThrow('段落整理後位置變了，請再選一次');
+    expect(briefCount(f)).toBe(0);
+    expect(codex.imageCalls).toHaveLength(0);
+    const { generation } = await f.core.requestImageFromSelection(uuid, {
+      selection: ACROSS,
+      spot: 3,
+      spotCount: 4,
+      spotBefore: '第四段：晚上把去年的筆記翻出來對照。',
+      spotAfter: '第五段：睡前寫下這一篇。',
+      contentHash,
+    });
+    await generation;
+    expect(briefCount(f)).toBe(1);
   });
 });

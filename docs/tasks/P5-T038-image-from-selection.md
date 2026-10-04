@@ -87,9 +87,9 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：審查五條已修（打字中「用這張」「上傳這張」反灰、送 `spotCount` 位置個數對不上回 400、`saveThenAct` 動作出錯不算存檔失敗、改那句希望的事件 `contextRefreshed: false`、prompt 拿掉放置位置那半句）；spec 與 known-issues 已同步
-- 已通過驗證：`npm run verify` 綠（90 檔、2001 測試）；之前的 `?fixtures=1` 截圖（膠囊兩顆、面板、卡片依據、用這張放在段落開頭、打字模式自動存）
-- 下一步：主 session 再審、使用者手動驗證（真的 Codex 生圖、只存草稿）、commit
+- 最後完成：PR #26 Codex 審查三條 P2 已修（送所選位置兩側的字 `spotBefore`／`spotAfter`、後端比對不一致回 400；面板開著時文章被別處改了就關掉請重選；送出後換篇不動畫面 `stillOnJob`）；spec 與 known-issues 已同步
+- 已通過驗證：`npm run verify` 綠（90 檔、2006 測試）
+- 下一步：主 session 審查、commit、更新 PR；使用者手動驗證（真的 Codex 生圖、只存草稿）
 - Blocker：無
 
 ## 完成結果

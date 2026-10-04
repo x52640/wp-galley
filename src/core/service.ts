@@ -304,7 +304,7 @@ export class CoreService {
     return this.ctx.images.requestImageAtPosition(uuid, input);
   }
 
-  requestImageFromSelection(uuid: string, input: { selection: string; spot?: number; spotCount?: number; contentHash: string; note?: string | null; timeoutMs?: number }): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
+  requestImageFromSelection(uuid: string, input: { selection: string; spot?: number; spotCount?: number; spotBefore?: string; spotAfter?: string; contentHash: string; note?: string | null; timeoutMs?: number }): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
     return this.ctx.images.requestImageFromSelection(uuid, input);
   }
 

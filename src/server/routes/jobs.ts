@@ -181,6 +181,8 @@ const ImageFromSelectionBody = z
     selection: z.string().min(1).max(20_000),
     spot: z.number().int().min(0).max(10_000).optional(),
     spotCount: z.number().int().min(1).max(10_001).optional(),
+    spotBefore: z.string().max(200).optional(),
+    spotAfter: z.string().max(200).optional(),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
     note: z
       .string()
@@ -686,6 +688,8 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
               contentHash: body.contentHash,
               ...(body.spot === undefined ? {} : { spot: body.spot }),
               ...(body.spotCount === undefined ? {} : { spotCount: body.spotCount }),
+              ...(body.spotBefore === undefined ? {} : { spotBefore: body.spotBefore }),
+              ...(body.spotAfter === undefined ? {} : { spotAfter: body.spotAfter }),
               ...(body.note === undefined ? {} : { note: body.note }),
             }),
           );

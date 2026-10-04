@@ -130,6 +130,12 @@ export interface ImageFromSelectionRequest {
    * 畫面上定位不到選取時不送。
    */
   readonly spotCount?: number;
+  /**
+   * 畫面上所選位置兩側的字（`spotEdges`：前面那塊結尾、後面那塊開頭，各取忽略空白後 20 字；最前面／最後面那側是空字串）。
+   * 跟後端用目前這一版算的不一樣（段落被拆開或合併，邊界挪了）就 400，不猜。畫面上定位不到選取時不送。
+   */
+  readonly spotBefore?: string;
+  readonly spotAfter?: string;
   readonly contentHash: string;
   readonly note?: string;
 }

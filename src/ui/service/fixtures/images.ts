@@ -9,6 +9,8 @@ import {
   selectionSpotAnchor,
   selectionSpots,
   SELECTION_SPOTS_CHANGED_MESSAGE,
+  spotEdges,
+  spotEdgesMatch,
 } from '../../../contract/selection-image.js';
 import type { ImageBrief, ImageCandidate, ImageGenerationStatus, MediaUploadResult, PublisherApi } from '../types.js';
 import { GREY_PNG } from './data.js';
@@ -145,6 +147,12 @@ export const imagesApi: Pick<PublisherApi, 'getImageGenerationStatus' | 'generat
     if (input.spotCount !== undefined && input.spotCount !== spots.length) throw new Error(SELECTION_SPOTS_CHANGED_MESSAGE);
     const spot = spots.find((candidate) => candidate.spot === (input.spot ?? 0));
     if (spot === undefined) throw new Error(`位置 ${input.spot} 不在選取範圍內`);
+    if (
+      (input.spotBefore !== undefined || input.spotAfter !== undefined) &&
+      !spotEdgesMatch({ before: input.spotBefore ?? '', after: input.spotAfter ?? '' }, spotEdges(blocks, spot.afterBlockIndex))
+    ) {
+      throw new Error(SELECTION_SPOTS_CHANGED_MESSAGE);
+    }
     const { anchor, position } = selectionSpotAnchor(blocks, spot);
     const brief: ImageBrief = {
       id: Math.floor(Math.random() * 90_000) + 10_000,

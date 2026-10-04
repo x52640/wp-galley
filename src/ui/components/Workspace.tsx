@@ -32,7 +32,7 @@ import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofVi
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
 import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
-import { selectionImageBlockedReason, selectionImageContentHash } from '../lib/selection-image-view.js';
+import { selectionImageBlockedReason, selectionImageContentHash, stillOnJob } from '../lib/selection-image-view.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -582,7 +582,11 @@ export function Workspace({
               canSelectToFactCheck(display, { finished: isFinished(job.state) })
                 ? {
                     blockedReason: selectionImageBlocked,
-                    onRequest: async ({ text, note, spot, spotCount }) => {
+                    onRequest: async ({ text, note, spot, spotCount, spotBefore, spotAfter }) => {
+                      // 回來時可能已經換到別篇（Workspace 重用）：不是發起的那一篇就不動畫面（跟 startFactCheck 同一套）。
+                      const origin = job.uuid;
+                      const stillHere = (): boolean =>
+                        stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
                       // 畫面那一版：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
                       const contentHash = selectionImageContentHash({
                         editing: editing !== null,
@@ -596,15 +600,18 @@ export function Workspace({
                           selection: text,
                           spot,
                           ...(spotCount === undefined ? {} : { spotCount }),
+                          ...(spotBefore === undefined ? {} : { spotBefore }),
+                          ...(spotAfter === undefined ? {} : { spotAfter }),
                           contentHash,
                           ...(note === null ? {} : { note }),
                         });
+                        if (!stillHere()) return;
                         // 生圖在背後跑：打開右欄圖片區並捲到那張卡片（跟「請 AI 配一張」一樣）。
                         setImagesOpen(true);
                         setFocusBriefId(brief.id);
                         await refresh();
                       } catch (cause) {
-                        setAgentError(`用此段配圖沒有開始：${describeError(cause)}`);
+                        if (stillHere()) setAgentError(`用此段配圖沒有開始：${describeError(cause)}`);
                       }
                     },
                   }

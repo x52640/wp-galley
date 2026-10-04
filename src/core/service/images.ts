@@ -26,6 +26,8 @@ import {
   selectionSpotAnchor,
   selectionSpots,
   SELECTION_SPOTS_CHANGED_MESSAGE,
+  spotEdges,
+  spotEdgesMatch,
 } from '../../contract/selection-image.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { sha256Of } from '../../media/upload.js';
@@ -297,7 +299,8 @@ export class ImagesModule {
    *   `locateSelection`）：找不到或出現不只一次都拒絕（400）。
    * - 圖放哪裡由使用者選（`spot`：0＝這段開頭、中間＝選取內第 k 段之後、最後＝這段結尾，`selectionSpots`），
    *   錨點照「在這裡插圖」同一套（「這段開頭」先引用開頭那段、放在它之前）。位置只影響放哪，不影響 prompt。
-   * - `spotCount`（選填）是畫面上看到的位置個數，跟這裡用目前這一版算的不一樣就拒絕（400），不猜。
+   * - `spotCount`（選填）是畫面上看到的位置個數、`spotBefore`／`spotAfter`（選填）是所選位置兩側的字（`spotEdges`），
+   *   跟這裡用目前這一版算的不一樣就拒絕（400），不猜。
    * - prompt 用 `buildSelectionImagePrompt`：選取文字為主，文章標題與所在小節標題只當背景。
    * - purpose 記卡片上要講的依據（「依選取段落：『…』（共 N 字）」）。
    * - 選取文字、標題、那句話、組好的 prompt 有 WordPress 密碼一律先擋（D-023）。
@@ -308,6 +311,8 @@ export class ImagesModule {
       selection: string;
       spot?: number;
       spotCount?: number;
+      spotBefore?: string;
+      spotAfter?: string;
       contentHash: string;
       note?: string | null;
       timeoutMs?: number;
@@ -335,6 +340,16 @@ export class ImagesModule {
     const spot = spots.find((candidate) => candidate.spot === wanted);
     if (spot === undefined) {
       throw new InvalidInputError(`位置 ${wanted} 不在選取範圍內（可用的是 0 到 ${spots[spots.length - 1]!.spot}）`);
+    }
+    // 位置個數一樣、邊界卻挪了（段落被拆開／合併）：比邊界兩側的字（Codex 審查 P2）。
+    if (
+      (input.spotBefore !== undefined || input.spotAfter !== undefined) &&
+      !spotEdgesMatch(
+        { before: input.spotBefore ?? '', after: input.spotAfter ?? '' },
+        spotEdges(blocks, spot.afterBlockIndex),
+      )
+    ) {
+      throw new InvalidInputError(SELECTION_SPOTS_CHANGED_MESSAGE);
     }
     await this.assertCanStartUserImage(job);
     this.recheckAfterAwait(job, revisionRow.id);

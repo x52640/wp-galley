@@ -5,8 +5,10 @@ import {
   locateSelection,
   selectionImageLength,
   selectionSpots,
+  spotEdges,
   type SelectionSpot,
 } from '../../contract/selection-image.js';
+import type { PositionBlock } from '../../contract/position-anchor.js';
 
 /**
  * 選一段文字「用此段配圖」（D-037，P5-T038）畫面的判斷。規則本身在共用契約 `contract/selection-image.ts`；
@@ -67,21 +69,48 @@ export function capsuleNotes(input: {
 export function selectionImageSpots(
   blockTexts: readonly string[],
   text: string,
-): { spots: SelectionSpot[]; message: string | null } {
+): { spots: SelectionSpot[]; message: string | null; blocks: PositionBlock[] } {
   const blocks = blockTexts.map((value) => ({ text: value.replace(/\s+/g, ' ').trim() }));
   const located = locateSelection(blocks, text);
   if (!located.ok) {
-    return { spots: [{ spot: 0, kind: 'start', afterBlockIndex: -1, label: '這段開頭' }], message: located.message };
+    return { spots: [{ spot: 0, kind: 'start', afterBlockIndex: -1, label: '這段開頭' }], message: located.message, blocks };
   }
-  return { spots: selectionSpots(blocks, located.first, located.last), message: null };
+  return { spots: selectionSpots(blocks, located.first, located.last), message: null, blocks };
 }
 
 /**
- * 送出時帶的位置個數（`spotCount`）：後端用存好的那一版算出來不一樣就拒絕，不讓圖默默放錯（審查 2）。
- * 畫面上定位不到選取（只剩「這段開頭」）時不帶，交給後端自己定位。
+ * 送出時跟著位置一起帶的核對資料（Codex 審查 P2）：畫面上看到幾個位置（`spotCount`），以及所選位置兩側的字
+ * （`spotBefore`／`spotAfter`，`spotEdges`）。後端用存好的那一版算出來對不上就拒絕，不讓圖默默放錯。
+ * 畫面上定位不到選取時什麼都不帶，交給後端自己定位。
  */
-export function selectionImageSpotCount(result: { spots: readonly SelectionSpot[]; message: string | null }): number | undefined {
-  return result.message === null ? result.spots.length : undefined;
+export function selectionImageSpotHints(
+  result: { spots: readonly SelectionSpot[]; message: string | null; blocks: readonly PositionBlock[] },
+  spot: number,
+): { spotCount?: number; spotBefore?: string; spotAfter?: string } {
+  if (result.message !== null) return {};
+  const chosen = result.spots.find((candidate) => candidate.spot === spot);
+  if (chosen === undefined) return { spotCount: result.spots.length };
+  const edges = spotEdges(result.blocks, chosen.afterBlockIndex);
+  return { spotCount: result.spots.length, spotBefore: edges.before, spotAfter: edges.after };
+}
+
+/**
+ * 「用此段配圖」面板開著時，文章被**別處**改了（不是這次打字中自己存的那幾版、也不是正在送出時的自動存）：
+ * 面板上的位置選項是照舊版算的，要關掉請使用者重選（Codex 審查 P2）。
+ */
+export function selectionPickStale(state: {
+  openedKey: string;
+  currentKey: string;
+  own: readonly string[];
+  sending: boolean;
+}): boolean {
+  if (state.sending) return false;
+  return state.currentKey !== state.openedKey && !state.own.includes(state.currentKey);
+}
+
+/** 非同步回來時畫面還在不在發起的那一篇（Workspace 換篇會重用，跟 `startFactCheck` 同一套；Codex 審查 P2）。 */
+export function stillOnJob(state: { alive: boolean; current: string; origin: string }): boolean {
+  return state.alive && state.current === state.origin;
 }
 
 /** 面板標題：「依選取段落：「開頭十幾個字…」（共 N 字）」——跟卡片上講的同一句。 */

@@ -127,3 +127,27 @@ export function selectionSpotAnchor(blocks: readonly PositionBlock[], spot: Sele
 export function selectionBasisLabel(text: string): string {
   return `依選取段落：「${excerptOf(text)}」（共 ${selectionImageLength(text)} 字）`;
 }
+
+/** 位置指紋每一側取幾個字（忽略空白後）。 */
+export const SPOT_EDGE_CHARS = 20;
+
+/**
+ * 位置的「兩側指紋」（P5-T038 Codex 審查）：邊界**前面那塊的結尾**與**後面那塊的開頭**各取忽略空白後的 20 字
+ * （文章最前面／最後面那一側是空字串）。取貼著邊界的那一截：段落被拆開或合併時，邊界兩側的字一定變，
+ * 光比位置個數抓不到（例如 `<div><p>A</p><p>B</p></div>` 存檔後拆成兩段，個數一樣、邊界卻挪了）。
+ */
+export function spotEdges(blocks: readonly PositionBlock[], afterBlockIndex: number): { before: string; after: string } {
+  const compact = (index: number): string[] => Array.from((blocks[index]?.text ?? '').replace(/\s+/gu, ''));
+  const before = afterBlockIndex >= 0 ? compact(afterBlockIndex) : [];
+  const after = compact(afterBlockIndex + 1);
+  return {
+    before: before.slice(Math.max(before.length - SPOT_EDGE_CHARS, 0)).join(''),
+    after: after.slice(0, SPOT_EDGE_CHARS).join(''),
+  };
+}
+
+/** 畫面送來的兩側指紋跟用目前這一版算的一不一樣（忽略空白）。 */
+export function spotEdgesMatch(seen: { before: string; after: string }, current: { before: string; after: string }): boolean {
+  const strip = (value: string): string => value.replace(/\s+/gu, '');
+  return strip(seen.before) === strip(current.before) && strip(seen.after) === strip(current.after);
+}

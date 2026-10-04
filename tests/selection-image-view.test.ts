@@ -6,7 +6,9 @@ import {
   selectionImageContentHash,
   selectionImageHeading,
   selectionImageProblem,
-  selectionImageSpotCount,
+  selectionImageSpotHints,
+  selectionPickStale,
+  stillOnJob,
   selectionImageSpots,
 } from '../src/ui/lib/selection-image-view.js';
 import { planSelectionCheck } from '../src/ui/lib/check-while-writing.js';
@@ -116,10 +118,30 @@ describe('打字模式中「用這張」反灰（審查 1）', () => {
   });
 });
 
-describe('送出的位置個數（審查 2）', () => {
-  it('畫面上定位得到：帶位置個數；定位不到：不帶', () => {
-    const texts = ['第二段的內容在這裡。', '第三段的內容在這裡。'];
-    expect(selectionImageSpotCount(selectionImageSpots(texts, '的內容在這裡。\n\n第三段'))).toBe(3);
-    expect(selectionImageSpotCount(selectionImageSpots(texts, '不在文章裡的字'))).toBeUndefined();
+describe('送出的位置核對資料（審查 2、Codex 審查 P2）', () => {
+  const texts = ['第二段的內容在這裡。', '第三段的內容在這裡。', '下一段。'];
+
+  it('畫面上定位得到：帶位置個數與所選位置兩側的字；定位不到：都不帶', () => {
+    const result = selectionImageSpots(texts, '的內容在這裡。\n\n第三段');
+    expect(selectionImageSpotHints(result, 2)).toEqual({ spotCount: 3, spotBefore: '第三段的內容在這裡。', spotAfter: '下一段。' });
+    expect(selectionImageSpotHints(result, 0)).toEqual({ spotCount: 3, spotBefore: '', spotAfter: '第二段的內容在這裡。' });
+    expect(selectionImageSpotHints(selectionImageSpots(texts, '不在文章裡的字'), 0)).toEqual({});
+  });
+});
+
+describe('面板開著時文章被別處改了：關掉請重選（Codex 審查 P2）', () => {
+  it('版本換成別處改的才算；自己這次打字中存的、正在送出時的都不算', () => {
+    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h1', own: [], sending: false })).toBe(false);
+    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: [], sending: false })).toBe(true);
+    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: ['h2'], sending: false })).toBe(false);
+    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: [], sending: true })).toBe(false);
+  });
+});
+
+describe('送出後換到別篇：不動畫面（Codex 審查 P2）', () => {
+  it('還在發起的那一篇才更新', () => {
+    expect(stillOnJob({ alive: true, current: 'a', origin: 'a' })).toBe(true);
+    expect(stillOnJob({ alive: true, current: 'b', origin: 'a' })).toBe(false);
+    expect(stillOnJob({ alive: false, current: 'a', origin: 'a' })).toBe(false);
   });
 });

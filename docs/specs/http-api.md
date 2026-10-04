@@ -143,9 +143,9 @@
   `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
   規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
 - 選一段文字「用此段配圖」（D-037，P5-T038，新增、不改既有欄位）：同一條 `POST /briefs`，body 有 `selection` 就是這一種
-  （`ImageFromSelectionRequest`：`selection`、選填 `spot`（整數 ≥ 0，預設 0＝這段開頭）、選填 `spotCount`（畫面上看到的位置個數，≥ 1）、`contentHash`、選填 `note`），否則照位置那一種。
+  （`ImageFromSelectionRequest`：`selection`、選填 `spot`（整數 ≥ 0，預設 0＝這段開頭）、選填 `spotCount`（畫面上看到的位置個數，≥ 1）、選填 `spotBefore`／`spotAfter`（所選位置兩側的字，各 ≤ 200 字元）、`contentHash`、選填 `note`），否則照位置那一種。
   兩種都是 `.strict()`：選取那種多送 `afterBlockIndex`、`prompt` 都 400。zod 只擋超大 body（`selection` ≤ 20000 字元）；字數 10～3000 由
-  CoreService 照共用規則驗（400，講太短／太長）。找不到選取、出現不只一次、`spot` 不在範圍、`spotCount` 跟後端用目前這一版算的個數不一樣（「段落整理後位置變了，請再選一次」）400；其餘狀態碼同上一條。
+  CoreService 照共用規則驗（400，講太短／太長）。找不到選取、出現不只一次、`spot` 不在範圍、`spotCount` 或兩側的字跟後端用目前這一版算的不一樣（「段落整理後位置變了，請再選一次」）400；其餘狀態碼同上一條。
   `ImageBrief` 多一個欄位 `fromSelection`（boolean；照選取配的才 true）。規則見 [agent-tasks.md](agent-tasks.md)「選一段文字『用此段配圖』」。
 - 在卡片上改配圖需求（D-025，P5-T025）：`PATCH /briefs/:id` 的 body 是 `.strict()`，`prompt`／`note` **只能送一個**
   （都送、都不送、多送欄位例如 `aspectRatio` 都是 400）；長度跟畫面計數同一套（`prompt` 去頭尾後數 code point、上限 2000，
