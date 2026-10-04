@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
-import { api, describeError, isFixtureMode } from '../service/client.js';
-import type { LoadedJob, ProofMark } from '../service/types.js';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
+import type { LoadedJob } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
-import type { SuggestionKind } from '../lib/review-kinds.js';
-import { markScopes, pickClickedMark } from '../lib/factcheck-view.js';
+import type { ProofHighlight } from '../lib/proof-highlights.js';
 import {
   SelectionActions,
   SelectionNotice,
@@ -13,14 +10,16 @@ import {
   type SelectionCheckInput,
   type SelectionImageInput,
 } from './SelectionActions.js';
-import { attachEditInterceptors, markBlank, unwrapHighlightMarks } from '../lib/proof-edit-dom.js';
 import { useProofEditing } from '../lib/use-proof-editing.js';
+import { useProofFrame, useProofMeasure } from '../lib/use-proof-frame.js';
 import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
+import { MarkGutter } from './MarkPin.js';
+import { InsertSlots, useInsertSlots } from './InsertSlots.js';
+
+export type { ProofHighlight } from '../lib/proof-highlights.js';
 
 /**
- * 中央校樣。
- *
- * 兩個關鍵決定：
+ * 中央校樣。這個元件只做組裝：各部分在哪裡，下面每一節都標了檔案。
  *
  * **一、iframe 直接指向 /api/jobs/:uuid/preview。**
  * 本機守門對每個回應都加 `X-Frame-Options: DENY`，那會連同源嵌入都擋掉；
@@ -33,19 +32,12 @@ import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
  *
  * 示範資料模式沒有後端可以指，改成把 HTML 放進 `srcdoc`，其餘完全一樣。
  *
- * **二、iframe 不自己捲動。**
- * 高度撐到內容的完整高度，捲動交給外層容器。這樣每一段的座標在文件裡是固定的，
- * 頁邊符號只要絕對定位在同一個捲動容器裡就會跟著一起動，不需要同步兩個捲軸。
- * 「不捲動」是做出來的，不是期望（P5-T029）：iframe 帶 `scrolling="no"`，載入後外層用 CSSOM 把文件的
- * `html` 設成 `overflow: hidden`（不注入 script），量高度時把 body 的下外距與 html 的下內距算進去
- * ——以前只量 body 的底邊，漏掉瀏覽器預設的 8px 下外距，文件永遠多出 8px 可以捲，滑鼠停在文章上
- * 滾輪要先把這 8px 捲完，外層才會動（「要滾兩次」）。文件不能捲，Chrome 就把滾輪直接交給外層。
- * 打字時瀏覽器為了讓游標看得見仍可能把文件捲下去；量測時一律捲回頂端。
+ * **二、iframe 不自己捲動**，高度撐到內容的完整高度、捲動交給外層容器（P5-T029）。
+ * 載入、量測、ResizeObserver、捲動對齊在 `lib/use-proof-frame.ts`，高度怎麼量在 `lib/proof-frame.ts`（P5-T043）。
  *
- * **三、建議標在字上（B1）。**
- * 外層把待處理的那段字包進 `<mark>`，顏色用 CSSOM（`element.style`）設定：文件的
- * CSP 擋的是 `<style>` 與 style 屬性，不管外層透過 CSSOM 改樣式；也不注入任何 script。
- * 點標記的事件由外層掛在文件上（處理函式屬於外層，iframe 自己仍然不能跑 script）。
+ * **三、建議標在字上（B1）。** 外層把待處理的那段字包進 `<mark>`，用 CSSOM 上色、不注入 script；
+ * 點標記由外層掛在文件上的事件處理。怎麼包、點到哪一張在 `lib/proof-highlights.ts`（P5-T043）。
+ * 左側的校對符號在 `MarkPin.tsx`。
  *
  * **四、直接在文章上改（P5-T010）。**
  * 編輯時把 `.preview-body` 設成 contenteditable：使用者看到的是排好版的文章，不是標籤。
@@ -67,9 +59,8 @@ import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
  * 正文是空的（新稿件剛建好）時放一個空段落與「從這裡開始寫…」的提示（CSSOM 規則，不改正文）。
  *
  * **五、在這裡插圖（P5-T016）。**
- * 段落之間（含最前面與最後面）滑鼠移過去出現「在這裡插圖」。跟頁邊符號一樣畫在 iframe 外層，
- * 位置用同一份量到的區塊座標算（上一段的底與下一段的頂的中間），iframe 裡什麼都不加。
- * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。
+ * 段落之間滑鼠移過去出現「在這裡插圖」，畫在 iframe 外層、位置用同一份量到的區塊座標。
+ * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。狀態與畫面在 `InsertSlots.tsx`（P5-T043）。
  *
  * **六、選字「查證這句」（P6-T005，D-034；打字模式 D-036）。**
  * 在正文或標題上選一段字，選取下方浮出一顆膠囊按鈕（樣子跟「在這裡插圖」一致），畫在 iframe 外層，
@@ -99,83 +90,6 @@ export interface ProofEditRequest {
   caretSkipInside?: string | null;
   blockIndex: number | null;
   nonce: number;
-}
-
-/** 校樣上要標出來的一段字。 */
-export interface ProofHighlight {
-  /** 卡片的 key：校稿 `r<id>`、查證 `f<id>`（兩張表的 id 會撞號）。 */
-  id: string;
-  /** 校稿的四種分類，或查證（跟校稿不同的樣式，D-034）。 */
-  kind: SuggestionKind | 'factcheck';
-  text: string;
-  /** 掛在第幾個頂層區塊；null＝定位不到，就在整篇裡找第一個。 */
-  blockIndex: number | null;
-  /**
-   * 落在這段字（建議的 after）裡的不標（P5-T017）：「很多事→很多事情」在已經有「很多事情」的文章裡，
-   * 要標的是另一個還沒改的「很多事」，跟按接受真的會改的位置一致。
-   */
-  skipInside?: string | null;
-}
-
-/**
- * 標記的顏色。跟 styles/01-tokens.css 的 --kind-* 同一套，這裡要能直接寫進 iframe。
- * 查證（`factcheck`，對應 --kind-check）用靛藍**虛線底線**、很淡的底，跟校稿的實線底線分得開；
- * 它用 text-decoration 畫線，校稿標記包在它裡面（同一句既有觀察卡片又有查證）時兩條線都看得到。
- */
-const HIGHLIGHT_COLORS: Record<SuggestionKind | 'factcheck', { bg: string; line: string; dashed?: boolean }> = {
-  typo: { bg: '#FCE3D6', line: '#C2410C' },
-  style: { bg: '#E4EDE8', line: '#3F5B4F' },
-  fact: { bg: '#DDE8F5', line: '#1E4F8A' },
-  source: { bg: '#F6EDCF', line: '#8A6A14' },
-  factcheck: { bg: '#F0EFFB', line: '#3730A3', dashed: true },
-};
-
-/**
- * 文件內容的完整高度（P5-T029）。
- *
- * 不能用 documentElement.scrollHeight：它至少等於 iframe 目前的高度，高度只會被撐大、不會縮回去。
- * 量 body 的底邊，再加上 body 的下外距（瀏覽器預設 8px）與最後一個子元素可能穿出來的下外距、html 的下內距與框線
- * ——少算任何一點，文件就會多出幾 px 可以捲。
- *
- * 浮動（`alignleft`／`alignright` 的圖）不撐高父元素：載入時外層把 body 設成 `display: flow-root`（CSSOM），
- * body 的底邊才包得住最後一張浮動圖。再保險一層：文件的內容比 iframe 目前的高度還高（scrollHeight 大於 clientHeight，
- * 例如絕對定位的東西穿出來），就用 scrollHeight——iframe 不能捲，少算就是把內容裁掉（P5-T029 審查 #3）。
- * 只在「超出」時才用 scrollHeight：它至少等於 iframe 目前的高度，平常用它的話高度只會變大、不會縮回去。
- */
-function contentHeight(doc: Document): number {
-  const win = doc.defaultView;
-  const body = doc.body;
-  const scrollY = win?.scrollY ?? 0;
-  const px = (value: string | undefined): number => {
-    const n = Number.parseFloat(value ?? '');
-    return Number.isFinite(n) ? n : 0;
-  };
-  const bodyStyle = win?.getComputedStyle(body);
-  const htmlStyle = win?.getComputedStyle(doc.documentElement);
-  const last = body.lastElementChild;
-  const lastMargin = last ? px(win?.getComputedStyle(last).marginBottom) : 0;
-  let bottom = body.getBoundingClientRect().bottom + scrollY;
-  if (last) bottom = Math.max(bottom, last.getBoundingClientRect().bottom + scrollY + lastMargin);
-  bottom += px(bodyStyle?.marginBottom) + px(htmlStyle?.paddingBottom) + px(htmlStyle?.borderBottomWidth);
-  const root = doc.documentElement;
-  const measured = Math.ceil(bottom);
-  if (root.scrollHeight > root.clientHeight) return Math.max(measured, root.scrollHeight);
-  // 差不到幾 px 就維持目前的高度：量法跟 scrollHeight 差個一兩 px 時，不會在「超出→撐高→縮回→又超出」之間來回跳。
-  if (root.clientHeight > measured && root.clientHeight - measured < 4) return root.clientHeight;
-  return measured;
-}
-
-interface BlockBox {
-  index: number;
-  top: number;
-  /**
-   * 區塊的高度。標亮某一段時要畫一個蓋住整段的框，所以高度也得量。
-   *
-   * 框畫在 iframe **外面**：文件本身帶著 `default-src 'none'` 的 CSP，而且
-   * 「不去碰校樣文件的內部」本來就是這個元件的原則——量得到位置就夠了。
-   */
-  height: number;
-  text: string;
 }
 
 export function ProofView({
@@ -255,94 +169,19 @@ export function ProofView({
    */
   selectionImage?: SelectionImageInput | null;
 }): JSX.Element {
-  const [srcDoc, setSrcDoc] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [bodyMissing, setBodyMissing] = useState(false);
-  const [blocks, setBlocks] = useState<BlockBox[]>([]);
-  const [height, setHeight] = useState(600);
   const [pinned, setPinned] = useState<string | null>(null);
-  /** 正文欄在 iframe 裡的水平位置：插圖的線只畫在文字那一欄，不橫跨整張紙。 */
-  const [column, setColumn] = useState<{ left: number; width: number } | null>(null);
-  /** 打開了哪一個「在這裡插圖」（插在第幾塊之後）；null＝沒打開。 */
-  const [inserting, setInserting] = useState<number | null>(null);
   const [showMarks, setShowMarks] = useState(true);
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
-  /**
-   * 量測的世代編號。
-   *
-   * 上一版的 iframe 排了好幾個延後的量測（字型載完、ResizeObserver、250ms 的
-   * 保險），版本一換那些回呼還在路上，回來時會把剛清掉的舊區塊又補回去。所以
-   * 每次量測都帶著當時的世代，過期的就直接不算。
-   */
-  const measureToken = useRef(0);
-  // 父層每次刷新都會給新的物件；用 ref 接住 callback，量測不必跟著重建。
-  const onBlocksRef = useRef(onBlocks);
-  onBlocksRef.current = onBlocks;
-  const onPreviewedRef = useRef(onPreviewed);
-  onPreviewedRef.current = onPreviewed;
-  const onPreviewHashRef = useRef(onPreviewHash);
-  onPreviewHashRef.current = onPreviewHash;
-  const onHighlightRef = useRef(onHighlight);
-  onHighlightRef.current = onHighlight;
-  const activeHighlightRef = useRef(activeHighlight);
-  activeHighlightRef.current = activeHighlight;
-  const [loadCount, setLoadCount] = useState(0);
-
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
-  const fixtures = isFixtureMode();
-  /**
-   * 渲染的世代。
-   *
-   * 「渲染」不一定換 hash，但後端要等校樣**在渲染之後被載入一次**才把 RENDERED 推進
-   * PREVIEWED（人一定看過才准核准）。所以每次進入 RENDERED 就換一個網址重載一次。
-   */
-  const [renderEpoch, setRenderEpoch] = useState(0);
-  /** 示範資料上一次拿到的校樣原始碼。 */
-  const lastSrcDoc = useRef<string | null>(null);
-  useEffect(() => {
-    if (job.state === 'RENDERED') setRenderEpoch((epoch) => epoch + 1);
-  }, [job.state]);
-  const measure = useCallback((token: number) => {
-    if (token !== measureToken.current) return;
-    const frame = frameRef.current;
-    const doc = frame?.contentDocument;
-    if (!frame || !doc?.body) return;
 
-    // 先讓 iframe 貼齊內容高度，量到的座標才等於文件座標（contentHeight 說明為什麼不用 scrollHeight）。
-    // 文件本身不能捲（html overflow: hidden）；打字時瀏覽器為了游標把它捲下去的，捲回頂端。
-    const scrollY = frame.contentWindow?.scrollY ?? 0;
-    setHeight(Math.max(contentHeight(doc), 200));
-
-    const body = doc.querySelector('.preview-body');
-    const children = body ? Array.from(body.children) : [];
-    if (body) {
-      const box = body.getBoundingClientRect();
-      setColumn((current) =>
-        current !== null && current.left === box.left && current.width === box.width
-          ? current
-          : { left: box.left, width: box.width },
-      );
-    }
-    const measured = children.map((element, index) => {
-      const box = element.getBoundingClientRect();
-      return {
-        index,
-        top: box.top + scrollY,
-        height: box.height,
-        text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
-      };
-    });
-    setBlocks(measured);
-    onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
-    if (scrollY !== 0) frame.contentWindow?.scrollTo(0, 0);
-  }, []);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // effect 的順序跟抽出前一樣（React 照呼叫順序跑 effect）：渲染世代 → 打字模式 → 載入、換版本、ETag、捲動、標記
+  // → 進出編輯 → 選字膠囊 → 插圖。見 lib/use-proof-frame.ts 檔頭；tests/proof-editing.test.ts 守著。
+  // 量測（P5-T043 抽出）：渲染世代的 effect 與 `measure`。
+  const measured = useProofMeasure({ jobState: job.state, onBlocks });
+  const { frameRef, scrollRef, measure, measureToken, renderEpoch, blocks, height, column } = measured;
   // 打字模式（P5-T042 抽出）：編輯狀態、原文快照、存檔、hold、錯誤、格式工具列。
   // 必須呼叫在這個位置：裡面唯一的 effect（離開打字模式清掉 hold）抽出前就排在這裡；
-  // 進入／離開編輯與「版本被換掉」的 effect 仍在下面原位，只呼叫它給的函式。
+  // 進入／離開編輯的 effect 仍在下面原位，只呼叫它給的函式。
   const edit = useProofEditing({
     job,
     editing,
@@ -356,219 +195,43 @@ export function ProofView({
     onEndEdit,
     onEditTargetMissing,
   });
-  const { isEditing, editingRef, hold, shown, saving, refreshFormat } = edit;
+  const { isEditing, hold, shown, saving } = edit;
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
   const previewSrc = `${job.previewUrl}?v=${shown.key}&r=${shown.epoch}`;
 
-  useEffect(() => {
-    if (!fixtures) return;
-    let cancelled = false;
-    if (!hasRevision) {
-      setSrcDoc(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    api
-      .fetchPreview(job.uuid)
-      .then((text) => {
-        if (cancelled) return;
-        // 內容一模一樣時 iframe 不會重載、也就不會觸發 onLoad。抓這一次本身就等於
-        // 「看過了」，所以直接收尾，不然畫面會一直停在「載入校樣…」。
-        if (text === lastSrcDoc.current) {
-          setLoading(false);
-          onPreviewedRef.current?.();
-          return;
-        }
-        lastSrcDoc.current = text;
-        setSrcDoc(text);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(describeError(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-    // renderEpoch：渲染之後要重抓一次，示範資料才會跟真的後端一樣推進 PREVIEWED。
-    // 用 shown（不是 revisionKey）：打字中自己存的版本不重抓（D-036）。
-  }, [job.uuid, shown.key, hasRevision, fixtures, shown.epoch]);
-
-  /**
-   * 換版本＝上一版量到的東西全部作廢。
-   *
-   * 只把 loading 打開是不夠的：舊的 blocks 還在 state 裡，圖片區的「插入位置」
-   * 就還選得到上一版的第 n 段，送出去的索引會落在新版本的別的地方。所以這裡把
-   * 區塊清空並且通知父層，等新的校樣量完才會再有東西可選。
-   */
-  useEffect(() => {
-    // 編輯到一半版本被換掉（理論上編輯中動作都鎖住了，這是最後一道防線）：打的字留不住，要講出來（useProofEditing）。
-    edit.abandonOnNewVersion();
-    measureToken.current += 1;
-    setLoading(true);
-    setBodyMissing(false);
-    setBlocks([]);
-    setPinned(null);
-    setInserting(null);
-    selectionActions.clearPick();
-    onBlocksRef.current?.([]);
-    onPreviewHashRef.current?.(null);
-    // shown.key：打字中自己存的版本（D-036）不算「被換掉」，離開打字模式時才換。
-  }, [shown.key]);
-
-  // 校樣本體是 iframe 自己載的，header 拿不到，只能另外問一次 ETag。
-  useEffect(() => {
-    if (!hasRevision) {
-      onPreviewHashRef.current?.(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .fetchPreviewHash(job.uuid)
-      .then((hash) => {
-        if (!cancelled) onPreviewHashRef.current?.(hash);
-      })
-      .catch(() => {
-        // 問不到就當「無法確認」，不要因此擋住整個校樣。
-        if (!cancelled) onPreviewHashRef.current?.(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [job.uuid, revisionKey, hasRevision]);
-
-  useEffect(() => () => observerRef.current?.disconnect(), []);
-
-  const handleLoad = useCallback(() => {
-    const token = measureToken.current;
-    setLoading(false);
-    measure(token);
-    const doc = frameRef.current?.contentDocument;
-    if (!doc) return;
-    // 文件不自己捲動（見檔頭「二」）：捲動全部交給外層，滑鼠停在文章上滾一次就動。
-    doc.documentElement.style.overflow = 'hidden';
-    // body 包住浮動（alignleft／alignright 的圖），高度才量得到最後一張浮動圖的底（見 contentHeight）。
-    if (doc.body) doc.body.style.display = 'flow-root';
-    // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
-    setBodyMissing(doc.querySelector('.preview-body') === null);
-    onPreviewedRef.current?.();
-    setLoadCount((count) => count + 1);
-    // 點文章裡的標記＝在右欄亮起那一項。處理函式屬於外層，iframe 自己不跑 script。
-    doc.addEventListener('click', (event) => {
-      // 不能用 instanceof Element：iframe 裡的節點屬於另一個視窗，外層的 Element 認不得它。
-      const target = event.target as Element | null;
-      const mark = typeof target?.closest === 'function' ? target.closest('mark[data-hl]') : null;
-      if (!mark || editingRef.current) return;
-      // 同一段字有兩種標記（查證包在校稿裡面）時，點擊只會落在內層：已經亮著再點一次就換外層（審查 A）。
-      const parent = mark.parentElement?.closest('mark[data-hl]') ?? null;
-      const key = pickClickedMark(
-        { key: mark.getAttribute('data-hl') ?? '', text: mark.textContent ?? '' },
-        parent === null ? null : { key: parent.getAttribute('data-hl') ?? '', text: parent.textContent ?? '' },
-        activeHighlightRef.current,
-      );
-      onHighlightRef.current?.(key);
-    });
-    // 選字之後的膠囊（查證這句、用此段配圖；SelectionActions.tsx）：選了字就浮出、Esc 收起。
-    selectionActions.attach(doc);
-    // 編輯中：打字會改變高度，要重量；正文空不空決定要不要顯示「從這裡開始寫…」。
-    doc.addEventListener('input', () => {
-      // 開始打字：膠囊收起（不擋打字）。
+  // 校樣本體（P5-T043 抽出）：載入、換版本、ETag、捲到清單點的段落、字上標記、捲到點的標記。
+  // 選字膠囊與插圖在下面才建立；這幾個函式只在 effect 與 iframe 事件裡呼叫（render 之後），那時已經有值。
+  const frame = useProofFrame({
+    job,
+    mode,
+    hasRevision,
+    revisionKey,
+    measured,
+    edit,
+    highlights,
+    activeHighlight,
+    onHighlight,
+    focusBlock,
+    onPreviewed,
+    onPreviewHash,
+    resetViews: () => {
+      setPinned(null);
+      insert.reset();
       selectionActions.clearPick();
-      if (!editingRef.current) return;
-      const body = doc.querySelector<HTMLElement>('.preview-body');
-      if (body) markBlank(body);
-      measure(measureToken.current);
-    });
-    // 打字時瀏覽器可能把文件捲下去讓游標看得見；文件不該自己捲，捲回來並重量高度。
-    doc.addEventListener('scroll', () => {
-      if ((doc.defaultView?.scrollY ?? 0) !== 0) measure(measureToken.current);
-    });
-    // 貼上整理、拖放、按鍵攔截（P5-T028、P5-T029）：規則在 lib/proof-edit.ts。
-    attachEditInterceptors(doc, {
-      isEditing: () => editingRef.current,
-      allow: () => edit.allowRef.current,
-      formatState: () => edit.formatStateRef.current,
-      runCommand: (command) => edit.doCommandRef.current(command),
-    });
-    doc.addEventListener('selectionchange', () => {
-      if (editingRef.current) refreshFormat();
-    });
-    // 字型與圖片載入完會改變高度，要再量一次。
-    void doc.fonts.ready.then(() => measure(token));
-    observerRef.current?.disconnect();
-    const observer = new ResizeObserver(() => measure(token));
-    observer.observe(doc.documentElement);
-    observerRef.current = observer;
-    window.setTimeout(() => measure(token), 250);
-  }, [measure, refreshFormat]);
+    },
+    attachSelection: (doc) => selectionActions.attach(doc),
+    clearSelection: () => selectionActions.clearPick(),
+  });
+  const { fixtures, srcDoc, loading, error, bodyMissing, loadCount, focused } = frame;
 
-  // 從清單點過來的那一段：捲過去並畫框。量測還沒好就先不動，等量完這個 effect
-  // 會因為 blocks 改變再跑一次。
-  const focused = focusBlock === null ? undefined : blocks.find((block) => block.index === focusBlock);
-  useEffect(() => {
-    const frame = frameRef.current;
-    const scroller = scrollRef.current;
-    // 打字中不捲（例如查證跑完自動亮起那張卡片）：游標與捲動位置不能被拉走（D-036）。
-    if (focused === undefined || !frame || !scroller || editingRef.current) return;
-    const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-    scroller.scrollTo({
-      top: Math.max(offset + focused.top - 96, 0),
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-    });
-  }, [focused?.index, focused?.top]);
-
-  // 把建議標到字上。內容、清單或模式一變就整個重標：先拆掉舊的，再包新的。
-  const highlightKey = highlights.map((h) => `${h.id}:${h.kind}:${h.blockIndex}:${h.text}`).join('|');
-  useEffect(() => {
-    // 編輯中不碰正文：輪詢換掉清單也不重標，否則 normalize() 會讓游標跳掉。
-    // 進入編輯時的拆標記由下面的編輯 effect 負責。
-    if (isEditing) return;
-    const doc = frameRef.current?.contentDocument;
-    const body = doc?.querySelector('.preview-body');
-    if (!doc || !body) return;
-    // 標題裡也可能有查證的標記（只出現在標題的那句，Codex 審查 4）：跟正文一起拆。
-    const title = doc.querySelector('.preview-title');
-    unwrapHighlightMarks(body);
-    if (title) unwrapHighlightMarks(title);
-    if (mode !== 'edit') return;
-    for (const highlight of highlights) {
-      const active = highlight.id === activeHighlight;
-      for (const where of markScopes(highlight.kind, highlight.blockIndex)) {
-        const scope = where === 'block' ? body.children[highlight.blockIndex ?? -1] : where === 'title' ? title : body;
-        if (scope && wrapFirst(doc, scope, highlight, active)) break;
-      }
-    }
-    measure(measureToken.current);
-    // highlights 由 highlightKey 代表；陣列本身每次都是新的。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightKey, activeHighlight, mode, loadCount, measure, isEditing]);
-
-  // 從右欄點過來的那一項：捲到它在文章裡的位置。
-  useEffect(() => {
-    if (activeHighlight === null || mode !== 'edit' || isEditing) return;
-    const frame = frameRef.current;
-    const scroller = scrollRef.current;
-    const mark = frame?.contentDocument?.querySelector(`mark[data-hl='${activeHighlight}']`);
-    if (!frame || !scroller || !mark) return;
-    const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-    const top = mark.getBoundingClientRect().top + (frame.contentWindow?.scrollY ?? 0);
-    scroller.scrollTo({
-      top: Math.max(offset + top - 160, 0),
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-    });
-  }, [activeHighlight, mode, loadCount]);
-
-  // 進入／離開編輯（內容在 useProofEditing）。標記的拆除由上面那個 effect 負責（isEditing 變了它會重跑）。
+  // 進入／離開編輯（內容在 useProofEditing）。標記的拆除由 useProofFrame 的標記 effect 負責（isEditing 變了它會重跑）。
   useEffect(() => {
     edit.syncEditing();
     // editing 物件本身每次都是新的；nonce 才代表「又要求了一次」。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.nonce, isEditing, loadCount]);
 
-  const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
-
-  // 選字之後的膠囊與「用此段配圖」面板（P5-T041）。iframe 的選取事件在 handleLoad 交給它；
-  // handleLoad 與「換版本」的 effect 寫在上面，但都在 render 完才跑，那時這裡已經有值。
+  // 選字之後的膠囊與「用此段配圖」面板（P5-T041）。iframe 的選取事件在 useProofFrame 的 handleLoad 交給它。
   const selectionActions = useSelectionActions({
     jobUuid: job.uuid,
     mode,
@@ -581,31 +244,12 @@ export function ProofView({
     actWhileWriting: edit.actWhileWriting,
   });
 
-  // 不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
-  const canInsert = insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0;
-  useEffect(() => {
-    if (!canInsert) setInserting(null);
-  }, [canInsert]);
-  const slots = canInsert ? insertSlots(blocks) : [];
-  const openSlot = inserting === null ? undefined : slots.find((slot) => slot.after === inserting);
-  /** 關掉插圖面板，焦點回到打開它的那顆「在這裡插圖」（放好之後版本換了、按鈕不在了就算了）。 */
-  const closeInsert = useCallback(() => {
-    const after = inserting;
-    setInserting(null);
-    if (after === null) return;
-    window.requestAnimationFrame(() => {
-      scrollRef.current?.querySelector<HTMLElement>(`.insert-slot-btn[data-after='${after}']`)?.focus({ preventScroll: true });
-    });
-  }, [inserting]);
-  // 面板打開在段落下面，靠近視窗底時會被切掉；捲到看得見整個面板為止。
-  const popRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (inserting === null) return;
-    popRef.current?.scrollIntoView({
-      block: 'nearest',
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-    });
-  }, [inserting]);
+  // 在這裡插圖（P5-T043 抽出）：不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
+  const insert = useInsertSlots({
+    canInsert: insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0,
+    blocks,
+    scrollRef,
+  });
 
   return (
     <section className="proof" aria-label="校樣">
@@ -677,62 +321,15 @@ export function ProofView({
         {hasRevision && (fixtures ? srcDoc !== null : true) && (
           <div className="proof-sheet" data-editing={isEditing ? 'yes' : 'no'} style={{ height: `${height}px` }}>
             {showMarks && (
-              <div className="proof-gutter" aria-label="校對符號">
-                {markGroups.map(({ blockIndex, marks }) =>
-                  marks.map((mark, order) => {
-                    const id = `${blockIndex}-${mark.kind}-${order}`;
-                    const top = blocks.find((block) => block.index === blockIndex)?.top;
-                    if (top === undefined) return null;
-                    return (
-                      <MarkPin
-                        key={id}
-                        id={id}
-                        mark={mark}
-                        top={top + order * 26}
-                        pinned={pinned === id}
-                        onToggle={() => setPinned((current) => (current === id ? null : id))}
-                      />
-                    );
-                  }),
-                )}
-              </div>
+              <MarkGutter
+                marks={mode === 'edit' && !isEditing ? job.marks : []}
+                blocks={blocks}
+                pinned={pinned}
+                onToggle={(id) => setPinned((current) => (current === id ? null : id))}
+              />
             )}
 
-            {slots.length > 0 && column !== null && (
-              <div className="proof-inserts" aria-label="插入圖片的位置">
-                {slots.map((slot) => (
-                  <div
-                    key={slot.after}
-                    className="insert-slot"
-                    data-open={inserting === slot.after ? 'yes' : 'no'}
-                    style={{ top: `${slot.y - 12}px`, left: `${column.left}px`, width: `${column.width}px` }}
-                  >
-                    <button
-                      type="button"
-                      className="insert-slot-btn"
-                      data-after={slot.after}
-                      aria-expanded={inserting === slot.after}
-                      onClick={() => setInserting((current) => (current === slot.after ? null : slot.after))}
-                    >
-                      <Icon name="image-plus" size={13} />
-                      在這裡插圖
-                      <span className="sr-only">
-                        {slot.after < 0 ? '（文章最前面）' : `（第 ${slot.after + 1} 段之後）`}
-                      </span>
-                    </button>
-                  </div>
-                ))}
-                {openSlot !== undefined && insertImage !== null && (
-                  <div
-                    ref={popRef}
-                    className="insert-pop"
-                    style={{ top: `${openSlot.y + 16}px`, left: `${column.left}px`, width: `${Math.min(column.width, 416)}px` }}
-                  >
-                    {insertImage(openSlot.after, closeInsert)}
-                  </div>
-                )}
-              </div>
-            )}
+            <InsertSlots state={insert} column={column} insertImage={insertImage} />
 
             <SelectionActions actions={selectionActions} editing={isEditing} saving={saving} />
 
@@ -753,144 +350,11 @@ export function ProofView({
               // 文件不自己捲動（見檔頭「二」）；載入後外層再用 CSSOM 把 html 設成 overflow: hidden。
               scrolling="no"
               style={{ height: `${height}px` }}
-              onLoad={handleLoad}
+              onLoad={frame.handleLoad}
             />
           </div>
         )}
       </div>
     </section>
   );
-}
-
-/**
- * 在 scope 裡找第一段相同的文字（忽略空白，規則跟後端算「第 N 段」共用），包進 `<mark>`。
- *
- * 只在單一文字節點裡找：跨過標籤的（`今天<em>讀完`）不包，跟後端逐項套用的規則
- * 一致（docs/specs/review-proposals.md）——找不到就不標，右欄的卡片照樣在。
- */
-function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, active: boolean): boolean {
-  if (highlight.text.length === 0) return false;
-  const group = highlight.kind === 'factcheck' ? 'factcheck' : 'review';
-  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const text = node as Text;
-    // 同一種（校稿／查證）的標記裡不再包；另一種的可以包在裡面（同一句既有觀察卡片又有查證）。
-    if (text.parentElement?.closest(`mark[data-hl-group='${group}']`)) continue;
-    const hit = findIgnoringSpaces(text.data, highlight.text, highlight.skipInside);
-    if (hit === null) continue;
-    const range = doc.createRange();
-    range.setStart(text, hit.start);
-    range.setEnd(text, hit.end);
-    const mark = doc.createElement('mark');
-    mark.setAttribute('data-hl', highlight.id);
-    mark.setAttribute('data-hl-group', group);
-    const color = HIGHLIGHT_COLORS[highlight.kind];
-    mark.style.background = color.bg;
-    mark.style.color = 'inherit';
-    if (color.dashed) {
-      mark.style.textDecoration = `underline dashed ${color.line}`;
-      mark.style.textDecorationThickness = '2px';
-      mark.style.textUnderlineOffset = '5px';
-    } else {
-      mark.style.borderBottom = `2px solid ${color.line}`;
-    }
-    mark.style.borderRadius = '2px';
-    mark.style.cursor = 'pointer';
-    if (active) {
-      mark.style.outline = `2px solid ${color.line}`;
-      mark.style.outlineOffset = '2px';
-    }
-    range.surroundContents(mark);
-    return true;
-  }
-  return false;
-}
-
-const KIND_LABEL: Record<ProofMark['kind'], string> = {
-  inserted: '新增',
-  deleted: '刪除',
-  replaced: '改寫',
-  moved: '調動',
-};
-
-function MarkPin({
-  id,
-  mark,
-  top,
-  pinned,
-  onToggle,
-}: {
-  id: string;
-  mark: ProofMark;
-  top: number;
-  pinned: boolean;
-  onToggle: () => void;
-}): JSX.Element {
-  return (
-    <div className="mark" style={{ top: `${top}px` }} data-pinned={pinned ? 'yes' : 'no'}>
-      <button
-        type="button"
-        className="mark-pin"
-        aria-expanded={pinned}
-        aria-controls={`mark-detail-${id}`}
-        onClick={onToggle}
-      >
-        <span className="mark-glyph" aria-hidden="true">
-          {mark.glyph}
-        </span>
-        <span className="sr-only">
-          第 {mark.blockIndex + 1} 段{KIND_LABEL[mark.kind]}：{mark.summary}
-        </span>
-      </button>
-
-      <div className="mark-pop" id={`mark-detail-${id}`} role="note">
-        <p className="mark-pop-head">
-          <span className="mark-pop-kind">{KIND_LABEL[mark.kind]}</span>
-          <span className="mark-pop-where mono">第 {mark.blockIndex + 1} 段</span>
-        </p>
-        <p className="mark-pop-summary">{mark.summary}</p>
-        {mark.before !== null && (
-          <p className="mark-pop-line">
-            <span className="mark-pop-tag">前</span>
-            <span className="mark-pop-before">{mark.before}</span>
-          </p>
-        )}
-        {mark.after !== null && (
-          <p className="mark-pop-line">
-            <span className="mark-pop-tag">後</span>
-            <span className="mark-pop-after">{mark.after}</span>
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * 段落之間可以插圖的位置：最前面（-1）、每一段之後。`y` 是兩段之間空白的中間
- * （最前面是第一段頂上一點，最後面是最後一段底下一點），座標跟頁邊符號同一套。
- */
-function insertSlots(blocks: readonly BlockBox[]): { after: number; y: number }[] {
-  const sorted = [...blocks].sort((a, b) => a.index - b.index);
-  const first = sorted[0];
-  if (first === undefined) return [];
-  const slots = [{ after: -1, y: first.top - 18 }];
-  sorted.forEach((block, i) => {
-    const bottom = block.top + block.height;
-    const next = sorted[i + 1];
-    slots.push({ after: block.index, y: next === undefined ? bottom + 18 : (bottom + next.top) / 2 });
-  });
-  return slots;
-}
-
-function groupMarks(marks: ProofMark[]): { blockIndex: number; marks: ProofMark[] }[] {
-  const byBlock = new Map<number, ProofMark[]>();
-  for (const mark of marks) {
-    const bucket = byBlock.get(mark.blockIndex);
-    if (bucket) bucket.push(mark);
-    else byBlock.set(mark.blockIndex, [mark]);
-  }
-  return [...byBlock.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([blockIndex, list]) => ({ blockIndex, marks: list }));
 }

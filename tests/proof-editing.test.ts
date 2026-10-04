@@ -104,7 +104,8 @@ describe('replaceWithSavedBody：照樣存之後畫面換成存進去的樣子',
 
 describe('useProofEditing 的 effect 順序（P5-T042）', () => {
   // React 照呼叫順序跑 effect。抽出前這個 hook 裡只有「離開打字模式清掉 hold」一個 effect 排在這個位置；
-  // 進入／離開編輯、版本被換掉的 effect 要排在 ProofView 其他 effect 之間，所以留在 ProofView、只呼叫 hook 給的函式。
+  // 進入／離開編輯、版本被換掉的 effect 要排在其他 effect 之間，所以不在 hook 裡、只呼叫 hook 給的函式
+  // （進出編輯在 ProofView，換版本在 P5-T043 抽出的 useProofFrame）。
   const hook = readFileSync(new URL('../src/ui/lib/use-proof-editing.ts', import.meta.url), 'utf8');
   const view = readFileSync(new URL('../src/ui/components/ProofView.tsx', import.meta.url), 'utf8');
 
@@ -112,17 +113,18 @@ describe('useProofEditing 的 effect 順序（P5-T042）', () => {
     expect(hook.match(/\buseEffect\(/g)).toHaveLength(1);
   });
 
-  it('ProofView 在渲染世代的 effect 之後、載校樣的 effect 之前呼叫 hook；進出編輯的 effect 在標記與捲動之後', () => {
-    const epoch = view.indexOf("if (job.state === 'RENDERED') setRenderEpoch");
+  it('ProofView 在量測（渲染世代的 effect）之後、載校樣之前呼叫 hook；進出編輯的 effect 在標記與捲動之後', () => {
+    // P5-T043：渲染世代與量測抽到 useProofMeasure、載校樣與標記抽到 useProofFrame，順序由 hook 的呼叫位置決定
+    // （每個 hook 裡面的順序見 tests/proof-frame.test.ts）。
+    const measure = view.indexOf('useProofMeasure({');
     const hookCall = view.indexOf('useProofEditing({');
-    const fetchPreview = view.indexOf('.fetchPreview(job.uuid)');
-    const highlights = view.indexOf('unwrapHighlightMarks(body);');
+    const frame = view.indexOf('useProofFrame({');
     const sync = view.indexOf('edit.syncEditing();');
     const selection = view.indexOf('useSelectionActions({');
-    expect(epoch).toBeGreaterThan(0);
-    expect(hookCall).toBeGreaterThan(epoch);
-    expect(fetchPreview).toBeGreaterThan(hookCall);
-    expect(sync).toBeGreaterThan(highlights);
+    expect(measure).toBeGreaterThan(0);
+    expect(hookCall).toBeGreaterThan(measure);
+    expect(frame).toBeGreaterThan(hookCall);
+    expect(sync).toBeGreaterThan(frame);
     expect(selection).toBeGreaterThan(sync);
   });
 });

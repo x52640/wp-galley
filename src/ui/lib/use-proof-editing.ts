@@ -50,8 +50,8 @@ import { decideEditSave, replaceWithSavedBody } from './proof-editing.js';
  *
  * **effect 的順序跟抽出前一樣**（React 照呼叫順序跑 effect）：
  * - 這個 hook 裡只有一個 effect（離開打字模式就清掉 hold、自動存過、動作錯誤），ProofView 在原本那個位置呼叫這個 hook。
- * - 進入／離開編輯（`syncEditing`）與「版本被換掉」（`abandonOnNewVersion`）要排在 ProofView 其他 effect 之間，
- *   effect 本身留在 ProofView 原位，這裡只提供內容。
+ * - 進入／離開編輯（`syncEditing`）與「版本被換掉」（`abandonOnNewVersion`）要排在其他 effect 之間，
+ *   effect 本身不在這裡、只提供內容：進出編輯留在 ProofView 原位，換版本在 `lib/use-proof-frame.ts`（P5-T043）。
  */
 
 /** 這裡用到的進入編輯要求（`ProofEditRequest` 的一部分：游標要停在哪）。 */
@@ -92,7 +92,7 @@ export interface ProofEditing {
   // --- 流程 ---
   /** 進入／離開編輯（ProofView 的 effect 呼叫，依賴 `editing?.nonce`、`isEditing`、`loadCount`）。 */
   syncEditing: () => void;
-  /** 校樣換了版本：打字到一半就結束編輯並講出來（ProofView「換版本」的 effect 呼叫）。 */
+  /** 校樣換了版本：打字到一半就結束編輯並講出來（`useProofFrame`「換版本」的 effect 呼叫）。 */
   abandonOnNewVersion: () => void;
   cancelEdit: () => void;
   saveEdit: (force?: boolean) => Promise<void>;
@@ -273,7 +273,7 @@ export function useProofEditing({
     refreshFormat();
   };
 
-  // 進入／離開編輯。標記的拆除由 ProofView 標記的 effect 負責（isEditing 變了它會重跑）。
+  // 進入／離開編輯。標記的拆除由 `useProofFrame` 標記的 effect 負責（isEditing 變了它會重跑）。
   const syncEditing = (): void => {
     const frame = frameRef.current;
     const doc = frame?.contentDocument;
