@@ -24,8 +24,8 @@ import { selectionImageHeading, selectionPickStale, settleSpots } from '../lib/s
  * - `SelectionActions`：膠囊與「用此段配圖」面板，畫在 iframe 外層、用文件座標定位。
  * - `SelectionNotice`：面板因為文章被別處改了而關掉時，頂端那一行提示。
  *
- * ProofView 只負責把 iframe 的選取事件交給它（`attach`），以及版本換掉、開始打字時收起膠囊（`clearPick`）。
- * 「先存再做」本身（`actWhileWriting`）跟「儲存」共用存檔狀態與「照樣存」，留在 ProofView，由這裡呼叫。
+ * iframe 載入時由 `useProofFrame` 的 `handleLoad` 把選取事件交給它（`attach`），版本換掉、開始打字時收起膠囊（`clearPick`）；ProofView 只負責接線。
+ * 「先存再做」本身（`actWhileWriting`）跟「儲存」共用存檔狀態與「照樣存」，在 `lib/use-proof-editing.ts`，由這裡呼叫。
  */
 
 /** 上層給的「查證這句」（P6-T005）。null＝不給（對照、成品、改字中、稿件結束）。 */
@@ -103,7 +103,7 @@ export function useSelectionActions({
   frameRef: RefObject<HTMLIFrameElement | null>;
   selectionCheck: SelectionCheckInput | null;
   selectionImage: SelectionImageInput | null;
-  /** 打字模式：內容有改就先照「儲存」存一版，存好再做（ProofView）。 */
+  /** 打字模式：內容有改就先照「儲存」存一版，存好再做（`useProofEditing`）。 */
   actWhileWriting: (act: () => void | Promise<void>) => Promise<void>;
 }): SelectionActionsState {
   /** 選字查證：選了哪段字、膠囊畫在哪（文件座標）。null＝沒選或不給查。 */

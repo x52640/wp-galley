@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **98 檔 / 2177 測試**全綠（2026-10-05，D-040 拆檔 PR A＋B＋C 三個都合併後；本機試合三個分支量得。只合其中一兩個時數字會不同：A 單獨 96／2136、B 單獨 94／2106、C 單獨 94／2093）
+- `npm run verify`：typecheck 通過；Vitest **98 檔 / 2177 測試**全綠（2026-10-05 主樹，D-040 三個拆檔 PR #29～#31 合併後）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -45,8 +45,9 @@
 ## 上次停在哪（2026-10-05 拆檔）
 
 - D-040 拆檔分三個 PR、都從 main 開：A＝P5-T041～P5-T043（ProofView 1560 → 360 行）、B＝P5-T044（MediaPanel 1010 → 222）、C＝P5-T045（Workspace 989 → 714）。每張 Task 實作 → verify → 獨立審查（皆無行為差異）→ Codex。
-- 三個 PR 都改 `docs/specs/architecture.md` 功能地圖相鄰的列：程式碼互不衝突，但後合的會在這個檔衝突，需要 rebase。
-- 殘餘（各 Task 檔「完成結果」）：MediaPanel 暫時轉出 `useImageGenerationStatus`／`assetLabel`；`SelectionActions.tsx` 檔頭兩三處註解仍寫 ProofView（不在任何 Task write_paths，待使用者決定）；`proof-editing`／`proof-frame` 守門測試靠找原始碼字串判斷 hook 順序。
+- 合併順序 #30 → #29 → #31；#31 在 `architecture.md` 功能地圖衝突，逐列合併後 rebase（只動文件）。三個 PR 都 Codex 一輪無問題、每張 Task 獨立審查一輪無行為差異。
+- 合併後發現 5 處文件／註解仍指向拆檔前的位置（design-system、agent-tasks、tokens.css、SelectionActions），已修在本分支第一個 commit，跟下一個 Task 一起進 PR。
+- 殘餘（各 Task 檔「完成結果」）：MediaPanel 暫時轉出 `useImageGenerationStatus`／`assetLabel`；`proof-editing`／`proof-frame` 守門測試靠找原始碼字串判斷 hook 順序。
 - Vite 8 沒有 `--cacheDir` 參數：worktree 起 Vite 要另寫 config 指 cacheDir，否則快取寫進主目錄 `node_modules/.vite`（worktree 的 node_modules 是 symlink）。
 - 截圖排隊：同一時間只一個 ui-drive（9333 埠）；示範資料版本 hash 是亂數、計時器看時間、捲軸會淡出，比對前先連跑兩次找出本來就會變的。
 

@@ -4,7 +4,7 @@
 > 內文圖的錨點與自動放位置（D-020）、在文章上直接請 AI 配一張（D-022）、建議英文網址（D-026）、執行中的回饋。
 > 程式：`src/agents/output-contract.ts`（`buildSystemPrompt`、`TASK_BRIEF`）、
 > migration 004／005／006／008、`src/core/image-generation.ts`、`src/ui/components/AgentProgress.tsx`、
-> `AgentButton.tsx`、`panels/MediaPanel.tsx`（`BriefCard`）、`InsertImagePanel.tsx`、
+> `AgentButton.tsx`、`panels/MediaPanel.tsx`、`panels/BriefCard.tsx`、`InsertImagePanel.tsx`、
 > `src/core/slug-suggestion.ts`、`src/contract/slug.ts`、`components/SlugSuggest.tsx`（「標題與網址」與發布面板共用）。
 
 三件事都來自實際用起來的問題（2026-08-28，D-010）。
