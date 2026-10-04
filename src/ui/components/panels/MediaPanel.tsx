@@ -17,6 +17,7 @@ import { agentStatusText, runLocksContent } from '../../lib/agent-tasks.js';
 import { ErrorNote, Field, Spinner, useAction } from './shared.js';
 import { USER_NOTE_MAX, userNoteLength } from '../../../contract/user-note.js';
 import { BRIEF_PROMPT_MAX, briefPromptLength } from '../../../contract/brief-prompt.js';
+import { placeBlockedWhileWriting } from '../../lib/check-while-writing.js';
 
 /**
  * 配圖。
@@ -56,10 +57,13 @@ export function MediaPanel({
   refresh,
   blocks,
   focusBriefId = null,
+  editing = false,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
   blocks: Block[];
+  /** 正在打字（P5-T038 審查 1）：卡片上會把圖放進正文的「用這張」「上傳這張」反灰。 */
+  editing?: boolean;
   /** 剛在文章上「請 AI 配一張」建出來的那條（P5-T018）：捲到它，讓人看得到計時器。 */
   focusBriefId?: number | null;
 }): JSX.Element {
@@ -121,6 +125,7 @@ export function MediaPanel({
                 refresh={refresh}
                 generation={generation}
                 focused={brief.id === focusBriefId}
+                writing={editing}
               />
             ))}
           </ul>
@@ -265,13 +270,18 @@ function BriefCard({
   refresh,
   generation,
   focused,
+  writing,
 }: {
   job: LoadedJob;
   brief: ImageBrief;
   refresh: () => Promise<void>;
   generation: ImageGenerationStatus | null;
   focused: boolean;
+  /** 正在打字（文章上的打字模式）。 */
+  writing: boolean;
 }): JSX.Element {
+  /** 打字中不放圖（放圖建新版本，打的字之後存不進去）。 */
+  const writingBlock = placeBlockedWhileWriting(writing);
   const rootRef = useRef<HTMLLIElement>(null);
   // 從文章上「請 AI 配一張」過來的：捲到這張卡片（右欄可能很長，計時器要看得到）。
   useEffect(() => {
@@ -512,12 +522,20 @@ function BriefCard({
         editing ? (
           editor
         ) : (
-          <div className="brief-editable">
-            <p className="brief-purpose">
-              {brief.note !== null ? `想要：${brief.note}` : '沒有特別要求：Codex 讀前後段落自己決定畫面'}
-            </p>
-            {editButton}
-          </div>
+          <>
+            {/* 選一段文字配的（P5-T038）：講清楚這張是照哪段配的。 */}
+            {brief.fromSelection && <p className="brief-basis">{brief.purpose}</p>}
+            <div className="brief-editable">
+              <p className="brief-purpose">
+                {brief.note !== null
+                  ? `想要：${brief.note}`
+                  : brief.fromSelection
+                    ? '沒有特別要求：Codex 讀你選的這段自己決定畫面'
+                    : '沒有特別要求：Codex 讀前後段落自己決定畫面'}
+              </p>
+              {editButton}
+            </div>
+          </>
         )
       ) : (
         <p className="brief-purpose">{brief.purpose}</p>
@@ -623,7 +641,8 @@ function BriefCard({
             <button
               type="button"
               className="btn btn-primary btn-tiny"
-              disabled={busy || runningElsewhere}
+              disabled={busy || runningElsewhere || writingBlock !== null}
+              title={writingBlock ?? undefined}
               onClick={() =>
                 void use.run(async () => {
                   setFeatureNote(null);
@@ -652,6 +671,12 @@ function BriefCard({
               再生一張
             </button>
           </div>
+          {writingBlock !== null && (
+            <p className="field-hint insert-ai-blocked" role="status">
+              <Icon name="alert" size={13} />
+              {writingBlock}
+            </p>
+          )}
         </figure>
       )}
 
@@ -742,7 +767,8 @@ function BriefCard({
             // 另一個 Agent 動作在跑時不給上傳：上傳完會自動放進正文或設精選，那會讓跑到一半的結果作廢
             // （後端也會擋下自動放，這裡先不讓人按，跟「用這張」一樣）。這張卡片自己在生圖時也不給：
             // 從文章上「請 AI 配一張」開始的那趟不經過這張卡片的 generate，busy 看不到它。
-            disabled={busy || runningElsewhere || generating}
+            // 打字中也不給（P5-T038 審查 1）：上傳完會照錨點放進正文、建新版本。
+            disabled={busy || runningElsewhere || generating || writingBlock !== null}
           />
         </label>
 
@@ -757,7 +783,9 @@ function BriefCard({
               body: mine ? (
                 <p>
                   這條會從清單上消失，還沒用的候選圖也不會再出現。已經上傳的圖片不受影響。
-                  要再配，在文章上那個位置按「在這裡插圖」→「請 AI 配一張」。
+                  {brief.fromSelection
+                    ? '要再配，在文章上再選一次那段，按「用此段配圖」。'
+                    : '要再配，在文章上那個位置按「在這裡插圖」→「請 AI 配一張」。'}
                 </p>
               ) : (
                 <p>

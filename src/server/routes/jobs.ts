@@ -30,6 +30,9 @@ import type {
   FactCheckRequest,
   FactCheckRunResult,
   ImageAtPositionRequest,
+  ImageFromSelectionRequest,
+  SelectionSpotsRequest,
+  SelectionSpotsResponse,
   ImageBriefResponse,
   UseCandidateRequest,
   UpdateImageBriefRequest,
@@ -172,6 +175,31 @@ const ImageAtPositionBody = z
   .strict();
 
 /**
+ * 選一段文字「用此段配圖」（P5-T038）：同一條路由的另一種 body。`.strict()` 同上；跟位置那種混送也擋
+ * （`afterBlockIndex` 在這裡是多送的欄位）。字數另外在 CoreService 照共用規則驗（講太短／太長），這裡只擋超大 body。
+ */
+const ImageFromSelectionBody = z
+  .object({
+    selection: z.string().min(1).max(20_000),
+    spot: z.number().int().min(0).max(10_000).optional(),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
+    note: z
+      .string()
+      .max(4_000)
+      .refine((value) => userNoteLength(value) <= USER_NOTE_MAX, `想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`)
+      .optional(),
+  })
+  .strict();
+
+/** 「用此段配圖」的位置選項（P5-T038 第二輪審查）：唯讀。`.strict()`。 */
+const SelectionSpotsBody = z
+  .object({
+    selection: z.string().min(1).max(20_000),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
+  })
+  .strict();
+
+/**
  * 在卡片上改配圖需求（P5-T025）。`.strict()`、`prompt`／`note` 只能送一個：比例、alt、錨點不在這次能改的範圍，
  * 多送要當場擋下，不是被默默丟掉。長度跟前端計數、CoreService 同一套；另有寬鬆的原始長度上限擋超大 body。
  * 哪一種需求該送哪一個由 CoreService 判斷（MCP 不經過這裡）。
@@ -246,6 +274,8 @@ export const REQUEST_CONTRACT_CHECK: {
   readonly media: Accepts<typeof MediaBody, MediaUploadRequest>;
   readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
   readonly imageAtPosition: Accepts<typeof ImageAtPositionBody, ImageAtPositionRequest>;
+  readonly imageFromSelection: Accepts<typeof ImageFromSelectionBody, ImageFromSelectionRequest>;
+  readonly selectionSpots: Accepts<typeof SelectionSpotsBody, SelectionSpotsRequest>;
   readonly useCandidate: Accepts<typeof UseCandidateBody, UseCandidateRequest>;
   readonly resolve: Accepts<typeof ResolveReviewBody, ResolveReviewRequest>;
   readonly proposalRef: Accepts<typeof ProposalRefBody, ProposalRefRequest>;
@@ -262,6 +292,8 @@ export const REQUEST_CONTRACT_CHECK: {
   media: true,
   place: true,
   imageAtPosition: true,
+  imageFromSelection: true,
+  selectionSpots: true,
   useCandidate: true,
   resolve: true,
   proposalRef: true,
@@ -653,17 +685,47 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
    */
   app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/briefs', async (request, reply): Promise<ImageBriefResponse> => {
     const { uuid } = parse(UuidParams, request.params);
-    const body = parse(ImageAtPositionBody, request.body);
-    const { brief } = await guard(() =>
-      core().requestImageAtPosition(uuid, {
-        afterBlockIndex: body.afterBlockIndex,
-        contentHash: body.contentHash,
-        ...(body.note === undefined ? {} : { note: body.note }),
-      }),
-    );
+    // 兩種 body 二選一：有 `selection` 的是「用此段配圖」（P5-T038），其他照「請 AI 配一張」（P5-T018）。
+    const raw = request.body;
+    const fromSelection = typeof raw === 'object' && raw !== null && 'selection' in raw;
+    const { brief } = fromSelection
+      ? await (async () => {
+          const body = parse(ImageFromSelectionBody, raw);
+          return guard(() =>
+            core().requestImageFromSelection(uuid, {
+              selection: body.selection,
+              contentHash: body.contentHash,
+              ...(body.spot === undefined ? {} : { spot: body.spot }),
+              ...(body.note === undefined ? {} : { note: body.note }),
+            }),
+          );
+        })()
+      : await (async () => {
+          const body = parse(ImageAtPositionBody, raw);
+          return guard(() =>
+            core().requestImageAtPosition(uuid, {
+              afterBlockIndex: body.afterBlockIndex,
+              contentHash: body.contentHash,
+              ...(body.note === undefined ? {} : { note: body.note }),
+            }),
+          );
+        })();
     reply.status(202);
     return { brief };
   });
+
+  /**
+   * 「用此段配圖」的位置選項（P5-T038 第二輪審查）：唯讀、不建任何東西。後端在 `contentHash` 那一版定位選取並算位置；
+   * 不是目前這一版 409、字數不合格／找不到／不只一處 400、含 WordPress 密碼 400。
+   */
+  app.post<{ Params: { uuid: string } }>(
+    '/api/jobs/:uuid/briefs/selection-spots',
+    async (request): Promise<SelectionSpotsResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const body = parse(SelectionSpotsBody, request.body);
+      return guard(() => core().selectionImageSpots(uuid, { selection: body.selection, contentHash: body.contentHash }));
+    },
+  );
 
   /**
    * 候選圖本體。只在本機，**還沒上傳到 WordPress**。檔案路徑由資料庫決定，

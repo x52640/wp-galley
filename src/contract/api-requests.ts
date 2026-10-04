@@ -113,6 +113,38 @@ export interface ImageAtPositionRequest {
 }
 
 /**
+ * 選一段文字「用此段配圖」（D-037，P5-T038，同一條 `POST /api/jobs/:uuid/briefs`，跟 `ImageAtPositionRequest` 二選一）。
+ *
+ * 後端用目前這一版重新定位選取（忽略空白、可跨段）；找不到、出現不只一次都 400。prompt 由後端組。
+ */
+export interface ImageFromSelectionRequest {
+  /*
+   * `contentHash` 必須是位置選項來源那一版（`SelectionSpotsResponse.contentHash`）；目前已經不是那一版就 409，請使用者重選。
+   */
+  /** 選的字（純文字，`Selection.toString()`）。10～3000 字（`contract/selection-image.ts`），超過不截斷。 */
+  readonly selection: string;
+  /**
+   * 圖放哪裡：`POST …/briefs/selection-spots` 回的選項之一（0＝這段開頭，預設）。只影響放哪，不影響 prompt。
+   */
+  readonly spot?: number;
+  /**
+   * 畫面上看到的位置個數（含開頭、結尾）。後端用目前這一版算的個數不一樣（打字模式存檔整理改了段落）就 400，不猜。
+   * 畫面上定位不到選取時不送。
+   */
+  readonly contentHash: string;
+  readonly note?: string;
+}
+
+/**
+ * 「用此段配圖」的位置選項（P5-T038 第二輪審查，`POST /api/jobs/:uuid/briefs/selection-spots`，唯讀）。
+ * `contentHash` 是畫面那一版（打字模式先自動存好的那一版）；不是目前這一版 409。
+ */
+export interface SelectionSpotsRequest {
+  readonly selection: string;
+  readonly contentHash: string;
+}
+
+/**
  * 在卡片上改配圖需求（D-025，P5-T025，`PATCH /api/jobs/:uuid/briefs/:id`）。**只能送其中一個**：
  * - `prompt`：Agent 建議的那條（`origin = 'agent'`，含封面）的畫面描述。去頭尾後不能是空的，
  *   上限 2000 字（code point，`contract/brief-prompt.ts`）。

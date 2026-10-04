@@ -173,3 +173,38 @@ export function locateTextOffset(texts: readonly string[], count: number): { ind
 export function editBarSavedNote(autoSaved: boolean): string | null {
   return autoSaved ? '已自動存一版；按取消會回到這一版' : null;
 }
+
+/**
+ * 打字模式中「用這張」／卡片上「上傳這張」為什麼不能按（P5-T038 審查 1）：它們會照錨點把圖放進正文、建一個新版本，
+ * 而打字模式的校樣不重載（hold）、下一次存檔的基準是打字中最後存的那一版 → 存檔 409，打的字存不進去。
+ * 不在打字模式就是 null。
+ */
+export function placeBlockedWhileWriting(editing: boolean): string | null {
+  return editing ? '正在打字：先按「儲存」離開打字模式，再放這張圖（放圖會建新版本，打的字會存不進去）。' : null;
+}
+
+/**
+ * 打字模式「先存再做」的順序（P5-T038 審查 3）：存檔失敗才算存檔失敗（放掉 hold、講「沒存成功」）；
+ * 存好之後的那個動作（查證、用此段配圖）自己出錯只講那個動作的錯，**不動 hold**——hold 一放掉校樣就重載，會蓋掉正在打的字。
+ */
+export async function saveThenAct(steps: {
+  save: () => Promise<string | null>;
+  onSaved: (savedHash: string | null) => void;
+  onSaveFailed: (cause: unknown) => void;
+  act: () => void | Promise<void>;
+  onActFailed: (cause: unknown) => void;
+}): Promise<void> {
+  let savedHash: string | null;
+  try {
+    savedHash = await steps.save();
+  } catch (cause) {
+    steps.onSaveFailed(cause);
+    return;
+  }
+  steps.onSaved(savedHash);
+  try {
+    await steps.act();
+  } catch (cause) {
+    steps.onActFailed(cause);
+  }
+}

@@ -3,13 +3,19 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ImageBrief as ImageBriefView, ImageCandidate, ImageGenerationStatus } from '../../contract/api.js';
+import type {
+  ImageBrief as ImageBriefView,
+  ImageCandidate,
+  ImageGenerationStatus,
+  SelectionSpotsResponse,
+} from '../../contract/api.js';
 import { AgentError, ContentChangedError, InvalidInputError, MediaError } from '../errors.js';
-import { splitTopLevelBlocks } from '../html-blocks.js';
+import { splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
 import type { AgentRunStatus, JobRow, ImageCandidateRow } from '../repository.js';
 import {
   buildImagePrompt,
   buildPositionImagePrompt,
+  buildSelectionImagePrompt,
   POSITION_ASPECT_RATIO,
   positionAnchor,
   positionContext,
@@ -17,6 +23,18 @@ import {
   userImageFilename,
 } from '../image-generation.js';
 import { checkUserNote } from '../../contract/user-note.js';
+import {
+  blockMedia,
+  checkSelectionImage,
+  locateSelection,
+  normalizeSelectionText,
+  selectionBasisLabel,
+  selectionSpotAnchor,
+  selectionSpots,
+  SELECTION_SPOTS_CHANGED_MESSAGE,
+  type SelectionSpot,
+  type SpotBlock,
+} from '../../contract/selection-image.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { sha256Of } from '../../media/upload.js';
 import { inspectImage, MediaUploadError } from '../../media/validate.js';
@@ -254,65 +272,220 @@ export class ImagesModule {
     const revisionRow = this.ctx.requireRevision(job);
 
     this.ctx.assertNoAppPassword(input.note);
-    // 跟前端計數、zod 同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。
-    const checked = checkUserNote(input.note);
-    if (!checked.ok) throw new InvalidInputError(checked.message);
-    const note = checked.note;
-    if (input.contentHash !== revisionRow.content_hash) {
-      throw new ContentChangedError('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。', {
-        expected: input.contentHash,
-        current: revisionRow.content_hash,
-      });
-    }
+    const note = this.checkedNote(input.note);
+    this.assertShownRevision(input.contentHash, revisionRow);
     const blocks = splitTopLevelBlocks(revisionRow.rendered_html ?? '');
     if (!Number.isInteger(input.afterBlockIndex) || input.afterBlockIndex < -1 || input.afterBlockIndex > blocks.length - 1) {
       throw new InvalidInputError(
         `插入位置 ${input.afterBlockIndex} 超出範圍（目前有 ${blocks.length} 個區塊，可用的位置是 -1 到 ${blocks.length - 1}）`,
       );
     }
+    await this.assertCanStartUserImage(job);
+    this.recheckAfterAwait(job, revisionRow.id);
+
+    const { anchor, position } = positionAnchor(blocks, input.afterBlockIndex);
+    const context = positionContext(blocks, input.afterBlockIndex);
+    const prompt = buildPositionImagePrompt({ ...context, note, aspectRatio: POSITION_ASPECT_RATIO });
+    return this.startUserBrief(uuid, job, revisionRow.id, {
+      prompt,
+      purpose: '你在文章上指定位置、請 AI 配的圖',
+      anchor,
+      anchorPosition: position,
+      note,
+      detail: { afterBlockIndex: input.afterBlockIndex },
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  }
+
+  /**
+   * 「用此段配圖」的位置選項（D-037，P5-T038 第二輪審查）：**唯讀**，不建任何東西。
+   * 在 `contentHash` 那一版（必須是目前這一版，打字模式由畫面先自動存）上定位選取，回傳圖可以放的位置。
+   * 位置一律由後端在存好的那一版上算：畫面只顯示、送出時帶回 `spot` 與這裡回的 `contentHash`。
+   * 圖片、分隔線、嵌入內容算真的區塊（`blockMedia`），空段落不算。
+   */
+  selectionImageSpots(
+    uuid: string,
+    input: { selection: string; contentHash: string },
+  ): SelectionSpotsResponse {
+    const job = this.ctx.requireJob(uuid);
+    const revisionRow = this.ctx.requireRevision(job);
+    this.ctx.assertNoAppPassword(input.selection);
+    const { spots } = this.locateForSelection(input.selection, input.contentHash, revisionRow);
+    return {
+      contentHash: revisionRow.content_hash,
+      spots: spots.map(({ spot, kind, label }) => ({ spot, kind, label })),
+      basis: selectionBasisLabel(input.selection),
+    };
+  }
+
+  /**
+   * 選一段文字「用此段配圖」（D-037，P5-T038）。流程跟 `requestImageAtPosition` 同一套（先擋、建使用者那條需求、
+   * 同一趟開始生圖不等它畫完），差別：
+   *
+   * - 選取文字照共用規則驗字數（10～3000，超過不截斷），在 `contentHash` 那一版定位（忽略空白、可跨段，
+   *   `locateSelection`）：找不到或出現不只一次都拒絕（400）。
+   * - `contentHash` 是位置選項來源那一版（`selectionImageSpots` 回的）。目前已經不是那一版就 409「文章剛被改過…」，
+   *   不猜位置。`spot` 照同一套 `selectionSpots` 在那一版上找；錨點照「在這裡插圖」同一套。位置只影響放哪，不影響 prompt。
+   * - prompt 用 `buildSelectionImagePrompt`：選取文字為主，文章標題與所在小節標題只當背景。
+   * - purpose 記卡片上要講的依據（「依選取段落：『…』（共 N 字）」）。
+   * - 選取文字、標題、那句話、組好的 prompt 有 WordPress 密碼一律先擋（D-023）。
+   */
+  async requestImageFromSelection(
+    uuid: string,
+    input: { selection: string; spot?: number; contentHash: string; note?: string | null; timeoutMs?: number },
+  ): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
+    const job = this.ctx.requireJob(uuid);
+    this.ctx.assertMutable(job);
+    const revisionRow = this.ctx.requireRevision(job);
+
+    this.ctx.assertNoAppPassword(input.note, input.selection);
+    const note = this.checkedNote(input.note);
+    const { blocks, located, spots } = this.locateForSelection(input.selection, input.contentHash, revisionRow);
+    const wanted = input.spot ?? 0;
+    const spot = spots.find((candidate) => candidate.spot === wanted);
+    if (spot === undefined) {
+      throw new InvalidInputError(`位置 ${wanted} 不在選取範圍內（可用的是 0 到 ${spots[spots.length - 1]!.spot}）`);
+    }
+    await this.assertCanStartUserImage(job);
+    this.recheckAfterAwait(job, revisionRow.id);
+
+    const title = this.currentTitle(job);
+    const section = sectionHeading(blocks, located.first);
+    this.ctx.assertNoAppPassword(title, section);
+    const { anchor, position } = selectionSpotAnchor(blocks, spot);
+    const prompt = buildSelectionImagePrompt({
+      title,
+      section,
+      selection: normalizeSelectionText(input.selection),
+      note,
+      aspectRatio: POSITION_ASPECT_RATIO,
+    });
+    return this.startUserBrief(uuid, job, revisionRow.id, {
+      prompt,
+      purpose: selectionBasisLabel(input.selection),
+      anchor,
+      anchorPosition: position,
+      note,
+      // 不記選取內容本身：只記範圍與位置。
+      detail: {
+        fromSelection: true,
+        firstBlockIndex: located.first,
+        lastBlockIndex: located.last,
+        spot: spot.spot,
+        afterBlockIndex: spot.afterBlockIndex,
+      },
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  }
+
+  /**
+   * 驗字數、確認 `contentHash` 是目前這一版（不是就 409「文章剛被改過」）、在那一版定位選取、算位置選項。
+   * 位置選項與送出共用這一份，兩邊才一定一樣。
+   */
+  private locateForSelection(
+    selection: string,
+    contentHash: string,
+    revisionRow: { content_hash: string; rendered_html: string | null },
+  ): {
+    blocks: (TopLevelBlock & SpotBlock)[];
+    located: { first: number; last: number };
+    spots: SelectionSpot[];
+  } {
+    const checked = checkSelectionImage(selection);
+    if (!checked.ok) throw new InvalidInputError(checked.message);
+    if (contentHash !== revisionRow.content_hash) {
+      throw new ContentChangedError(SELECTION_SPOTS_CHANGED_MESSAGE, { expected: contentHash, current: revisionRow.content_hash });
+    }
+    const blocks = splitTopLevelBlocks(revisionRow.rendered_html ?? '').map((block) => ({ ...block, media: blockMedia(block) }));
+    const located = locateSelection(blocks, selection);
+    if (!located.ok) throw new InvalidInputError(located.message);
+    return { blocks, located, spots: selectionSpots(blocks, located.first, located.last) };
+  }
+
+  /** 跟前端計數、zod 同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。 */
+  private checkedNote(note: string | null | undefined): string | null {
+    const checked = checkUserNote(note);
+    if (!checked.ok) throw new InvalidInputError(checked.message);
+    return checked.note;
+  }
+
+  /** 畫面上那一版不是目前這一版：位置（與選取）是照畫面算的，不能用。 */
+  private assertShownRevision(contentHash: string, revisionRow: { content_hash: string }): void {
+    if (contentHash !== revisionRow.content_hash) {
+      throw new ContentChangedError('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。', {
+        expected: contentHash,
+        current: revisionRow.content_hash,
+      });
+    }
+  }
+
+  /**
+   * 使用者發起的生圖能不能開始：沒有別的 Agent 動作在跑、Codex 能用（沒裝**或沒登入**都擋）。
+   * 中間有 await，回來之後呼叫端要**同步**呼叫 `recheckAfterAwait` 再接 `startUserBrief`（中間不能再 await），
+   * 兩個同時送來的請求才不會都通過。
+   */
+  private async assertCanStartUserImage(job: JobRow): Promise<void> {
     if (this.ctx.activeRuns.has(job.uuid)) {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     }
-    // 生圖本身只看「有沒有會生圖的 adapter」；這裡多檢查沒登入，免得建了需求才失敗。
     const status = await this.ctx.agents.imageGenerationStatus();
     if (!status.available || status.provider === null) {
       throw new AgentUnavailableError(status.reason ?? '沒有能生圖的 Agent');
     }
-    // 上面那個 await 期間世界可能變了：再確認一次（之後到 generateBriefImage 登記好之前都是同步的）。
+  }
+
+  /** await 期間世界可能變了：再確認一次稿件、Agent、版本。同步。 */
+  private recheckAfterAwait(job: JobRow, revisionId: number): void {
     const fresh = this.ctx.repo.jobById(job.id)!;
     this.ctx.assertMutable(fresh);
     if (this.ctx.activeRuns.has(job.uuid)) {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     }
-    if (this.ctx.repo.latestRevision(job.id)?.id !== revisionRow.id) {
+    if (this.ctx.repo.latestRevision(job.id)?.id !== revisionId) {
       throw new ContentChangedError('文章在你按下去之前換了一版，位置可能已經不對了。重新讀取之後再選一次位置。');
     }
+  }
 
-    const { anchor, position } = positionAnchor(blocks, input.afterBlockIndex);
-    const context = positionContext(blocks, input.afterBlockIndex);
-    const prompt = buildPositionImagePrompt({ ...context, note, aspectRatio: POSITION_ASPECT_RATIO });
-    this.ctx.assertNoAppPassword(prompt);
+  /**
+   * 建使用者那條需求、記事件、同一趟開始生圖（不等它畫完）。
+   * 生圖失敗記在 `agent_runs`，promise 另外接住；沒登記成功就把需求標成不要了、錯誤照丟。
+   */
+  private async startUserBrief(
+    uuid: string,
+    job: JobRow,
+    revisionId: number,
+    input: {
+      prompt: string;
+      purpose: string;
+      anchor: string | null;
+      anchorPosition: 'after' | 'before';
+      note: string | null;
+      detail: Record<string, unknown>;
+      timeoutMs?: number;
+    },
+  ): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
+    this.ctx.assertNoAppPassword(input.prompt);
     const row = this.ctx.repo.insertUserImageBrief({
       jobId: job.id,
       briefKey: `${USER_BRIEF_PREFIX}${randomBytes(4).toString('hex')}`,
-      purpose: '你在文章上指定位置、請 AI 配的圖',
-      prompt,
+      purpose: input.purpose,
+      prompt: input.prompt,
       aspectRatio: POSITION_ASPECT_RATIO,
       // 那句話講的是風格（「水彩風」），不是圖的內容，不能當替代文字；生圖那一趟也只回圖。
       // 留空，卡片上在「用這張」旁邊請使用者自己寫一句（選填），跟著用這張送出。
       altText: '',
-      anchor,
-      anchorPosition: position,
-      userNote: note,
+      anchor: input.anchor,
+      anchorPosition: input.anchorPosition,
+      userNote: input.note,
     });
     this.ctx.repo.insertEvent({
       jobId: job.id,
-      revisionId: revisionRow.id,
+      revisionId,
       approvalId: null,
       actor: 'ui',
       eventType: 'image_brief_requested',
       status: 'succeeded',
-      detail: { briefId: row.id, briefKey: row.brief_key, afterBlockIndex: input.afterBlockIndex, anchorPosition: position },
+      detail: { briefId: row.id, briefKey: row.brief_key, ...input.detail, anchorPosition: input.anchorPosition },
     });
 
     const generation = this.generateBriefImage(
@@ -337,6 +510,14 @@ export class ImagesModule {
     return { brief, generation };
   }
 
+  /** 目前這一版的標題（templateData 的 title，沒有就用稿件標題）。 */
+  private currentTitle(job: JobRow): string | null {
+    const latest = this.ctx.repo.latestRevision(job.id);
+    const title = latest ? this.ctx.payloadOf(latest).templateData['title'] : null;
+    if (typeof title === 'string' && title.trim() !== '') return title.trim();
+    return job.title?.trim() || null;
+  }
+
   /** 目前這一版 templateData 的 slug（字串才算）。 */
   private currentSlug(job: JobRow): string | null {
     const latest = this.ctx.repo.latestRevision(job.id);
@@ -351,4 +532,13 @@ export class ImagesModule {
     }
     return row;
   }
+}
+
+/** 選取開頭那塊所在的小節標題：從那塊往前找最近的 H2／H3（那塊本身是標題也算）；沒有就 null。 */
+function sectionHeading(blocks: readonly { tag: string; text: string }[], first: number): string | null {
+  for (let i = first; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block && (block.tag === 'h2' || block.tag === 'h3') && block.text.trim() !== '') return block.text.trim();
+  }
+  return null;
 }

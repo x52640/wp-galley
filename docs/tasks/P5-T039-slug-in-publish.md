@@ -1,7 +1,7 @@
 ---
 id: P5-T039
 phase: 5
-status: ready
+status: done
 depends_on: [P5-T026]
 specs: [agent-tasks.md, design-system.md, state-machine.md]
 write_paths: ["src/ui/components/PublishSheet.tsx", "src/ui/components/panels/SourcePanel.tsx", "src/ui/components/SlugSuggest.tsx", "src/ui/lib/", "src/ui/service/fixtures/", "src/ui/styles/", "src/contract/", "tests/", "docs/specs/agent-tasks.md", "docs/specs/design-system.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T039-slug-in-publish.md"]

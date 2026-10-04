@@ -28,6 +28,9 @@ import type {
   AutoFeatureResult,
   AutoPlaceResult,
   ImageAtPositionRequest,
+  ImageFromSelectionRequest,
+  SelectionSpotsRequest,
+  SelectionSpotsResponse,
   ImageBrief,
   ImageCandidate,
   ImageGenerationStatus,
@@ -56,6 +59,7 @@ import type {
 } from '../../contract/api.js';
 
 export type {
+  SelectionSpotsResponse,
   AgentProvider,
   AgentRun,
   AgentRunResult,
@@ -242,6 +246,10 @@ export interface PublisherApi {
    * 生好的候選圖出現在那條需求上，之後照一般的「用這張／再生一張」。
    */
   requestImageAtPosition(uuid: string, input: ImageAtPositionRequest): Promise<ImageBrief>;
+  /** 選一段文字「用此段配圖」（P5-T038）：同一條 `POST …/briefs`，body 是選取那一種。 */
+  requestImageFromSelection(uuid: string, input: ImageFromSelectionRequest): Promise<ImageBrief>;
+  /** 「用此段配圖」的位置選項（唯讀，P5-T038 第二輪審查）：後端在存好的那一版上算。 */
+  selectionImageSpots(uuid: string, input: SelectionSpotsRequest): Promise<SelectionSpotsResponse>;
   /**
    * 「用這張」：上傳到 WordPress 媒體庫。封面那條會自動設成精選。`altText`：卡片上填的替代文字
    * （P5-T018），不給就用需求上的。

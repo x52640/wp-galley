@@ -31,7 +31,15 @@ import { InsertImagePanel } from './InsertImagePanel.js';
 import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofView.js';
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
-import { MediaPanel } from './panels/MediaPanel.js';
+import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
+import {
+  beginRefresh,
+  createJobBinder,
+  refreshStillCurrent,
+  selectionImageBlockedReason,
+  selectionImageContentHash,
+  stillOnJob,
+} from '../lib/selection-image-view.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -138,8 +146,15 @@ export function Workspace({
   }, []);
 
   const refresh = useCallback(async () => {
-    const mine = ++generation.current;
-    const isCurrent = (): boolean => alive.current && mine === generation.current;
+    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
+    // 舊篇的 refresh（換篇前抓住的）在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉，
+    // 舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。所有 `refresh(` 呼叫處（含子元件）都經過這裡。
+    const origin = uuid;
+    const mine = beginRefresh({ generation: generation.current, current: uuidRef.current, origin });
+    if (mine === null) return;
+    generation.current = mine;
+    const isCurrent = (): boolean =>
+      refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
     try {
       // 查證結果另一條路讀（GET …/factchecks）；讀不到不擋整個工作區，留著上一次的。
       const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
@@ -152,6 +167,14 @@ export function Workspace({
       if (isCurrent()) setError(describeError(cause));
     }
   }, [uuid]);
+
+  /**
+   * 把會改工作區畫面的回呼綁住現在這一篇（第三輪審查）：子元件的非同步動作（AgentButton 的錯誤、恢復這篇的錯誤…）
+   * 回來時已經換到別篇，就不動畫面。同一篇內身分不變（第四輪審查）：子元件把它放進 effect 依賴時，
+   * 每次 render 換新的會讓 effect 每次重跑、把錯誤清掉（AgentButton 的 `onError`）。
+   */
+  const binder = useRef(createJobBinder((origin) => stillOnJob({ alive: alive.current, current: uuidRef.current, origin })));
+  const onThisJob = <A extends unknown[]>(fn: (...args: A) => void): ((...args: A) => void) => binder.current(uuid, fn);
 
   // 換一篇稿件就把上一篇的畫面丟掉，不要讓舊資料留在畫面上。
   useEffect(() => {
@@ -359,6 +382,9 @@ export function Workspace({
     if (editing === null) lastSavedHash.current = null;
   }, [editing, uuid]);
 
+  /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
+  const imageGeneration = useImageGenerationStatus(true);
+
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);
     setEditNotice(notice ?? null);
@@ -424,6 +450,12 @@ export function Workspace({
   // 選字「查證這句」在打字模式也能按（D-036）：按下先存一版、留在打字模式再查；
   // 打字模式下正文空不空不看存過的（空白新稿打了第一句還沒存，Codex P2），交給存檔與查證流程驗。
   const selectionCheckBlocked = selectionCheckBlockedReason(blockedInput);
+  // 選字「用此段配圖」（P5-T038）：跟「請 AI 配一張」同一套反灰條件；打字模式照樣給（按下先存）。
+  const selectionImageBlocked = selectionImageBlockedReason({
+    generation: imageGeneration,
+    running: working === true,
+    finished: isFinished(job.state),
+  });
   // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
   const insertable = canInsertImages(display, {
     editing: editing !== null,
@@ -474,7 +506,7 @@ export function Workspace({
             <AgentButton
               job={job}
               refresh={refresh}
-              onError={setAgentError}
+              onError={onThisJob(setAgentError)}
               provider={provider}
               onProvider={setProvider}
               sending={factCheckSending}
@@ -517,19 +549,21 @@ export function Workspace({
           cancelling={cancelling}
           onCancel={() => {
             setCancelling(true);
+            // 停止回來時已經換篇：不動新篇的畫面（第三輪審查）。
+            const here = onThisJob((run: () => void) => run());
             void api
               .cancelAgent(job.uuid)
-              .catch((cause: unknown) => setError(describeError(cause)))
+              .catch((cause: unknown) => here(() => setError(describeError(cause))))
               .finally(() => {
                 setCancelling(false);
-                void refresh();
+                here(() => void refresh());
               });
           }}
         />
       )}
 
       {job.state === 'CANCELLED' ? (
-        <RestoreBar job={job} refresh={refresh} onError={setError} />
+        <RestoreBar job={job} refresh={refresh} onError={onThisJob(setError)} />
       ) : isTerminal(job.state) && (
         <div className="terminal-bar" role="status">
           <Icon name="alert" size={15} />
@@ -568,6 +602,57 @@ export function Workspace({
                   }
                 : null
             }
+            selectionImage={
+              canSelectToFactCheck(display, { finished: isFinished(job.state) })
+                ? {
+                    blockedReason: selectionImageBlocked,
+                    // 畫面知道的目前版本：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
+                    currentHash: selectionImageContentHash({
+                      editing: editing !== null,
+                      lastSaved: lastSavedHash.current,
+                      jobHash: job.currentRevision?.contentHash,
+                    }),
+                    loadSpots: async (text) => {
+                      // 換篇時沿用同一個元件：不是發起的那一篇就什麼都不做（第二輪審查）。
+                      const origin = job.uuid;
+                      const stillHere = (): boolean =>
+                        stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
+                      if (!stillHere()) return null;
+                      const contentHash = selectionImageContentHash({
+                        editing: editing !== null,
+                        lastSaved: lastSavedHash.current,
+                        jobHash: job.currentRevision?.contentHash,
+                      });
+                      if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
+                      const result = await api.selectionImageSpots(origin, { selection: text, contentHash });
+                      return stillHere() ? result : null;
+                    },
+                    onRequest: async ({ text, note, spot, contentHash }) => {
+                      // 回來時可能已經換到別篇（Workspace 重用）：清錯誤、送請求之前就先確認還在發起的那一篇。
+                      const origin = job.uuid;
+                      const stillHere = (): boolean =>
+                        stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
+                      if (!stillHere()) return;
+                      setAgentError(null);
+                      try {
+                        const brief = await api.requestImageFromSelection(origin, {
+                          selection: text,
+                          spot,
+                          contentHash,
+                          ...(note === null ? {} : { note }),
+                        });
+                        if (!stillHere()) return;
+                        // 生圖在背後跑：打開右欄圖片區並捲到那張卡片（跟「請 AI 配一張」一樣）。
+                        setImagesOpen(true);
+                        setFocusBriefId(brief.id);
+                        await refresh();
+                      } catch (cause) {
+                        if (stillHere()) setAgentError(`用此段配圖沒有開始：${describeError(cause)}`);
+                      }
+                    },
+                  }
+                : null
+            }
             insertImage={
               insertable
                 ? (afterBlockIndex, close) => (
@@ -583,6 +668,8 @@ export function Workspace({
                       onClose={close}
                       onAiStarted={async (briefId) => {
                         // 生圖在背後跑：面板關掉，進度在右欄那張卡片與頂端長條（重讀之後開始輪詢）。
+                        // 送出期間已經換篇（第三輪審查）：不打開右欄、不捲卡片、不重讀。
+                        if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin: job.uuid })) return;
                         close();
                         setImagesOpen(true);
                         setFocusBriefId(briefId);
@@ -593,6 +680,8 @@ export function Workspace({
                 : null
             }
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
+              // 存好之後換到別篇（Workspace 重用）：不碰 lastSavedHash、編輯狀態、refresh（第二輪審查）。
+              const origin = job.uuid;
               // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
               const base = nextSaveBase(lastSavedHash.current, job.currentRevision?.contentHash);
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
@@ -613,6 +702,7 @@ export function Workspace({
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
+              if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return saved.contentHash;
               if (stay) {
                 lastSavedHash.current = saved.contentHash;
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
@@ -698,7 +788,7 @@ export function Workspace({
             </h2>
             {showImages && (
               <div className="margin-section-body">
-                <MediaPanel job={job} refresh={refresh} blocks={blocks} focusBriefId={focusBriefId} />
+                <MediaPanel job={job} refresh={refresh} blocks={blocks} focusBriefId={focusBriefId} editing={editing !== null} />
               </div>
             )}
           </section>
