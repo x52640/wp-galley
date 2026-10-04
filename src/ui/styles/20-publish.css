@@ -30,6 +30,27 @@
 .p-dest-main b { font-size: 1rem; }
 .p-dest-main span { font-size: .82rem; color: var(--shell-text-dim); }
 
+/* 網址（D-038，P5-T039）：跟作者同一種框；空的時候底下一行黃色提醒＋編輯列＋建議網址。 */
+.p-slug {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  padding: .65rem .95rem;
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+}
+.p-slug-line { display: flex; align-items: center; gap: .6rem; font-size: .92rem; min-width: 0; }
+.p-slug-line > svg { color: var(--accent); flex: none; }
+.p-slug-label { color: var(--shell-text-dim); flex: none; }
+.p-slug-value { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.p-slug-value.dim { font-size: .85rem; }
+.p-slug-empty { margin: 0; }
+.p-slug-edit { display: flex; flex-direction: column; gap: .55rem; }
+.p-slug-edit .row { flex-wrap: nowrap; }
+.p-slug-edit .input { flex: 1; min-width: 0; }
+.p-slug-edit .note { margin: 0; }
+.p-slug .slug-suggest { margin-top: 0; }
+
 .p-author {
   display: flex;
   align-items: center;

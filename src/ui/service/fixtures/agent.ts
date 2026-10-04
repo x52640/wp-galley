@@ -19,6 +19,7 @@ function fixtureSlugIdeas(title: string): string[] {
     return ['a-distant-cry-from-spring-review', 'A_Distant_Cry', 'a-distant-cry-from-spring', 'yamada-distant-cry-from-spring'];
   }
   if (title.includes('看得見的錯誤')) return ['visible-mistakes', 'Seeing_Errors', 'mistakes-you-can-see', 'on-seeing-our-errors'];
+  if (title.includes('AI未來已來')) return ['the-ai-future-is-here-part-1', 'AI_Future_1', 'ai-future-is-now-1', 'living-with-ai-part-1'];
   if (title.includes('文章要怎麼寫')) return ['how-to-structure-writing', 'writing-without-mess', 'organize-your-article'];
   return ['new-article', 'notes-on-this-topic', 'thoughts-and-notes'];
 }
