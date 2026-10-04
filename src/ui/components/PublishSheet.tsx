@@ -1,12 +1,22 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { api } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { shortHash } from '../lib/format.js';
+import { readString, shortHash } from '../lib/format.js';
+import {
+  isSlugDirty,
+  nextSlugDraft,
+  publishSlugView,
+  slugEscapeAction,
+  slugPublishBlocker,
+  withSlug,
+} from '../lib/publish-slug.js';
+import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
-import { ErrorNote, Spinner, useAction } from './panels/shared.js';
+import { ErrorNote, Spinner, guardEdit, useAction } from './panels/shared.js';
+import { SlugSuggest } from './SlugSuggest.js';
 import { AuthorPicker, authorBlocker, useAuthors } from './AuthorPicker.js';
 
 /**
@@ -58,6 +68,53 @@ export function PublishSheet({
   const prepare = useAction();
   const go = useAction();
 
+  // 網址框（P5-T039）：放在這一層，發布按鈕才知道有沒存的改動（審查 #1、#4）。
+  const savedSlug = readString(job.currentRevision?.templateData ?? null, 'slug');
+  const [slugDraft, setSlugDraft] = useState(savedSlug);
+  const [slugEditing, setSlugEditing] = useState(false);
+  const slugSave = useAction();
+  const slugDirty = isSlugDirty(slugDraft, savedSlug);
+  // 已存的網址換了才同步，而且只在框裡沒改動時（審查 #2：按「儲存分類」不能把打好的字清掉）。
+  const prevSavedSlug = useRef(savedSlug);
+  useEffect(() => {
+    const prev = prevSavedSlug.current;
+    prevSavedSlug.current = savedSlug;
+    setSlugDraft((draft) => nextSlugDraft(draft, prev, savedSlug));
+  }, [savedSlug]);
+  // Escape（審查 #3）：Sheet 在 document 上聽 Escape 關面板。框裡有沒存的改動時在 window 的捕獲階段先攔下，
+  // 只還原框內的字；焦點在不在框裡都一樣。沒改動就不攔，照常關面板（按「改」打開的由輸入框自己收起）。
+  useEffect(() => {
+    if (!slugDirty) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || slugSave.busy) return;
+      if (slugEscapeAction({ dirty: true, editing: slugEditing }) !== 'revert') return;
+      event.stopPropagation();
+      event.preventDefault();
+      setSlugDraft(savedSlug);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [slugDirty, slugEditing, savedSlug, slugSave.busy]);
+
+  const storeSlug = (): void => {
+    if (!slugDirty || slugSave.busy) return;
+    void slugSave.run(async () => {
+      const baseHash = job.currentRevision?.contentHash ?? null;
+      // 整份取代：其他欄位原樣帶上；帶 expectedContentHash，中間被別處改過就擋下來，不蓋掉。
+      await guardEdit(() =>
+        api.createRevision(job.uuid, {
+          origin: 'manual',
+          templateData: withSlug(job.currentRevision?.templateData ?? null, slugDraft),
+          reason: '在發布面板改網址',
+          ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+        }),
+      );
+      clearSlugSuggest(job.uuid);
+      setSlugEditing(false);
+      await refresh();
+    });
+  };
+
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
   useEffect(() => {
     if (!NEEDS_RENDER.has(job.state) || job.currentRevision === null) return;
@@ -94,7 +151,8 @@ export function PublishSheet({
   const mismatch = hash !== null && previewHash !== null && previewHash !== hash;
   const torn = job.approval !== null && !job.approval.valid;
 
-  const why: string | null = needsCover
+  const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSave.busy });
+  const why: string | null = slugBlocker ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
       ? `還不能發布：${otherBlockers.join('、')}`
@@ -106,7 +164,7 @@ export function PublishSheet({
             : `目前狀態是「${job.state}」，這一步不能發布。`
           : status === 'publish' && !understood
             ? '要先勾上面的「我知道」。'
-            : authorBlocker(authors, authorId);
+            : authorBlocker(authors, authorId));
 
   const publish = (): void =>
     void go.run(async () => {
@@ -132,7 +190,7 @@ export function PublishSheet({
     <div className="publish">
       <section className="p-section">
         <h3 className="p-label">
-          <span className="p-num">1</span>發到哪裡・作者
+          <span className="p-num">1</span>發到哪裡・網址・作者
         </h3>
         <div className="p-dest">
           <Icon name="globe" size={18} />
@@ -145,6 +203,20 @@ export function PublishSheet({
           </span>
         </div>
         <p className="field-hint">類型在建稿時就決定了，發布時不用再選。</p>
+        <PublishSlug
+          job={job}
+          refresh={refresh}
+          approvedNow={approvedNow}
+          busy={go.busy}
+          draft={slugDraft}
+          setDraft={setSlugDraft}
+          editing={slugEditing}
+          setEditing={setSlugEditing}
+          dirty={slugDirty}
+          saving={slugSave.busy}
+          error={slugSave.error}
+          onSave={storeSlug}
+        />
         <AuthorPicker state={authors} chosen={authorId} onChoose={setAuthorId} />
       </section>
 
@@ -295,7 +367,7 @@ export function PublishSheet({
           type="button"
           className="btn btn-primary btn-big p-go-btn"
           data-danger={status === 'publish' ? 'yes' : 'no'}
-          disabled={why !== null || go.busy || prepare.busy}
+          disabled={why !== null || go.busy || prepare.busy || slugSave.busy}
           onClick={publish}
         >
           {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
@@ -309,6 +381,12 @@ export function PublishSheet({
             </>
           )}
         </p>
+        {slugDirty && (
+          <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSave.busy || go.busy} onClick={storeSlug}>
+            {slugSave.busy ? <Spinner /> : <Icon name="check" size={13} />}
+            存網址
+          </button>
+        )}
         {mismatch && (
           <button
             type="button"
@@ -325,6 +403,149 @@ export function PublishSheet({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 「網址」一行（D-038，P5-T039）。發布前最後一眼看的就是這個面板，網址空著要在這裡講清楚後果，
+ * 當場就能建議（D-010）、當場就能改（D-008，不離開面板）。不擋發布（跟 Q-1 一樣只提醒）。
+ *
+ * 網址在 templateData 裡、會進 content hash（state-machine.md）：存網址＝建一版新內容，核准作廢、
+ * 稿子退回 RENDERED。已經核准時改之前先講（`approvalNote`），存了之後面板底下的「舊的核准已經作廢」
+ * 與「核准並…」按鈕照常出現，不默默失效。
+ */
+function PublishSlug({
+  job,
+  refresh,
+  approvedNow,
+  busy,
+  draft,
+  setDraft,
+  editing,
+  setEditing,
+  dirty,
+  saving,
+  error,
+  onSave,
+}: {
+  job: LoadedJob;
+  refresh: () => Promise<void>;
+  approvedNow: boolean;
+  /** 正在發布：不給改。 */
+  busy: boolean;
+  /** 框裡的值、開關、存的動作都在 PublishSheet：發布按鈕要知道有沒存的改動（審查 #1）。 */
+  draft: string;
+  setDraft: (value: string) => void;
+  editing: boolean;
+  setEditing: (value: boolean) => void;
+  dirty: boolean;
+  saving: boolean;
+  error: string | null;
+  onSave: () => void;
+}): JSX.Element {
+  const data = job.currentRevision?.templateData ?? null;
+  const saved = readString(data, 'slug');
+  const view = publishSlugView({
+    contentType: job.target.contentType,
+    slug: saved,
+    title: readString(data, 'title', job.title ?? ''),
+    approvedNow,
+  });
+  // 有沒存的改動時編輯列一定開著（例如自動攤開的框打了字之後別處把網址存好了）。
+  const open = editing || view.openEditor || dirty;
+
+  return (
+    <div className="p-slug">
+      <div className="p-slug-line">
+        <Icon name="link" size={16} />
+        <span className="p-slug-label">網址</span>
+        {view.value !== null ? (
+          <span className="p-slug-value mono">{view.value}</span>
+        ) : (
+          <span className="p-slug-value dim">沒填</span>
+        )}
+        {!open && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            disabled={busy}
+            onClick={() => {
+              setDraft(saved);
+              setEditing(true);
+            }}
+          >
+            {view.value === null ? '填網址' : '改'}
+          </button>
+        )}
+      </div>
+
+      {view.empty !== null && (
+        <p className={view.empty.tone === 'warn' ? 'note note-warn p-slug-empty' : 'field-hint'} role="note">
+          {view.empty.tone === 'warn' && <Icon name="alert" size={14} />}
+          <span>{view.empty.text}</span>
+        </p>
+      )}
+
+      {open && (
+        <div className="p-slug-edit">
+          {view.approvalNote !== null && (
+            <p className="note note-warn">
+              <Icon name="scissors" size={14} />
+              <span>{view.approvalNote}</span>
+            </p>
+          )}
+          <div className="row">
+            <input
+              className="input mono"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={job.target.contentType === 'diary' ? readString(data, 'title', 'YYYYMMDD') : 'english-slug'}
+              aria-label="網址片段"
+              disabled={busy || saving}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && dirty) onSave();
+                // 有改動的 Escape 在 PublishSheet 的捕獲階段就處理掉了（只還原字）；走到這裡代表沒改動。
+                if (event.key === 'Escape' && slugEscapeAction({ dirty, editing }) === 'close-editor') {
+                  // 只收起編輯，不要連面板一起關掉（Sheet 在 document 上聽 Escape）。
+                  event.stopPropagation();
+                  setEditing(false);
+                }
+              }}
+            />
+            <button type="button" className="btn btn-primary btn-tiny" disabled={busy || saving || !dirty} onClick={onSave}>
+              {saving ? <Spinner /> : <Icon name="check" size={13} />}
+              存網址
+            </button>
+            {/* 有改動時一定給「取消」：發布按鈕底下那句叫人「按取消」（審查 #1）。 */}
+            {(editing || dirty) && (
+              <button
+                type="button"
+                className="btn btn-quiet btn-tiny"
+                disabled={saving}
+                onClick={() => {
+                  setDraft(saved);
+                  setEditing(false);
+                }}
+              >
+                取消
+              </button>
+            )}
+          </div>
+          {view.canSuggest && (
+            <SlugSuggest
+              job={job}
+              refresh={refresh}
+              slug={draft.trim()}
+              titleDirty={false}
+              pick={setDraft}
+              pickHint="點一個填進上面的網址欄，可以再改；按「存網址」才算數。"
+              disabled={busy || saving}
+            />
+          )}
+          <ErrorNote message={error} />
+        </div>
+      )}
     </div>
   );
 }

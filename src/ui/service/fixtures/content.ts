@@ -93,8 +93,8 @@ export const contentApi: Pick<PublisherApi, 'createRevision' | 'listRevisions' |
       (current?.number ?? 0) + 1,
       input.origin ?? 'manual',
       {
-        ...(current?.templateData ?? {}),
-        ...(input.templateData ?? {}),
+        // templateData 是整份取代（跟後端一樣）：清空網址時拿掉的 slug 鍵才真的不見（P5-T039）。
+        ...(input.templateData ?? current?.templateData ?? {}),
         // 示範資料不做後端的整理（normalizeEditedBody），原樣收下。
         ...(input.editedBody === undefined
           ? {}

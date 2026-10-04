@@ -5,6 +5,10 @@
 ## 已知殘餘（記錄，不擋進度）
 
 
+- 發布面板與「標題與網址」改網址都沒有前端格式檢查（P5-T039 沿用抽屜現況）：打了大寫、空格、中文要等存的時候後端用模板 schema 擋，
+  錯誤文案是後端的驗證訊息，不是白話。AI 建議的候選一定合格（`contract/slug.ts`）。
+- 發布面板網址框有沒存的改動時，Escape 在 window 捕獲階段被網址列先攔下（P5-T039 審查 #3）：這時面板裡若開著確認框（例如「建立分類項目」），第一次 Escape 只還原網址、要再按一次才關確認框。
+
 - 帶連結的圖片（`<figure><a href><img></a></figure>`）存得住、連結不丟，但發布時 `block-parse.ts` 還不認得 figure 裡的 `<a>`，
   整塊會走 wp:html 保底，不是帶 `linkDestination: custom` 的圖片區塊。要改 `block-parse.ts`／`block-types.ts`／`block-serialize.ts`
   （P5-T028 的 write_paths 只含最後一個），另開 Task（P5-T028 第三輪審查 #4）。

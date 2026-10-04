@@ -155,6 +155,21 @@ export function buildStore(): Map<string, FixtureJob> {
       blockers: ['這個發布目標必須設定精選圖片', '還沒渲染，先按「渲染」產生校樣'],
     }),
     baseLongform('f-rendered', { state: 'RENDERED', blockers: ['還沒核准'] }),
+    // 沒填網址的長文（D-038，P5-T039）：打開發布面板看得到「沒填網址」的提醒與「建議網址」。
+    baseLongform('f-noslug', {
+      state: 'RENDERED',
+      title: 'AI未來已來 - 1',
+      currentRevision: revision(
+        2,
+        'manual',
+        { title: 'AI未來已來 - 1', body: LONGFORM_BODY, tags: ['隨筆'] },
+        'd51f08ae2c7b3946',
+      ),
+      revisionCount: 2,
+      blockers: ['還沒核准'],
+      createdAt: '2026-10-04T06:00:00Z',
+      updatedAt: '2026-10-04T06:30:00Z',
+    }),
     baseDiary('f-previewed', {
       state: 'PREVIEWED',
       marks: DIARY_MARKS,

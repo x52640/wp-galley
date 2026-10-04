@@ -5,7 +5,7 @@
 > 程式：`src/agents/output-contract.ts`（`buildSystemPrompt`、`TASK_BRIEF`）、
 > migration 004／005／006／008、`src/core/image-generation.ts`、`src/ui/components/AgentProgress.tsx`、
 > `AgentButton.tsx`、`panels/MediaPanel.tsx`（`BriefCard`）、`InsertImagePanel.tsx`、
-> `src/core/slug-suggestion.ts`、`src/contract/slug.ts`、`panels/SourcePanel.tsx`（`SlugSuggest`）。
+> `src/core/slug-suggestion.ts`、`src/contract/slug.ts`、`components/SlugSuggest.tsx`（「標題與網址」與發布面板共用）。
 
 三件事都來自實際用起來的問題（2026-08-28，D-010）。
 
@@ -275,7 +275,9 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 
 ## 建議英文網址（D-026，P5-T026）
 
-「標題與網址」的網址欄底下一顆「建議網址」：跑一趟本機 Agent（使用者在「請 AI 看一遍」選單裡選的那家，
+兩個入口、同一個元件（`components/SlugSuggest.tsx`，D-038，P5-T039）：「標題與網址」的網址欄底下，以及**發布面板**的「網址」列
+（沒填網址時直接攤開；有填按「改」才出現）。請求與結果都在 `lib/slug-suggest-store.ts`，以稿件為 key，一邊想好的候選另一邊也看得到；
+在任一邊存了網址候選就收起來。一顆「建議網址」：跑一趟本機 Agent（使用者在「請 AI 看一遍」選單裡選的那家，
 `loadProvider`），讀**目前這一版**的標題＋內文開頭，回三個英文網址候選。長文與一般文章才有；**日記不提供**
 （網址是日期，前端不顯示、後端 `InvalidInputError`）。
 
@@ -287,7 +289,7 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 | 輸出 schema | **另一份小 schema** `SLUG_OUTPUT_SCHEMA`（`{ slugs: string[] }`，`maxItems` 10、每個 `maxLength` 200），不共用校稿那份：校稿那份的 `templateData` 必填且嵌整份模板 schema，這一趟手上沒有整份 templateData，硬要帶回只能編、或把整篇再吐一次。三家 CLI 都吃得下（只有一個必填欄位，Codex strict 不用轉 nullable） |
 | 單個候選的驗證 | 不放進 schema（一個不合格就整趟重來太浪費）。後端 `pickSlugSuggestions`（`src/contract/slug.ts`，示範資料共用）：去頭尾空白；只收**小寫英數與單個連字號、不以連字號開頭結尾、最多 60 字元**（比模板 schema 的 80 嚴，也不收底線：要的是短、好讀、一定存得進去）；不合格的**丟掉、不改寫**；重複的只留一個；最多留三個 |
 | 全丟光 | 那一趟記成 `failed`，丟 `AgentError`「AI 沒給出能用的網址（給了 N 個，格式都不合格）。再按一次試試，或自己填。」（HTTP 502） |
-| 落地 | **不落地**：不建提案、不改 templateData、不建版本、不動核准、不動配圖需求。候選只回給畫面；使用者點一個才填進網址欄（還沒存，照原本的「儲存」存）。**絕不自動填、不自動存**（AI 可能認錯作品） |
+| 落地 | **不落地**：不建提案、不改 templateData、不建版本、不動核准、不動配圖需求。候選只回給畫面；使用者點一個才填進網址欄（還沒存：抽屜照原本的「儲存」存，發布面板按「存網址」）。**絕不自動填、不自動存**（AI 可能認錯作品） |
 | 密碼 | **截斷之前**先對整份 templateData 檢查，再對組好的 prompt 檢查（D-023）：只查截好的 prompt 的話，密碼剛好跨在第 600 字時前半段會被送出去（P5-T026 審查）。有就拒絕，不送出、不記執行 |
 | 生命週期 | 跟校稿共用「同一篇一次一趟」（`activeRuns`）、AgentRegistry 同一條佇列、`DELETE /agent` 取消、頂端 AgentBanner。`agent_runs.purpose = 'suggest-slug'`（`AgentRun.task`）。逾時預設 2 分鐘 |
 | 內容被改過 | **不丟結果**：候選不會落地，不像校稿那樣要對著同一版套用。因此它跑的時候上傳圖片的自動放位置／自動設精選照常做（後端 `contentRunActive` 不算它），畫面上圖片的「放進正文／設精選」也不鎖（`runLocksContent`，`src/contract/agent-run.ts`；後端 `contentRunActive` 用同檔的 `taskLocksContent`，畫面與示範資料都用這一份） |
