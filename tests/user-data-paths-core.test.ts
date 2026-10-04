@@ -94,25 +94,33 @@ describe('寫入一律相對資料目錄', () => {
   });
 });
 
-describe('讀到舊的絕對路徑照舊能用', () => {
-  it('候選圖與媒體的 local_path 是絕對路徑：送得出去、用得了、刪得掉', async () => {
+describe('媒體的絕對路徑：只認媒體資料夾裡的（P8-T004）', () => {
+  it('在媒體資料夾裡：送得出去、用得了、刪得掉；在外面：當成不見了、刪媒體不動那個檔', async () => {
     const { f, dataDir } = await setup();
+    const mediaDir = coreInternals(f.core).mediaDir;
     const uuid = f.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
     await f.core.runAgentReview(uuid, { provider: 'codex', task: 'images' });
     const briefId = f.core.getJob(uuid).imageBriefs[0]!.id;
     const candidate = await f.core.generateBriefImage(uuid, briefId);
 
-    // 模擬「別處」的舊資料：檔案放在資料目錄外，DB 存絕對路徑。
+    // 資料目錄外的檔，DB 存絕對路徑：不讀。
     const outside = join(dirname(dataDir), `${'legacy root'}-${uuid}`, 'c.png');
     mkdirSync(dirname(outside), { recursive: true });
     writeFileSync(outside, TINY_PNG);
     f.db.handle.prepare('UPDATE image_candidates SET local_path = ? WHERE id = ?').run(outside, candidate.id);
-    expect(f.core.imageCandidateFile(uuid, candidate.id).path).toBe(outside);
+    expect(() => f.core.imageCandidateFile(uuid, candidate.id)).toThrow(/不見了/);
+
+    // 媒體資料夾裡的絕對路徑：照用。
+    const inside = join(mediaDir, uuid, 'abs.png');
+    writeFileSync(inside, TINY_PNG);
+    f.db.handle.prepare('UPDATE image_candidates SET local_path = ? WHERE id = ?').run(inside, candidate.id);
+    expect(f.core.imageCandidateFile(uuid, candidate.id).path).toBe(inside);
     const outcome = await f.core.useImageCandidate(uuid, candidate.id);
 
     f.db.handle.prepare('UPDATE media_assets SET local_path = ? WHERE id = ?').run(outside, outcome.media.id);
     f.core.removeMedia(uuid, outcome.media.id);
-    expect(existsSync(outside)).toBe(false);
+    expect(existsSync(outside)).toBe(true);
+    rmSync(dirname(outside), { recursive: true, force: true });
   });
 });
 
@@ -124,7 +132,8 @@ describe('別的根目錄留下的絕對路徑（重 clone 後把舊資料複製
     const briefId = f.core.getJob(uuid).imageBriefs[0]!.id;
     const candidate = await f.core.generateBriefImage(uuid, briefId);
 
-    const moved = join(dataDir, 'generated-images', uuid, 'candidates', 'c.png');
+    // 對應到媒體資料夾（正式是 <資料目錄>/generated-images，fixture 注入的是 <資料目錄>/media）。
+    const moved = join(coreInternals(f.core).mediaDir, uuid, 'candidates', 'c.png');
     mkdirSync(dirname(moved), { recursive: true });
     writeFileSync(moved, TINY_PNG);
     const oldRoot = '/Users/someone/old clone';

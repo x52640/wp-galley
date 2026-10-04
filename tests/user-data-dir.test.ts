@@ -396,16 +396,6 @@ describe('第一次啟動自動搬家', () => {
     expect(existsSync(join(dataDir, 'drafts'))).toBe(false);
   });
 
-  it('上次當掉留下的鎖（pid 已經不在）：接手照搬，搬完鎖檔清掉', () => {
-    const legacy = tempDir('legacy');
-    seedLegacyRoot(legacy);
-    const dataDir = join(tempDir('home'), 'Galley');
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, LOCK_FILE), '2147483646'); // 不可能存在的 pid
-    expect(moveLegacyData({ legacyRoot: legacy, dataDir }).kind).toBe('moved');
-    expect(existsSync(join(dataDir, LOCK_FILE))).toBe(false);
-  });
-
   it('暫存檔名每個行程不同：不刪別人的暫存檔', () => {
     const legacy = tempDir('legacy');
     seedLegacyRoot(legacy);
@@ -505,15 +495,7 @@ describe('第一次啟動自動搬家', () => {
     expect(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).toBe('12345');
   });
 
-  it('接手過期的鎖：先改名成自己的檔確認還是那把過期的，再建新鎖；不留下改名的殘檔', () => {
-    const dataDir = tempDir('lock');
-    writeFileSync(join(dataDir, LOCK_FILE), '2147483646');
-    const release = acquireMoveLock(dataDir);
-    expect(readFileSync(join(dataDir, LOCK_FILE), 'utf8')).toBe(String(process.pid));
-    expect(readdirSync(dataDir)).toEqual([LOCK_FILE]);
-    release();
-    expect(existsSync(join(dataDir, LOCK_FILE))).toBe(false);
-  });
+  // 過期的鎖不再自動接手（P8-T004）：見 data-dir-hardening.test.ts。
 
   it('prepareUserData：GALLEY_DATA_DIR 覆寫、搬家、建好子目錄（npm start／dev／migrate 共用這一段）', () => {
     const legacy = tempDir('legacy');

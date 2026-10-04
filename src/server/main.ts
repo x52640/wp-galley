@@ -2,7 +2,7 @@ import { config as loadDotenv } from 'dotenv';
 import { buildApp } from './app.js';
 import { ConfigError, loadConfig, redactConfig } from '../config/env.js';
 import { DataDirError, paths, projectRoot } from '../config/paths.js';
-import { DataMoveError, prepareUserData, type PreparedUserData } from '../config/user-data.js';
+import { DataMoveError, markDatabaseCreated, prepareUserData, type PreparedUserData } from '../config/user-data.js';
 import { openDatabase } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
 import { migrations } from '../db/migrations/index.js';
@@ -51,6 +51,7 @@ async function main(): Promise<void> {
   const db = openDatabase(data.databaseFile);
   // 舊程式資料夾：migration 010 把 DB 裡以它開頭的絕對路徑改成相對資料目錄。
   runMigrations(db, migrations, { legacyRoot: projectRoot });
+  rememberDatabase(data.dir);
 
   let templates;
   try {
@@ -118,6 +119,15 @@ async function main(): Promise<void> {
   const url = `http://${config.appHost === '::1' ? '[::1]' : config.appHost}:${config.appPort}`;
   app.log.info({ config: redactConfig(config) }, '發布台已啟動');
   console.log(`\n本機 WordPress 發布台：${url}\n健康檢查：${url}/api/health\n`);
+}
+
+/** 標記檔記下「這裡有過資料庫」（P8-T004）：之後資料庫不見了，啟動會停下來而不是默默建空的。記不下來只警告。 */
+function rememberDatabase(dataDir: string): void {
+  try {
+    markDatabaseCreated(dataDir);
+  } catch (error) {
+    console.warn(`\n⚠ ${error instanceof Error ? error.message : String(error)}（不影響這次啟動）\n`);
+  }
 }
 
 void main();
