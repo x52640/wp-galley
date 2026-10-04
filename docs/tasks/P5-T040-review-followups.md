@@ -60,11 +60,11 @@ D-039。已合併的 #24（P6-T006）、#25（P5-T039）補跑 Codex 審查，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #28 Codex 第三輪三條 P2（2026-10-05，未 commit）：待同步重讀改成一次只跑一個（`lib/serial-poll.ts`）；
-  網址草稿只有 store 一份（面板用 `useSyncExternalStore` 讀、`setSlugDraft` 寫）；工作區 `syncJob` 回傳 applied／failed／gone，
-  存網址（`runSlugSave`／`runSourceSave` 改成 save＋sync 兩步）要重讀套用才清草稿、放開，沒套用每 3 秒重試
-- 已通過驗證：`npm run verify` 93 檔／2074 測試綠（第三輪修正後）；`?fixtures=1`：發布面板打字、關掉再開仍在且擋發布、存網址後顯示新值且不再擋
-- 下一步：Codex 第四輪審查；`docs/specs/factcheck.md` 待同步段的「每 3 秒」改成「一次只跑一個、上一次結束 3 秒後再讀」（不在 write_paths，待主 session）
+- 最後完成：PR #28 Codex 第四輪兩條 P2（2026-10-05，未 commit）：工作區所有重讀（手動、動作後、查證輪詢、待同步、存網址後）
+  走同一個排程 `lib/refresh-scheduler.ts`（同時最多一個在飛、上一個結束才排下一個、需求都拿掉就停）；發請求前先查 `stillOnJob`（含 alive），
+  換篇／卸載時 dispose，在飛與等著的立刻以 gone 收尾、`runSlugSave` 放開。第三輪的 `lib/serial-poll.ts` 被取代、刪掉
+- 已通過驗證：`npm run verify` 93 檔／2079 測試綠（第四輪修正後）；`?fixtures=1`：載入、進出打字模式、發布面板存網址、「請 AI 看一遍」輪詢到跑完後放開、換篇載入
+- 下一步：主 session 合併；`docs/specs/factcheck.md` 待同步段的重讀節奏改指向 `refresh-scheduler`（不在 write_paths）
 - Blocker：無
 
 ## 完成結果
@@ -77,4 +77,6 @@ D-039。已合併的 #24（P6-T006）、#25（P5-T039）補跑 Codex 審查，�
    `runSlugSave` 存好且重讀套用後一律清掉該篇草稿（面板開著或關著都一樣，第二、三輪）。
 3. 「標題與網址」存檔中擋發布：`slug-save-store.ts` 加 `sourceSaveTouchesSlug`、`runSourceSave`；`SourcePanel` 的「儲存」「渲染」改到網址時
    整段（存＋渲染＋重讀到套用）登記成「存網址進行中」，存失敗也放開、錯誤照樣顯示；重讀沒套用就每 3 秒再讀（第三輪）；發布面板那邊在存時不默默跳過，按鈕反灰、硬按會講。
-- 測試：`tests/check-while-writing.test.ts`（#1 待同步四條）、`tests/serial-poll.test.ts`（三條）、`tests/publish-slug.test.ts`（#2、#3 與第三輪共十三條）。
+- 測試：`tests/check-while-writing.test.ts`（#1 待同步四條）、`tests/refresh-scheduler.test.ts`（八條，假時鐘）、`tests/publish-slug.test.ts`（#2、#3 與第三輪共十三條）。
+4. 重讀排程（第四輪）：`lib/refresh-scheduler.ts` 的 `createRefreshScheduler`，`Workspace` 每篇一個（用到才建、換篇／卸載 dispose），
+   `refresh`／`syncJob` 都經過它；查證中（1.5 秒）與待同步（3 秒）用 `setNeed` 登記輪詢需求。

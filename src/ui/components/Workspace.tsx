@@ -42,7 +42,7 @@ import {
   selectionImageContentHash,
   stillOnJob,
 } from '../lib/selection-image-view.js';
-import { startSerialPoll } from '../lib/serial-poll.js';
+import { createRefreshScheduler, type ReadResult, type RefreshScheduler } from '../lib/refresh-scheduler.js';
 import type { SyncOutcome } from '../lib/slug-save-store.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
@@ -154,22 +154,21 @@ export function Workspace({
   }, []);
 
   /**
-   * 回傳有沒有真的把新資料寫進畫面（PR #28 第三輪 Codex P2）：存網址要等 `applied` 才算存好；
-   * `failed`＝讀失敗或被更新的一次重讀取代；`gone`＝已經不在這一篇（換篇、元件卸載）。
+   * 讀一次某一篇、寫進畫面（只在還是那一篇、而且是最新一次送出的時候寫）。只由重讀排程呼叫，一次只有一個在飛。
+   * 發請求之前先確認元件還在、還在那一篇（PR #28 第四輪 Codex P2：卸載後不再發請求）。
    */
-  const syncJob = useCallback(async (): Promise<SyncOutcome> => {
-    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
-    // 舊篇的 refresh（換篇前抓住的）在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉，
-    // 舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。所有 `refresh(` 呼叫處（含子元件）都經過這裡。
-    const origin = uuid;
+  const readJob = useCallback(async (origin: string): Promise<ReadResult> => {
+    if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return 'failed';
+    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的重讀剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
+    // 舊篇的重讀在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉。
     const mine = beginRefresh({ generation: generation.current, current: uuidRef.current, origin });
-    if (mine === null) return 'gone';
+    if (mine === null) return 'failed';
     generation.current = mine;
     const isCurrent = (): boolean =>
       refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
     try {
       // 查證結果另一條路讀（GET …/factchecks）；讀不到不擋整個工作區，留著上一次的。
-      const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
+      const [next, checks] = await Promise.all([api.getJob(origin), api.listFactChecks(origin).catch(() => undefined)]);
       if (isCurrent()) {
         setJob(next);
         // 待同步（P5-T040 #1）看的是「哪一個序號的重讀成功了」，不比 hash。
@@ -181,9 +180,44 @@ export function Workspace({
     } catch (cause) {
       if (isCurrent()) setError(describeError(cause));
     }
-    return stillOnJob({ alive: alive.current, current: uuidRef.current, origin }) ? 'failed' : 'gone';
-  }, [uuid]);
-  /** 大部分呼叫處不需要結果。 */
+    return 'failed';
+  }, []);
+
+  /**
+   * 這一篇的重讀排程（`lib/refresh-scheduler.ts`，PR #28 第四輪 Codex P2）：手動重讀、動作做完的重讀、查證中的輪詢、
+   * 待同步的重試、存網址後的重讀全部走它，同時最多一個在飛、上一個結束才排下一個。
+   * 用到才建（StrictMode 的 effect 會先清再建）；換篇或卸載時 dispose：在飛與等著的立刻以 gone 收尾。
+   */
+  const schedulerRef = useRef<{ uuid: string; scheduler: RefreshScheduler } | null>(null);
+  const schedulerFor = useCallback(
+    (origin: string): RefreshScheduler | null => {
+      if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return null;
+      const held = schedulerRef.current;
+      if (held !== null && held.uuid === origin) return held.scheduler;
+      held?.scheduler.dispose();
+      const scheduler = createRefreshScheduler(() => readJob(origin));
+      schedulerRef.current = { uuid: origin, scheduler };
+      return scheduler;
+    },
+    [readJob],
+  );
+  useEffect(
+    () => () => {
+      schedulerRef.current?.scheduler.dispose();
+      schedulerRef.current = null;
+    },
+    [uuid],
+  );
+
+  /**
+   * 重讀這一篇，回傳有沒有真的把新資料寫進畫面（PR #28 第三輪 Codex P2）：存網址要等 `applied` 才算存好；
+   * `failed`＝讀失敗；`gone`＝已經不在這一篇（換篇、元件卸載），不會再套用。綁住呼叫時的那一篇。
+   */
+  const syncJob = useCallback(async (): Promise<SyncOutcome> => {
+    const scheduler = schedulerFor(uuid);
+    return scheduler === null ? 'gone' : scheduler.request();
+  }, [uuid, schedulerFor]);
+  /** 大部分呼叫處不需要結果。所有 `refresh(` 呼叫處（含子元件）都經過排程。 */
   const refresh = useCallback(async (): Promise<void> => {
     await syncJob();
   }, [syncJob]);
@@ -241,17 +275,15 @@ export function Workspace({
   const editBlockedNote = pendingSync && !runBlocked ? SYNC_PENDING_NOTE : 'AI 還在處理這篇，等它跑完再改。';
   const editBlockedRef = useRef({ blocked: editBlocked, note: editBlockedNote });
   editBlockedRef.current = { blocked: editBlocked, note: editBlockedNote };
-  // 一次只跑一個、上一次結束才排下一次（PR #28 第三輪 Codex P2）：固定間隔遇到比間隔還慢的重讀，
-  // 會一直推進世代、把每個回應都當成過期丟掉，永遠同步不了。
+  // 輪詢交給同一個重讀排程（PR #28 第四輪 Codex P2）：查證在跑（1.5 秒）、待同步（3 秒）各登記一個需求，
+  // 一次只跑一個、上一次結束才排下一次；`working`／`pendingSync` 都是照最新一次套用成功的資料算的，
+  // 查證跑完、同步好了，需求拿掉就停。
   useEffect(() => {
-    if (!pendingSync) return;
-    return startSerialPoll(refresh, 3000);
-  }, [pendingSync, refresh]);
+    schedulerFor(uuid)?.setNeed('working', working ? 1500 : null);
+  }, [working, uuid, schedulerFor]);
   useEffect(() => {
-    if (!working) return;
-    const timer = window.setInterval(() => void refresh(), 1500);
-    return () => window.clearInterval(timer);
-  }, [working, refresh]);
+    schedulerFor(uuid)?.setNeed('pendingSync', pendingSync ? 3000 : null);
+  }, [pendingSync, uuid, schedulerFor]);
 
   // 後端在 GET /preview 時把 RENDERED 推進 PREVIEWED，所以看完校樣要重讀一次。
   const stateRef = useRef(job?.state);
