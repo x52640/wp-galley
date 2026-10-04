@@ -5,11 +5,12 @@
  * （`ctx.content`、`ctx.media`…），模組之間透過它互相呼叫。這裡的欄位就是以前 CoreService 的私有欄位。
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { AgentRunTask, Job, MediaAsset, Revision } from '../../contract/api.js';
 import { computeRevisionHash } from '../content-hash.js';
 import {
+  AgentError,
   ContentInvalidError,
   InvalidInputError,
   JobNotFoundError,
@@ -27,7 +28,7 @@ import {
 } from '../repository.js';
 import { isContentMutable } from '../state-machine.js';
 import { containsSecret, createSecretScrubber, type Scrubber } from '../../config/secrets.js';
-import { fromStoredPath, resolveDataDir, toStoredPath } from '../../config/paths.js';
+import { fromStoredMediaPath, fromStoredPath, isInsideDir, resolveDataDir, toStoredPath } from '../../config/paths.js';
 import { createJobWorkspace, resolveInsideWorkspace, WorkspaceError } from '../../agents/workspace.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import type { AgentId } from '../../agents/types.js';
@@ -338,26 +339,69 @@ export class CoreContext {
     return toStoredPath(this.dataDir, absolute);
   }
 
-  /** DB 讀出的路徑 → 實際檔案位置。相對的以資料目錄解析；舊資料的絕對路徑照舊用。 */
+  /** DB 讀出的工作目錄路徑 → 實際位置。相對的以資料目錄解析；舊資料的絕對路徑照舊用。媒體檔用 `mediaFile`。 */
   localFile(stored: string): string {
     return fromStoredPath(this.dataDir, stored);
   }
 
   /**
-   * 這個 job 的 Agent 工作目錄。**一定在 `draftsDir` 裡**：DB 記的路徑解析後在 drafts/ 裡就用它（資料夾不見了補建）；
-   * 逃出去（被改過、或舊資料指到別處）就改用 `drafts/<uuid>`，不在外面跑 Agent。
+   * DB 讀出的媒體路徑（上傳過的圖、候選圖）→ 實際檔案位置；**一定在 `mediaDir` 裡**，不在就是 null（P8-T004）。
+   * 讀檔、刪檔都只能用這裡回傳的路徑，規則見 `fromStoredMediaPath`。
+   */
+  mediaFile(stored: string): string | null {
+    return fromStoredMediaPath(this.dataDir, this.mediaDir, stored);
+  }
+
+  /** 同 `mediaFile`，但路徑不在媒體資料夾裡就丟「檔案不見了」（不洩漏 DB 裡記的是哪裡）。 */
+  requireMediaFile(stored: string, what: string): string {
+    const file = this.mediaFile(stored);
+    if (file === null) {
+      throw new MediaError(`${what}的檔案不見了（generated-images/ 被清過？），請再生一張或重新上傳`);
+    }
+    return file;
+  }
+
+  /**
+   * 這個 job 的 Agent 工作目錄。**一定在 `draftsDir` 裡，字面路徑與實體路徑都是**：DB 記的路徑解析後在 drafts/ 裡就用它
+   * （資料夾不見了補建）；逃出去（被改過、舊資料指到別處、或路徑上有符號連結指到外面）就改用 `drafts/<uuid>`；
+   * 連 `drafts/<uuid>` 的實體路徑都不在 drafts/ 裡，就不跑 Agent（P8-T004）。
    */
   jobWorkspace(job: JobRow): string {
     if (job.workspace_path !== null) {
       try {
         const dir = resolveInsideWorkspace(this.draftsDir, this.localFile(job.workspace_path));
-        mkdirSync(dir, { recursive: true });
-        return dir;
+        if (this.ensureRealDraftDir(dir)) return dir;
       } catch (error) {
         if (!(error instanceof WorkspaceError)) throw error;
       }
     }
+    const fallback = join(this.draftsDir, job.uuid);
+    if (!this.ensureRealDraftDir(fallback)) {
+      throw new AgentError('這篇稿件的 AI 工作目錄不在發布台的 drafts/ 資料夾裡（可能被換成了符號連結），為了安全不在那裡跑 AI');
+    }
     return createJobWorkspace(this.draftsDir, job.uuid);
+  }
+
+  /**
+   * 建好 `dir`（drafts/ 底下、字面上已檢查過）並確認實體路徑也在 drafts/ 的實體路徑底下。
+   * 建之前先確認已經存在的那一段祖先在 drafts/ 裡，免得透過符號連結在外面建出資料夾。
+   */
+  private ensureRealDraftDir(dir: string): boolean {
+    try {
+      mkdirSync(this.draftsDir, { recursive: true });
+      const root = realpathSync(this.draftsDir);
+      const inside = (path: string, allowRoot: boolean): boolean => {
+        const real = realpathSync(path);
+        return (allowRoot && real === root) || isInsideDir(root, real);
+      };
+      let existing = dir;
+      while (!existsSync(existing)) existing = dirname(existing);
+      if (!inside(existing, true)) return false;
+      mkdirSync(dir, { recursive: true });
+      return inside(dir, false);
+    } catch {
+      return false;
+    }
   }
 
   mediaUrl(asset: MediaAssetRow): string | null {

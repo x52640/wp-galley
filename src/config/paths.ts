@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 
 /**
@@ -173,4 +173,48 @@ export function fromStoredPath(dataDir: string, stored: string): string {
   if (cut < 0) return stored;
   const candidate = resolve(base, stored.slice(cut + 1));
   return isInsideDir(base, candidate) && existsSync(candidate) ? candidate : stored;
+}
+
+/** 媒體檔在 DB 路徑裡的資料夾名（舊根目錄容錯只認這一段）。 */
+const MEDIA_SEGMENT = '/generated-images/';
+
+/**
+ * DB 讀出的**媒體**路徑（`media_assets.local_path`、`image_candidates.local_path`）→ 實際檔案位置（P8-T004）。
+ *
+ * 跟 `fromStoredPath` 不同，結果**一定在媒體資料夾（`generated-images/`）底下**，不然回 null（當成檔案不見了）：
+ * - 路徑裡有任何 `..` 段（或 NUL）就不解析。
+ * - 相對的以資料目錄解析、絕對的照用；兩者都要落在媒體資料夾裡。
+ * - 舊根目錄容錯（絕對路徑、不在資料目錄底下）：只取最後一個 `/generated-images/` 之後那段，對應到媒體資料夾，那裡真的有檔才用。
+ * - 檔案已經存在時，再確認**實體路徑**（解開符號連結）也在媒體資料夾的實體路徑底下。
+ *
+ * 讀檔、刪檔都只用這裡回傳的路徑：DB 被改過也碰不到 `.env`、資料庫或資料目錄裡的其他檔。
+ */
+export function fromStoredMediaPath(dataDir: string, mediaDir: string, stored: string): string | null {
+  if (stored === '' || stored.includes('\0') || stored.split(/[\\/]/).includes('..')) return null;
+  const base = resolve(dataDir);
+  const media = resolve(mediaDir);
+  const target = isAbsolute(stored) ? resolve(stored) : resolve(base, stored);
+  if (isInsideDir(media, target)) return confirmRealInside(media, target);
+  if (!isAbsolute(stored) || isInsideDir(base, target)) return null;
+  const cut = stored.lastIndexOf(MEDIA_SEGMENT);
+  if (cut < 0) return null;
+  const candidate = resolve(media, stored.slice(cut + MEDIA_SEGMENT.length));
+  if (!isInsideDir(media, candidate) || !existsSync(candidate)) return null;
+  return confirmRealInside(media, candidate);
+}
+
+/** 檔案存在時，實體路徑也要在 `parent` 的實體路徑底下；不存在就回原路徑（讀會失敗、刪不到東西）。 */
+function confirmRealInside(parent: string, target: string): string | null {
+  let real: string;
+  try {
+    real = realpathSync(target);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? target : null;
+  }
+  try {
+    return isInsideDir(realpathSync(parent), real) ? target : null;
+  } catch {
+    return null;
+  }
 }

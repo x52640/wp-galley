@@ -73,6 +73,9 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
 - 使用者資料（`.env`、站台設定檔、SQLite、`drafts/`、`generated-images/`、`backups/`）放在**程式資料夾外**的資料目錄
   （D-035，P8-T003；位置見 [architecture.md](architecture.md)「本機資料」），不在 repo 裡，也就不可能被 commit。
   資料目錄**新建時權限 0700**（已經存在的不改）。程式資料夾的舊位置仍留在 `.gitignore`（升級前的舊資料可能還在）。
+- **DB 裡記的路徑不被信任**（P8-T004）：讀刪媒體檔（上傳過的副本、候選圖）只認解析後落在 `generated-images/` 底下、
+  實體路徑也在裡面的；不在就當成檔案不見了，絕不因為 DB 的路徑去讀或刪資料目錄的其他檔（`.env`、資料庫等）。
+  Agent 工作目錄除了字面路徑，**實體路徑**（解開符號連結後）也要在 `drafts/` 底下，不然不在那裡跑。
 - **測試不碰資料目錄**：測試一律注入暫存路徑；`resolveDataDir()` 在測試行程（`VITEST`）裡沒設 `GALLEY_DATA_DIR`
   時回系統暫存目錄，忘了注入的測試也寫不到真的資料目錄。
 - 進到需要 WordPress 網址、Application Password 等資料時向使用者索取，不要預先寫進

@@ -85,19 +85,30 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
   絕對路徑不在資料目錄底下時另有容錯：取路徑裡最後一個 `/drafts/` 或 `/generated-images/` 段，資料目錄的同一個相對位置
   **真的有檔**才改用它（重 clone 後把舊資料複製過來、010 沒轉到的情況；`fromStoredPath`）。migration 010
   把「舊程式資料夾＋`/`」開頭的舊值改成相對（舊根目錄由 `runMigrations` 的 `legacyRoot` 傳入）。
-  Agent 工作目錄解析後一定在 `drafts/` 裡，逃出去就改用 `drafts/<uuid>`（`CoreContext.jobWorkspace`）。
-- **第一次啟動自動搬家**：有沒有搬過看資料目錄的**標記檔** `.galley-data.json`（`createdAt`、`migratedFrom`＝舊根目錄或 null＝全新），
+  **媒體路徑**（`media_assets.local_path`、`image_candidates.local_path`）另走 `fromStoredMediaPath`（P8-T004）：有 `..` 段就不解析；
+  解析後（含上面的容錯，容錯只認 `/generated-images/` 段）必須在媒體資料夾裡、檔案存在時實體路徑也在裡面，否則當成檔案不見了——
+  讀候選圖回「檔案不見了」、刪媒體不動任何檔（`CoreContext.mediaFile`／`requireMediaFile`）。
+  Agent 工作目錄解析後一定在 `drafts/` 裡，**字面與實體路徑都是**：逃出去（含路徑上有符號連結指到外面）就改用 `drafts/<uuid>`；
+  連 `drafts/<uuid>` 的實體路徑都在外面就不跑 Agent。建資料夾前先確認已存在的祖先在 `drafts/` 裡（`CoreContext.jobWorkspace`）。
+- **第一次啟動自動搬家**：有沒有搬過看資料目錄的**標記檔** `.galley-data.json`（`createdAt`、`state`、`migratedFrom`＝舊根目錄或 null＝全新、
+  `databaseCreated`＝這裡有過資料庫），
   不看 DB 在不在。沒有標記（或標記停在 `migrating`）、且程式資料夾的舊位置有任何一項（下表「資料目錄」那幾列；git 佔位檔不算）時，
   **複製**過去、舊的不刪；舊位置沒東西就只建目錄（標 `done`）。開始複製前先標 `state: 'migrating'`，全部做完最後一步才改成 `done`；
   停在 `migrating` 的下次啟動整份重搬（覆蓋新位置的半成品）。讀不到的舊資料（權限、I/O 錯誤）停止搬家，不當成沒有。
   順序是**先快照 DB、再複製資料夾**、最後 `.env`（先用 0600 建暫存檔再改名）與站台設定檔。
   SQLite 用 `VACUUM INTO` 寫成帶 pid＋亂數的暫存檔，唯讀開啟做 `integrity_check`、確認有 `schema_migrations`，通過才改名成 `publisher.sqlite`。
-  整段在鎖檔 `.migrating.lock`（記 pid）裡做：別的行程正在搬就停止啟動並說明；pid 已經不在（上次當掉）就接手——
-  先把過期的鎖改名成自己的檔、確認還是那一把才建新鎖；放鎖只刪內容是自己 pid 的。
+  整段在鎖檔 `.migrating.lock`（記 pid）裡做：鎖檔存在就停止啟動並說明（pid、建立時間、確定沒在跑時要刪哪個檔），
+  **不自動接手**、不猜是不是過期的（P8-T004）；放鎖只刪內容是自己 pid 的。
   失敗就停止啟動、講卡在哪；成功就印出資料搬到哪、舊資料在哪、可以自己刪哪些（提醒 `.env` 有密碼）。
   **沒有**標記但資料目錄已經有 DB（手動放的）：不覆蓋，補上標記。
+- **有過資料庫、現在不見了**（P8-T004）：標記 `done` 且 `databaseCreated`，`data/publisher.sqlite` 卻不存在或是空檔 → 停止啟動並說明
+  （資料庫應該在哪、可能被移走、找不回來要重新開始就把資料目錄整個移走再啟動），不建新 DB、不套 migration（`assertDatabasePresent`）。
+  `databaseCreated` 的來源：搬家時搬了 DB、手動放的 DB、或啟動建好 DB 套完 migration 後（`markDatabaseCreated`，`main.ts`／`cli-migrate.ts`）；
+  啟動時看到 DB 在、標記還沒記的也補上。沒有這個欄位的舊標記：`migratedFrom` 有值的當成有過，全新的當成沒有。
+  全新安裝（還沒建過 DB）照常建立。
 - **已經搬過、但舊位置還有沒搬過去的 DB**（`data/publisher.sqlite` 存在、且標記的 `migratedFrom` 不是這個程式資料夾，例如別的 checkout
-  先建了資料目錄）：不搬、不擋啟動，終端機大聲警告兩邊路徑與怎麼處理。
+  先建了資料目錄）：不搬、不擋啟動，終端機大聲警告兩邊路徑與怎麼處理。`migratedFrom` 就是這個程式資料夾的不探舊位置；
+  探舊位置出任何錯（權限、I/O）只略過警告，不擋啟動（P8-T004）。
 
 | 位置 | 內容 | 進 Git |
 | --- | --- | --- |
@@ -144,5 +155,5 @@ API 是同步的：`db.prepare(...).run()/get()/all()`，`.all()` 回傳
 | 取消、恢復已取消的稿件 | `Workspace` | `DELETE …`、`POST …/restore` | `jobs.ts`（`cancelJob`、`restoreJob`） | state-machine | restore-cancelled |
 | 設定精靈、停用類型 | `SetupWizard` | `/api/setup/*`（`setup.ts`） | `setup.ts`（另有 `server/reconfigure.ts`、`config/env-file.ts`、`wordpress/setup.ts`） | wordpress-site、security | setup-api、setup-diagnose、setup-env-file、site-switch、disable-targets、ui-target-toggle |
 | AI 查證（選字、觀察卡片、一鍵查證；分段進度、停止；卡片、看原文、知道了、去原文改；發布面板提醒） | `FactcheckCard`、`FactcheckIcon`、`SuggestionColumn`（混排）、`ProofView`（選字膠囊含打字模式先存再查、虛線標記）、`AgentButton`（一鍵查證）、`AgentProgress`（分段進度）、`PublishSheet`、`Workspace`、`lib/factcheck-view.ts`、`lib/check-while-writing.ts`（打字中存了不重載、能不能進打字模式） | `POST`／`GET …/factchecks`、`DELETE …/factchecks/:id`、`DELETE …/agent`、`POST …/revisions`（`resolveFactCheckId`） | `factcheck.ts`（純函式 `src/core/factcheck.ts`、取回器 `src/fetch/`） | factcheck、security、design-system | factcheck-service、factcheck-api、factcheck-verify、factcheck-prompts、factcheck-schema、safe-fetch、factcheck-view、stage-view、agent-progress、check-while-writing |
-| 資料目錄、第一次啟動自動搬家（啟動時，沒有畫面） | 終端機訊息 | — | `src/config/paths.ts`、`src/config/user-data.ts`、`server/main.ts`、`db/cli-migrate.ts`；DB 路徑在 `context.ts`（`storedPath`、`localFile`、`jobWorkspace`）；migration 010 | architecture（本機資料）、security | user-data-dir、user-data-paths-core、migrate |
+| 資料目錄、第一次啟動自動搬家（啟動時，沒有畫面） | 終端機訊息 | — | `src/config/paths.ts`、`src/config/user-data.ts`、`server/main.ts`、`db/cli-migrate.ts`；DB 路徑在 `context.ts`（`storedPath`、`localFile`、`mediaFile`、`jobWorkspace`）；migration 010 | architecture（本機資料）、security | user-data-dir、user-data-paths-core、data-dir-hardening、migrate |
 | 診斷 | `Diagnostics`（總覽進入） | `GET /api/health`（`health.ts`）、`GET /api/wordpress`（`wordpress.ts`） | 不經 CoreService（`wordpress/site.ts`） | wordpress-site | health、wordpress-api |

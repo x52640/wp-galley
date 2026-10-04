@@ -173,7 +173,7 @@ export class ImagesModule {
   imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string } {
     const job = this.ctx.requireJob(uuid);
     const row = this.requireCandidate(job, candidateId);
-    return { path: this.ctx.localFile(row.local_path), mimeType: row.mime_type };
+    return { path: this.ctx.requireMediaFile(row.local_path, '候選圖'), mimeType: row.mime_type };
   }
 
   /**
@@ -214,7 +214,7 @@ export class ImagesModule {
 
     try {
       const result = await this.ctx.media.addMediaWithOutcome(uuid, {
-        bytes: new Uint8Array(readFileSync(this.ctx.localFile(row.local_path))),
+        bytes: new Uint8Array(readFileSync(this.ctx.requireMediaFile(row.local_path, '候選圖'))),
         mimeType: row.mime_type,
         filename,
         altText,

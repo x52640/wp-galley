@@ -57,15 +57,18 @@ UI、`docs/archive/`。
 合併後正常啟動發布台，舊稿件、圖片照常；（主 session 代做）確認啟動訊息沒有誤警告。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新
-- [ ] 留下的殘餘已寫進 `docs/known-issues.md`
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新
+- [x] 留下的殘餘已寫進 `docs/known-issues.md`
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：派實作 subagent
+- 最後完成：五條實作＋測試（`tests/data-dir-hardening.test.ts`），spec（security、architecture 本機資料）與 known-issues 同步（2026-10-04，實作 subagent）
+- 已通過驗證：`npm run verify` 綠（90 檔／1990 測試）
+- 下一步：主 session 監工審查 → Codex 審查（D-039）→ commit
 - Blocker：無
 
 ## 完成結果
+
+（待審查通過後由主 session 填。實作摘要：媒體路徑走 `fromStoredMediaPath`／`CoreContext.mediaFile`；工作目錄 `jobWorkspace` 加實體路徑檢查；
+搬家鎖存在即停止；標記檔新增 `databaseCreated`＋`assertDatabasePresent`／`markDatabaseCreated`；`leftoverWarning` 先比 `migratedFrom`、探測錯誤只略過。）

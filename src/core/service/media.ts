@@ -311,7 +311,9 @@ export class MediaModule {
     }
 
     this.ctx.repo.deleteMedia(assetId);
-    rmSync(this.ctx.localFile(asset.local_path), { force: true });
+    // 只刪媒體資料夾裡的檔；DB 記的路徑不在裡面（被改過、舊的別處路徑）就不動任何檔（P8-T004）。
+    const localCopy = this.ctx.mediaFile(asset.local_path);
+    if (localCopy !== null) rmSync(localCopy, { force: true });
     this.ctx.repo.insertEvent({
       jobId: job.id,
       revisionId: null,
