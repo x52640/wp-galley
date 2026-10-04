@@ -42,6 +42,8 @@ import {
   selectionImageContentHash,
   stillOnJob,
 } from '../lib/selection-image-view.js';
+import { startSerialPoll } from '../lib/serial-poll.js';
+import type { SyncOutcome } from '../lib/slug-save-store.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -151,13 +153,17 @@ export function Workspace({
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  /**
+   * 回傳有沒有真的把新資料寫進畫面（PR #28 第三輪 Codex P2）：存網址要等 `applied` 才算存好；
+   * `failed`＝讀失敗或被更新的一次重讀取代；`gone`＝已經不在這一篇（換篇、元件卸載）。
+   */
+  const syncJob = useCallback(async (): Promise<SyncOutcome> => {
     // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
     // 舊篇的 refresh（換篇前抓住的）在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉，
     // 舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。所有 `refresh(` 呼叫處（含子元件）都經過這裡。
     const origin = uuid;
     const mine = beginRefresh({ generation: generation.current, current: uuidRef.current, origin });
-    if (mine === null) return;
+    if (mine === null) return 'gone';
     generation.current = mine;
     const isCurrent = (): boolean =>
       refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
@@ -170,11 +176,17 @@ export function Workspace({
         setOkSeq(mine);
         if (checks !== undefined) setFactChecks(checks);
         setError(null);
+        return 'applied';
       }
     } catch (cause) {
       if (isCurrent()) setError(describeError(cause));
     }
+    return stillOnJob({ alive: alive.current, current: uuidRef.current, origin }) ? 'failed' : 'gone';
   }, [uuid]);
+  /** 大部分呼叫處不需要結果。 */
+  const refresh = useCallback(async (): Promise<void> => {
+    await syncJob();
+  }, [syncJob]);
 
   /**
    * 把會改工作區畫面的回呼綁住現在這一篇（第三輪審查）：子元件的非同步動作（AgentButton 的錯誤、恢復這篇的錯誤…）
@@ -229,11 +241,11 @@ export function Workspace({
   const editBlockedNote = pendingSync && !runBlocked ? SYNC_PENDING_NOTE : 'AI 還在處理這篇，等它跑完再改。';
   const editBlockedRef = useRef({ blocked: editBlocked, note: editBlockedNote });
   editBlockedRef.current = { blocked: editBlocked, note: editBlockedNote };
+  // 一次只跑一個、上一次結束才排下一次（PR #28 第三輪 Codex P2）：固定間隔遇到比間隔還慢的重讀，
+  // 會一直推進世代、把每個回應都當成過期丟掉，永遠同步不了。
   useEffect(() => {
     if (!pendingSync) return;
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
-    return () => window.clearInterval(timer);
+    return startSerialPoll(refresh, 3000);
   }, [pendingSync, refresh]);
   useEffect(() => {
     if (!working) return;
@@ -838,7 +850,7 @@ export function Workspace({
 
       {sheet === 'source' && (
         <Sheet title="標題與網址" onClose={closeSheet}>
-          <SourcePanel job={job} refresh={refresh} />
+          <SourcePanel job={job} refresh={refresh} sync={syncJob} />
         </Sheet>
       )}
 
@@ -847,6 +859,7 @@ export function Workspace({
           <PublishSheet
             job={job}
             refresh={refresh}
+            sync={syncJob}
             previewHash={previewHash}
             onGoTo={(where) => {
               setSheet(null);
