@@ -105,6 +105,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-037** 2026-10-04 Remus｜文章上選一段（10～3000 字，可跨段）浮出「用此段配圖」，跟「查證這句」並排、打字模式也有（先自動存）：prompt 只為選取段落配圖（文章標題與所在小節標題只當背景），要 AI 先抓核心意思／場景／情緒再畫、抽象就用比喻、不畫字；圖的位置由使用者在選取範圍內選（預設開頭，可選段與段之間或結尾）；其餘照 D-022（先給看、按「用這張」才上傳）；超過上限講太長不截斷；配圖排隊、並行、一鍵每個大標題各配一張**未裁定**｜→ [P5-T038](docs/tasks/P5-T038-image-from-selection.md)
 - **D-038** 2026-10-04 Remus｜發布面板顯示「網址」：空的講後果（WordPress 會用標題產生，中文變一長串編碼）並當場給「建議網址」（點了才填，D-026 不變），不擋發布；日記只顯示不建議；建議網址 UI 兩處共用一個元件；改網址若讓核准失效要先講、不默默失效｜→ [P5-T039](docs/tasks/P5-T039-slug-in-publish.md)
 - **D-039** 2026-10-04 Remus｜修完 Codex 的問題一律再跑 Codex 審查，直到沒有問題才合併；已合併的 #23～#25 補審：#23 五條（媒體路徑限縮在 `generated-images/`、工作目錄查實體路徑、搬家鎖不再自動接手過期鎖、已搬完但 DB 不見不建空的、舊位置讀不到不擋啟動）→ P8-T004；#24、#25 的跨稿件串畫面併入 P5-T038，其餘另開；兩個分頁同時改同一篇的網址競態不修（單人本機工具，後端只發核准過的版本）｜→ [P8-T004](docs/tasks/P8-T004-data-dir-hardening.md)、[P5-T040](docs/tasks/P5-T040-review-followups.md)
+- **D-040** 2026-10-05 Remus｜大檔模組化，重構不改行為、一個 Task 一個 commit（可單獨 revert）；PR 分三個、都直接從 main 開、彼此不依賴、可並行：PR A＝ProofView 三張串行同一個 PR，ProofView 依序拆選字動作（P5-T041）→ 打字模式（P5-T042）→ 校樣載入／量測／標記（P5-T043），PR B＝MediaPanel（P5-T044）、PR C＝Workspace（P5-T045）各一個 PR（2026-10-05 修正原「一個 Task 一個 PR」）；都等 P5-T040 合併後開工；改動前後 `?fixtures=1` 截圖逐張比對；`repository.ts`、`rich-text.ts`、`SetupWizard.tsx`、`routes/jobs.ts` 大但少改，暫不拆（`service.ts` 已是轉接總機，不用拆）｜→ [P5-T041](docs/tasks/P5-T041-proofview-selection.md)～[P5-T045](docs/tasks/P5-T045-split-workspace.md)
 
 ## 待裁定
 
