@@ -92,18 +92,20 @@ describe('照錨點自動放（placeByAnchor）', () => {
 });
 
 describe('Agent 動作會不會鎖住內容', () => {
-  it('校稿、一鍵配圖、讀不到的會鎖；生圖、建議網址不會', () => {
+  it('校稿、一鍵配圖、讀不到的會鎖；生圖、建議網址、查證不會（D-036）', () => {
     expect(taskLocksContent('review')).toBe(true);
     expect(taskLocksContent('images')).toBe(true);
     expect(taskLocksContent(undefined)).toBe(true);
     expect(taskLocksContent('generate-image')).toBe(false);
     expect(taskLocksContent('suggest-slug')).toBe(false);
+    expect(taskLocksContent('factcheck')).toBe(false);
   });
 
   it('只有正在跑的才算', () => {
     expect(runLocksContent({ status: 'running', task: 'review' })).toBe(true);
     expect(runLocksContent({ status: 'succeeded', task: 'review' })).toBe(false);
     expect(runLocksContent({ status: 'running', task: 'generate-image' })).toBe(false);
+    expect(runLocksContent({ status: 'running', task: 'factcheck' })).toBe(false);
     expect(runLocksContent(null)).toBe(false);
   });
 });

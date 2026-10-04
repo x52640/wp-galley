@@ -14,6 +14,7 @@ import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
 import { canInsertImages, canSelectToFactCheck, stageDisplay, type StageView } from '../lib/stage-view.js';
 import { factCheckBlockedReason, hostedSearchNote, isNewCancelledRun, isOpenFinding, isWorkspaceBusy } from '../lib/factcheck-view.js';
+import { afterStaySave, dropStaleFactCheck, editBlockedByRun } from '../lib/check-while-writing.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
 import { AgentBanner } from './AgentProgress.js';
 import { AgentButton } from './AgentButton.js';
@@ -173,8 +174,13 @@ export function Workspace({
     working: job?.state === 'PUBLISHING' || job?.agentRun?.status === 'running',
     factCheckSending,
   });
-  const workingRef = useRef(working);
-  workingRef.current = working;
+  /**
+   * 進打字模式要不要擋：發布中、或查證以外的 Agent 動作在跑（D-036：查證不改文章，跑的時候照樣可以寫、可以存）。
+   * 「改原文」、卡片的自己改／去原文改共用這一個條件。
+   */
+  const editBlocked = editBlockedByRun({ publishing: job?.state === 'PUBLISHING', agentRun: job?.agentRun });
+  const editBlockedRef = useRef(editBlocked);
+  editBlockedRef.current = editBlocked;
   useEffect(() => {
     if (!working) return;
     const timer = window.setInterval(() => void refresh(), 1500);
@@ -277,8 +283,8 @@ export function Workspace({
   );
 
   const startEdit = useCallback((item: ReviewItem | null) => {
-    // AI 跑完會產生新版本、校樣會重載，編到一半的字就沒了。等它跑完再改。
-    if (workingRef.current) {
+    // AI 跑完會產生新版本、校樣會重載，編到一半的字就沒了。等它跑完再改（查證不在此列，D-036）。
+    if (editBlockedRef.current) {
       setEditNotice('AI 還在處理這篇，等它跑完再改。');
       return;
     }
@@ -305,7 +311,7 @@ export function Workspace({
   }, []);
   /** 查證卡片的「去原文改」：游標停在那句前面（找不到就停在那一段開頭），存檔後那條結案（resolved-by-edit）。 */
   const startFactCheckEdit = useCallback((finding: FactCheckFinding) => {
-    if (workingRef.current) {
+    if (editBlockedRef.current) {
       setEditNotice('AI 還在處理這篇，等它跑完再改。');
       return;
     }
@@ -335,6 +341,11 @@ export function Workspace({
   useEffect(() => {
     if (startEditing && loadFailed) onStartedEditing?.();
   }, [startEditing, loadFailed, onStartedEditing]);
+
+  // 去原文改的那條在打字中被新的查證結果取代或已處理（D-036）：之後存檔不再送它（後端遇到也照存不結案，這裡讓前端跟著，審查 1）。
+  useEffect(() => {
+    setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
+  }, [factChecks]);
 
   const endEdit = useCallback((notice?: string) => {
     setEditing(null);
@@ -389,18 +400,17 @@ export function Workspace({
     (job.target.requireFeaturedImage && job.featuredMediaId === null);
   const showImages = imagesOpen ?? imagesAttention;
   const display = stageDisplay(view, sheet === 'publish');
-  // 查證三個入口共用的反灰條件（跟其他 Agent 動作同一套）；查證跑的期間內容鎖住（D-034）。
-  const factCheckBlocked = factCheckBlockedReason({
+  // 查證入口共用的反灰條件（跟其他 Agent 動作同一套）。查證跑的期間不鎖內容（D-036）。
+  const blockedInput = {
     running: working,
     editing: editing !== null,
     comparing: display.compare,
     bodyEmpty: job.bodyEmpty,
     finished: isFinished(job.state),
-  });
-  const contentLocked =
-    factCheckSending || (job.agentRun?.status === 'running' && job.agentRun.task === 'factcheck')
-      ? '正在查證，內容先鎖住；等它跑完（或按停止）再改'
-      : null;
+  };
+  const factCheckBlocked = factCheckBlockedReason(blockedInput);
+  // 選字「查證這句」在打字模式也能按（D-036）：按下先存一版、留在打字模式再查。
+  const selectionCheckBlocked = factCheckBlockedReason({ ...blockedInput, editing: false });
   // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
   const insertable = canInsertImages(display, {
     editing: editing !== null,
@@ -537,9 +547,9 @@ export function Workspace({
             onEndEdit={endEdit}
             onEditTargetMissing={setEditNotice}
             selectionCheck={
-              canSelectToFactCheck(display, { editing: editing !== null, finished: isFinished(job.state) })
+              canSelectToFactCheck(display, { finished: isFinished(job.state) })
                 ? {
-                    blockedReason: factCheckBlocked,
+                    blockedReason: selectionCheckBlocked,
                     note: hostedSearchNote(provider),
                     onCheck: (text) => startFactCheck({ scope: 'selection', selection: text }),
                   }
@@ -569,7 +579,7 @@ export function Workspace({
                   )
                 : null
             }
-            onSaveEdit={async ({ editedBody, editedTitle }) => {
+            onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
               const base = job.currentRevision?.contentHash;
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
               const saved = await api.createRevision(job.uuid, {
@@ -589,8 +599,13 @@ export function Workspace({
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
-              // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
-              endEdit();
+              if (stay) {
+                // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
+                setEditing(afterStaySave);
+              } else {
+                // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
+                endEdit();
+              }
               await refresh();
               return saved.contentHash;
             }}
@@ -605,8 +620,8 @@ export function Workspace({
                     <button
                       type="button"
                       className="btn btn-quiet btn-tiny"
-                      disabled={working}
-                      title={working ? 'AI 還在處理這篇，等它跑完再改' : undefined}
+                      disabled={editBlocked}
+                      title={editBlocked ? 'AI 還在處理這篇，等它跑完再改' : undefined}
                       onClick={() => startEdit(null)}
                     >
                       <Icon name="file-text" size={13} />
@@ -642,7 +657,6 @@ export function Workspace({
             onFactCheckObservation={(item) => startFactCheck({ scope: 'observation', observationItemId: item.id })}
             factCheckBlocked={factCheckBlocked}
             factCheckNote={hostedSearchNote(provider)}
-            contentLocked={contentLocked}
           />
 
           <section className="margin-section" data-open={showImages ? 'yes' : 'no'}>

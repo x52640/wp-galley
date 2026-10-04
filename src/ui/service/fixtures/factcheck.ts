@@ -6,6 +6,9 @@
  * `blockIndex`、`excerptGone` 在種子資料裡**寫死**（後端用 `articleTextForAgent` 處理過的文字算，那份前處理不搬過來）。
  * 前後端都要的規則（選字長度、觀察卡片種類、說法不同的條數）用 `src/contract/factcheck.ts`。
  *
+ * 選字、觀察卡片查出來的新結果（`relocatable`）讀取時照目前的正文重新定位（D-036：查證跑的期間可以改字，
+ * 查的那句被改掉了就算「原句已經改了」）；用共用的忽略空白比對，不做後端那份前處理。
+ *
  * 跑一次查證會照真的流程走四個階段（找來源 → 抓網頁 → 判斷 → 核對），每段等幾秒，`agentRun.factCheck` 跟著變，
  * 練得到進度畫面。`?factcheck=nofetch` 模擬一個來源都沒抓到（第二趟不跑）。
  */
@@ -250,6 +253,8 @@ function seedFactcheck(): FactCheckState {
 const states = new Map<string, FactCheckState>([['f-factcheck', seedFactcheck()]]);
 let nextFindingId = 100;
 let nextRunId = 10;
+/** 跑出來的選字／觀察卡片結果：讀取時照目前的正文重算 `blockIndex`、`excerptGone`（種子資料維持寫死）。 */
+const relocatable = new Set<number>();
 
 function stateOf(uuid: string): FactCheckState {
   let state = states.get(uuid);
@@ -449,6 +454,7 @@ export const factcheckApi: Pick<PublisherApi, 'runFactCheck' | 'listFactChecks' 
       if (old.status === 'open' && created.some((fresh) => same(fresh.excerpt, old.excerpt))) old.status = 'superseded';
     }
     state.findings.push(...created);
+    if (input.scope !== 'article') for (const finding of created) relocatable.add(finding.id);
     run = { ...run, status: 'succeeded', finishedAt: new Date().toISOString() };
     state.latestRun = run;
     job.agentRun = { ...job.agentRun!, status: 'succeeded', finishedAt: run.finishedAt, factCheck: null };
@@ -457,8 +463,15 @@ export const factcheckApi: Pick<PublisherApi, 'runFactCheck' | 'listFactChecks' 
 
   async listFactChecks(uuid: string): Promise<FactCheckListResponse> {
     await delay(80);
-    mustGet(uuid);
+    const job = mustGet(uuid);
     const state = stateOf(uuid);
+    const body = readBody(job);
+    const title = typeof job.currentRevision?.templateData['title'] === 'string' ? (job.currentRevision.templateData['title'] as string) : '';
+    for (const finding of state.findings) {
+      if (!relocatable.has(finding.id)) continue;
+      finding.excerptGone = isExcerptGone(finding.excerpt, [title, ...bodyBlocks(body).map(blockText)]);
+      finding.blockIndex = finding.excerptGone ? null : blockOf(body, finding.excerpt);
+    }
     return {
       findings: clone(mergeByBlock(state.findings.filter((finding) => finding.status !== 'superseded'))),
       latestRun: clone(state.latestRun),

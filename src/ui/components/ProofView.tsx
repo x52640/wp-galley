@@ -17,6 +17,8 @@ import {
   applyLink,
   cleanEditedBody,
   snapshotBody,
+  snapshotHtml,
+  replaceBodyKeepingCaret,
   currentLink,
   removeLink,
   runCommand,
@@ -29,6 +31,7 @@ import type { RichUnit } from '../../contract/rich-text.js';
 import { isBlankBody } from '../../contract/empty-body.js';
 import { readString } from '../lib/format.js';
 import { decideProofSave } from '../lib/write-in-place.js';
+import { beginHold, editBarSavedNote, planSelectionCheck, settleHold, shownFrame, type ProofHold } from '../lib/check-while-writing.js';
 import { markScopes, pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
 import { FcIcon } from './FactcheckIcon.js';
 import { missingTargetNotice } from '../lib/edit-target.js';
@@ -94,10 +97,13 @@ import {
  * 位置用同一份量到的區塊座標算（上一段的底與下一段的頂的中間），iframe 裡什麼都不加。
  * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。
  *
- * **六、選字「查證這句」（P6-T005，D-034）。**
- * 沒在改字時，在正文或標題上選一段字，選取下方浮出一顆膠囊按鈕（樣子跟「在這裡插圖」一致），畫在 iframe 外層，
+ * **六、選字「查證這句」（P6-T005，D-034；打字模式 D-036）。**
+ * 在正文或標題上選一段字，選取下方浮出一顆膠囊按鈕（樣子跟「在這裡插圖」一致），畫在 iframe 外層，
  * 位置用選取範圍在文件裡的座標。要不要出現由上層決定（`selectionCheck` 給 null 就不畫）；不能查的時候照樣出現但反灰、講原因。
  * 選的字只當純文字送出（`Selection.toString()`），後端再驗一次長度與找不找得到。
+ * 打字模式也出現：只在有非空選取時，開始打字、按 Esc、選取消失就收起。按下時內容有改就先照「儲存」存一版
+ * （`onSaveEdit` 帶 `stay`），**留在打字模式、校樣不重載**（`lib/check-while-writing.ts` 的 hold：iframe 維持原本載著的那一版，
+ * 游標、捲動、存檔之後又打的字都留著；離開打字模式才重載成後端存好的那一版），存好再查；存失敗就不查。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
@@ -244,7 +250,7 @@ export function ProofView({
    * 存檔：送出改過的正文 HTML，回傳存完之後那一版的 content hash。成功後由上層結束編輯；
    * 失敗就丟錯，留在編輯中。
    */
-  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string }) => Promise<string>;
+  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string; stay?: boolean }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
   /** 進入編輯時要找的字與段落都標不出來（游標掉在文章開頭）：要在頂端講的話（P5-T037）。 */
@@ -351,8 +357,21 @@ export function ProofView({
   useEffect(() => {
     if (job.state === 'RENDERED') setRenderEpoch((epoch) => epoch + 1);
   }, [job.state]);
+  /** 打字中按「查證這句」先存的那幾版（D-036）：iframe 維持原本載著的那一版，不重載（見檔頭「六」）。 */
+  const [hold, setHold] = useState<ProofHold | null>(null);
+  /** 這次打字中自動存過一版（審查 4）：提示列講「按取消會回到這一版」。 */
+  const [autoSaved, setAutoSaved] = useState(false);
+  const holdRef = useRef(hold);
+  holdRef.current = hold;
+  useEffect(() => {
+    if (!isEditing) {
+      setHold(null);
+      setAutoSaved(false);
+    }
+  }, [isEditing]);
+  const shown = shownFrame({ editing: isEditing, hold, revisionKey, renderEpoch });
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
-  const previewSrc = `${job.previewUrl}?v=${revisionKey}&r=${renderEpoch}`;
+  const previewSrc = `${job.previewUrl}?v=${shown.key}&r=${shown.epoch}`;
 
   useEffect(() => {
     if (!fixtures) return;
@@ -385,7 +404,8 @@ export function ProofView({
       cancelled = true;
     };
     // renderEpoch：渲染之後要重抓一次，示範資料才會跟真的後端一樣推進 PREVIEWED。
-  }, [job.uuid, revisionKey, hasRevision, fixtures, renderEpoch]);
+    // 用 shown（不是 revisionKey）：打字中自己存的版本不重抓（D-036）。
+  }, [job.uuid, shown.key, hasRevision, fixtures, shown.epoch]);
 
   /**
    * 換版本＝上一版量到的東西全部作廢。
@@ -410,7 +430,8 @@ export function ProofView({
     setPicked(null);
     onBlocksRef.current?.([]);
     onPreviewHashRef.current?.(null);
-  }, [revisionKey]);
+    // shown.key：打字中自己存的版本（D-036）不算「被換掉」，離開打字模式時才換。
+  }, [shown.key]);
 
   // 校樣本體是 iframe 自己載的，header 拿不到，只能另外問一次 ETag。
   useEffect(() => {
@@ -561,9 +582,10 @@ export function ProofView({
       );
       onHighlightRef.current?.(key);
     });
-    // 選字查證（P6-T005）：沒在改字、上層有給的時候，選了字就在選取下方浮出「查證這句」。
+    // 選字查證（P6-T005；打字模式也算，D-036）：上層有給的時候，選了字就在選取下方浮出「查證這句」。
+    // 選取消失（打字會把選取收成游標）就收起。
     doc.addEventListener('selectionchange', () => {
-      if (editingRef.current || selectionCheckRef.current == null) return;
+      if (selectionCheckRef.current == null) return;
       setPicked(pickSelection(doc));
     });
     doc.addEventListener('keydown', (event) => {
@@ -571,6 +593,8 @@ export function ProofView({
     });
     // 編輯中：打字會改變高度，要重量；正文空不空決定要不要顯示「從這裡開始寫…」。
     doc.addEventListener('input', () => {
+      // 開始打字：膠囊收起（不擋打字）。
+      setPicked(null);
       if (!editingRef.current) return;
       const body = doc.querySelector<HTMLElement>('.preview-body');
       if (body) markBlank(body);
@@ -606,7 +630,8 @@ export function ProofView({
   useEffect(() => {
     const frame = frameRef.current;
     const scroller = scrollRef.current;
-    if (focused === undefined || !frame || !scroller) return;
+    // 打字中不捲（例如查證跑完自動亮起那張卡片）：游標與捲動位置不能被拉走（D-036）。
+    if (focused === undefined || !frame || !scroller || editingRef.current) return;
     const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     scroller.scrollTo({
       top: Math.max(offset + focused.top - 96, 0),
@@ -671,6 +696,7 @@ export function ProofView({
       setFormatState(null);
       setLinkEditor(null);
       setDropWarning(null);
+      pendingCheck.current = null;
       linkTarget.current = null;
       return;
     }
@@ -730,7 +756,12 @@ export function ProofView({
     if (title && originalTitle.current !== null) title.textContent = originalTitle.current;
   };
 
+  /** 打字模式按「查證這句」時內容有會被拿掉的格式、正在問「照樣存」：存好之後要查的那段字。 */
+  const pendingCheck = useRef<string | null>(null);
+
   const saveEdit = async (force = false): Promise<void> => {
+    // 按的是「儲存」：之前「查證這句」留下、等著「照樣存」的那段字作廢。
+    pendingCheck.current = null;
     const body = editBody();
     if (!body) return;
     // 存檔前整理一次（P5-T028）：b／i 轉 strong／em、瀏覽器的 div／<p><ul> 整理好、模板不支援的格式拿掉。
@@ -792,10 +823,87 @@ export function ProofView({
     }
   };
 
+  /**
+   * 打字模式按「查證這句」（D-036）：沒改直接查；有改先照「儲存」存一版（同樣的驗證與錯誤處理），
+   * 存完留在打字模式、校樣不重載，再用存好的那一版查。存失敗就不查，照存檔失敗的方式講。
+   */
+  const checkWhileWriting = async (text: string, force = false): Promise<void> => {
+    const body = editBody();
+    if (!body) return;
+    const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
+    const title = titleElement();
+    const plan = planSelectionCheck(
+      decideProofSave({
+        bodyCleaned: html,
+        bodyOriginal: originalClean.current ?? (originalBody.current ?? '').trim(),
+        dropped,
+        force,
+        titleText: title === null ? null : (title.textContent ?? ''),
+        titleOriginal: originalTitle.current ?? savedTitle,
+        diary: isDiary,
+        titleMaxLength: job.template.titleMaxLength,
+      }),
+    );
+    if (plan.kind === 'check') {
+      pendingCheck.current = null;
+      setDropWarning(null);
+      selectionCheckRef.current?.onCheck(text);
+      return;
+    }
+    if (plan.kind === 'invalid-title') {
+      pendingCheck.current = null;
+      setDropWarning(null);
+      setSaveError(plan.message);
+      return;
+    }
+    if (plan.kind === 'confirm-drop') {
+      pendingCheck.current = text;
+      setDropWarning([...plan.dropped]);
+      return;
+    }
+    pendingCheck.current = null;
+    setDropWarning(null);
+    setSaving(true);
+    setSaveError(null);
+    // 存的那一刻的樣子：存好之後「有沒有改」改跟這一版比。等回應的期間使用者可能還在打，不能拿那時的畫面當基準。
+    const rawAtSave = body.innerHTML;
+    const started = beginHold(holdRef.current, shown);
+    holdRef.current = started;
+    setHold(started);
+    try {
+      const savedHash = await onSaveEdit?.({ ...plan.save, stay: true });
+      const settled = settleHold(started, savedHash ?? null);
+      holdRef.current = settled;
+      setHold(settled);
+      // 照樣存（有會被拿掉的格式）：畫面換成存進去的樣子，不然那些格式留在畫面上、之後每次存都再問一次（審查 3）。
+      // 等回應的期間又打了字就不換（換了會丟字），下次存再照常問。
+      let rawNow = rawAtSave;
+      const doc = frameRef.current?.contentDocument;
+      if (force && plan.save.editedBody !== undefined && doc && body.innerHTML === rawAtSave) {
+        replaceBodyKeepingCaret(doc, body, plan.save.editedBody);
+        rawNow = body.innerHTML;
+        measure(measureToken.current);
+      }
+      if (plan.save.editedBody !== undefined) originalUnits.current = snapshotHtml(plan.save.editedBody);
+      originalClean.current = html;
+      originalBody.current = rawNow;
+      setAutoSaved(true);
+      if (plan.save.editedTitle !== undefined) originalTitle.current = plan.save.editedTitle;
+      selectionCheckRef.current?.onCheck(text);
+    } catch (cause) {
+      const settled = settleHold(started, null);
+      holdRef.current = settled;
+      setHold(settled);
+      setSaveError(describeError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
 
-  // 不給選字查證了（進了對照、打開發布面板、開始改字…）就把膠囊收掉。
-  const canPick = selectionCheck !== null && mode === 'edit' && !isEditing;
+  // 不給選字查證了（進了對照、打開發布面板…）就把膠囊收掉。打字模式照樣給（D-036）。
+  const canPick = selectionCheck !== null && mode === 'edit';
   useEffect(() => {
     if (!canPick) setPicked(null);
   }, [canPick]);
@@ -843,7 +951,9 @@ export function ProofView({
         </div>
         {isEditing ? (
           <div className="proof-editbar" role="status">
-            <span className="proof-editbar-note">直接在文章上打字，標題也可以點進去改；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。</span>
+            <span className="proof-editbar-note">
+              {editBarSavedNote(autoSaved) ?? '直接在文章上打字，標題也可以點進去改；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。'}
+            </span>
             <button type="button" className="btn btn-quiet btn-tiny" disabled={saving} onClick={cancelEdit}>
               取消
             </button>
@@ -902,10 +1012,27 @@ export function ProofView({
         <div className="proof-status proof-status-warn" role="alert">
           <Icon name="alert" size={15} />
           <span>這個版型不支援：{dropWarning.join('、')}。存檔時會拿掉這些格式，字會留著。</span>
-          <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setDropWarning(null)}>
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            onClick={() => {
+              pendingCheck.current = null;
+              setDropWarning(null);
+            }}
+          >
             回去改
           </button>
-          <button type="button" className="btn btn-primary btn-tiny" disabled={saving} onClick={() => void saveEdit(true)}>
+          <button
+            type="button"
+            className="btn btn-primary btn-tiny"
+            disabled={saving}
+            onClick={() => {
+              // 從「查證這句」來的：照樣存之後留在打字模式、接著查（D-036）；從「儲存」來的照舊存完離開。
+              const text = pendingCheck.current;
+              if (text !== null) void checkWhileWriting(text, true);
+              else void saveEdit(true);
+            }}
+          >
             照樣存
           </button>
         </div>
@@ -1009,12 +1136,19 @@ export function ProofView({
                   <button
                     type="button"
                     className="fc-pick-btn"
-                    disabled={pickProblem !== null}
+                    disabled={pickProblem !== null || saving}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => {
                       const text = picked.text;
                       setPicked(null);
-                      frameRef.current?.contentDocument?.getSelection()?.removeAllRanges();
+                      const selection = frameRef.current?.contentDocument?.getSelection();
+                      if (isEditing) {
+                        // 打字模式：游標留在選的那段字後面，接著打（D-036）。
+                        selection?.collapseToEnd();
+                        void checkWhileWriting(text);
+                        return;
+                      }
+                      selection?.removeAllRanges();
                       selectionCheck?.onCheck(text);
                     }}
                   >

@@ -2,7 +2,7 @@
 
 import { rmSync } from 'node:fs';
 import type { AutoFeatureResult, AutoPlaceResult, MediaAsset, Revision } from '../../contract/api.js';
-import { AgentError, InvalidInputError, MediaError } from '../errors.js';
+import { InvalidInputError, MediaError } from '../errors.js';
 import {
   escapeHtml,
   findBlocksContaining,
@@ -115,32 +115,6 @@ export class MediaModule {
     throw new InvalidInputError(message);
   }
 
-  /**
-   * 上傳回來時 AI 查證正在跑（內容鎖住）：不改本機紀錄、不建版本，記一筆失敗事件、丟跟內容鎖同一類的錯。
-   * （核准在上傳前已經撤銷，這裡收不回來。）
-   * 正常情況到不了這裡（換圖進行中不能開始查證、查證進行中不能換圖），這是防禦。
-   * 圖已經在 WordPress 媒體庫，發布台不自動刪使用者站上的東西。
-   */
-  private assertNotLockedAfterUpload(job: JobRow, wordpressMediaId: number): void {
-    try {
-      this.ctx.factcheck.assertNotRunning(job);
-    } catch (error) {
-      const message =
-        `上傳期間 AI 查證開始了，內容鎖住，所以這張圖沒有換進發布台（原本的圖與正文都沒動；核准在換圖開始時已經撤銷，要重新核准）。` +
-        `新圖已經傳到 WordPress 媒體庫（第 ${wordpressMediaId} 號），發布台不會自動刪除；不需要的話可以到媒體庫刪掉。`;
-      this.ctx.repo.insertEvent({
-        jobId: job.id,
-        revisionId: null,
-        approvalId: null,
-        actor: 'ui',
-        eventType: 'media_replaced',
-        status: 'failed',
-        detail: this.ctx.scrub({ mediaId: wordpressMediaId, message }),
-      });
-      throw error instanceof AgentError ? new AgentError(message) : error;
-    }
-  }
-
   private async addMediaUntracked(uuid: string, input: AddMediaInput): Promise<MediaUploadOutcome> {
     const job = this.ctx.requireJob(uuid);
     this.ctx.assertMutable(job);
@@ -214,8 +188,7 @@ export class MediaModule {
    * 換圖。契約把它列為會改變 content_hash 的方法，所以**一律先撤銷核准**——
    * 就算這張圖還沒插進正文也一樣。寧可多撤一次，也不要漏掉。
    *
-   * AI 查證跑的期間內容鎖住：在撤銷核准與上傳**之前**就拒絕（跟 `createRevision` 同一個判斷），一個副作用都沒有。
-   * 反過來，換圖進行中（`mediaUploads`）不能開始查證；兩邊的檢查到登記之間都沒有 await，所以不會交錯。
+   * AI 查證跑的期間照常換（D-036：查證不改文章，不鎖內容）。
    */
   async replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset> {
     this.ctx.assertNoAppPassword(input.altText, input.caption, ...this.ctx.currentContentOf(this.ctx.requireJob(uuid)));
@@ -229,7 +202,6 @@ export class MediaModule {
     this.ctx.assertMutable(job);
     const old = this.ctx.requireMedia(job, assetId);
     const client = this.ctx.requireWordPress();
-    this.ctx.factcheck.assertNotRunning(job);
 
     this.ctx.approval.invalidateApproval(job, '換圖');
 
@@ -241,7 +213,6 @@ export class MediaModule {
       ...(input.caption === undefined ? {} : { caption: input.caption }),
     });
     this.assertMutableAfterUpload(job, uploaded.media.id, 'media_replaced');
-    this.assertNotLockedAfterUpload(job, uploaded.media.id);
 
     const localPath = this.ctx.writeLocalCopy(job.uuid, uploaded.sha256, input.mimeType, input.bytes);
     const row = this.ctx.repo.updateMedia(assetId, {

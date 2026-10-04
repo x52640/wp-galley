@@ -1,7 +1,7 @@
 ---
 id: P6-T006
 phase: 6
-status: ready
+status: in_progress
 depends_on: [P6-T005]
 specs: [factcheck.md, http-api.md, design-system.md]
 write_paths: ["src/ui/", "src/contract/agent-run.ts", "src/contract/factcheck.ts", "src/core/service/factcheck.ts", "src/core/service/content.ts", "src/core/service/media.ts", "tests/", "docs/specs/factcheck.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P6-T006-check-while-writing.md"]
@@ -73,15 +73,18 @@ D-036。使用者 2026-10-04：「我寫完一句想要馬上請 AI 查，還需
 打開一篇草稿進打字模式 → 寫一句 → 選起來按「查證這句」→ 查證期間繼續寫下一句、按儲存 → 查證結果出現在右欄、剛寫的字沒被蓋掉。只在本機，不核准不發布。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新（新增或搬動功能：architecture.md 功能地圖）
-- [ ] 留下的殘餘已寫進 `docs/known-issues.md`
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新（新增或搬動功能：architecture.md 功能地圖）（`core-service.md` 由主 session 改）
+- [x] 留下的殘餘已寫進 `docs/known-issues.md`
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：派實作 subagent
+- 最後完成：實作（2026-10-04 subagent）＋獨立審查四條修正：①後端 `resolveFactCheckId` 指向這篇但已非 open 的那條 → 照存不結案（`findingToResolveByEdit`），
+  前端重讀時清掉已非 open 的 `editing.factCheckId`（`dropStaleFactCheck`）；②`settleHold` 一律記下存出來的版本（H0→H1→H0 不重載）；
+  ③打字中「照樣存」後正文換成整理後 HTML、游標照非空白字數放回（`replaceBodyKeepingCaret`）；④自動存過一版後提示列講「已自動存一版；按取消會回到這一版」
+- 已通過驗證：`npm run verify` 綠（86 檔／1906 測試）；`?fixtures=1` 截圖驗過打字模式膠囊、查證中繼續打字、查證完成字沒被蓋掉、照樣存後底線拿掉且游標續寫在原處、
+  去原文改期間同一句被重查後存檔不報錯
+- 下一步：主 session 審查 → commit；`docs/specs/core-service.md` 第 31 行的 `content.ts` 用的方法名要從 `requireOpenFinding` 改成 `findingToResolveByEdit`（該檔我沒動）；使用者手動驗證
 - Blocker：無
 
 ## 完成結果

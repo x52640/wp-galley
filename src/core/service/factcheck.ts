@@ -2,8 +2,8 @@
  * AI 查證（D-034，P6-T004；規格 docs/specs/factcheck.md）：找來源（Agent 第一趟）→ 抓網頁（我們的取回器）
  * → 判斷（Agent 第二趟，最嚴格無工具）→ 核對引文（程式），存成查證結果。
  *
- * - 整次佔一個 Agent 名額（`activeRuns`），跟其他 Agent 動作互斥；跑的期間鎖住內容（`assertNotRunning`，
- *   `createRevision` 呼叫——放圖、套用建議、在文章上改全部經過它）。
+ * - 整次佔一個 Agent 名額（`activeRuns`），跟其他 Agent 動作互斥；跑的期間**不鎖內容**（D-036）：
+ *   結果不改文章，跑完時內容換過了照收，讀取時用 excerpt 重新定位（找不到原句的算「原句已經改了」）。
  * - 抓網頁、核對兩段沒有 CLI 在跑、`agent_runs` 沒有 running 的那一筆：進度記在 `factcheck_runs`，
  *   `JobDetail.agentRun` 由它組出來（`agentRunView`）。
  * - 停止走既有的 `cancelAgentRun`（`agent.ts`）→ `cancelActive`：停掉正在跑的 CLI、中止正在抓的請求，**不存任何結果**。
@@ -72,13 +72,9 @@ export const SECRET_IN_URLS_MESSAGE = 'AI 給的網址或搜尋字串裡有你�
 export const SECRET_IN_CANDIDATES_MESSAGE = '要抓的網址裡有你的 WordPress 應用程式密碼（可能在文章原有的連結裡），這次查證停止';
 /** 要存的查證結果含 WordPress 密碼：整次停止，什麼都不存。訊息本身不含密碼。 */
 export const SECRET_IN_RESULT_MESSAGE = '查證結果裡有你的 WordPress 應用程式密碼，這次查證停止，沒有留下任何結果';
-/** 上傳或換圖進行中：不開始查證。 */
-export const FACTCHECK_MEDIA_UPLOADING_MESSAGE = '圖片正在上傳或換圖，等它完成再查證';
 /** 按了停止：等著的請求拿到這句，什麼都不存。 */
 export const FACTCHECK_CANCELLED_MESSAGE = '查證已停止，沒有留下任何結果';
 const CANCELLED_REASON = '使用者取消';
-/** 鎖住內容時的訊息（`createRevision` 擋下來）。 */
-export const FACTCHECK_LOCKED_MESSAGE = '查證正在跑，內容先鎖住；等它跑完或按停止之後再改';
 
 /** 流程內部用：查證紀錄已經不是 running（被停止了），後面一律不做。 */
 class FactCheckStopped extends Error {}
@@ -124,8 +120,6 @@ export class FactCheckModule {
     if (this.ctx.activeRuns.has(job.uuid)) {
       throw new AgentError('這個工作項目已經有一個 Agent 在跑了，先取消或等它跑完');
     }
-    // 上傳或換圖進行中（等 WordPress 回應）不開始：換圖回來要改正文，查證會把內容鎖住。
-    if (this.ctx.mediaUploads.has(job.uuid)) throw new AgentError(FACTCHECK_MEDIA_UPLOADING_MESSAGE);
 
     const workspace = this.ctx.jobWorkspace(job);
     const runRow = this.ctx.repo.insertFactCheckRun({
@@ -396,7 +390,7 @@ export class FactCheckModule {
 
   /**
    * 存結果（同步，中間不會被插隊）：同一句已有 open 的舊結果標成 superseded，寫新結果，查證紀錄結成 succeeded。
-   * 防禦性規則（照理說內容鎖住了不會發生）：跑完時內容已經不是發起時那一版，結果照收，讀取時用 excerpt 重新定位。
+   * 跑的期間內容可能被改過（D-036 不鎖內容）：結果照收，讀取時用 excerpt 對著最新版重新定位。
    */
   private persist(
     job: JobRow,
@@ -675,11 +669,6 @@ export class FactCheckModule {
     return true;
   }
 
-  /** 查證跑的期間鎖住內容（`createRevision` 呼叫）：在文章上改、放圖、套用建議都被擋。 */
-  assertNotRunning(job: JobRow): void {
-    if (this.ctx.activeRuns.get(job.uuid)?.factCheck !== undefined) throw new AgentError(FACTCHECK_LOCKED_MESSAGE);
-  }
-
   // --- 讀取與結案 ------------------------------------------------------------------
 
   listFactChecks(uuid: string): FactCheckListResponse {
@@ -718,7 +707,18 @@ export class FactCheckModule {
     });
   }
 
-  /** `createRevision` 的 `resolveFactCheckId`：寫入任何東西之前先驗（不屬於這篇、不是 open 就整個拒絕）。 */
+  /**
+   * `createRevision` 的 `resolveFactCheckId`：寫入任何東西之前先驗。不屬於這篇 → 整個拒絕；
+   * 屬於這篇但已經不是 open（打字中被 superseded、知道了、已結案）→ 回 null：照存、不結案、不報錯
+   * （D-036：查證跑的期間可以去原文改，跑完時那條可能已經被新結果取代，不能讓使用者的字存不進去）。
+   */
+  findingToResolveByEdit(job: JobRow, findingId: number): FactCheckFindingRow | null {
+    const row = this.ctx.repo.factCheckFindingById(findingId);
+    if (!row || row.job_id !== job.id) throw new InvalidInputError(`找不到這篇的查證結果 ${findingId}`);
+    return row.status === 'open' ? row : null;
+  }
+
+  /** 「知道了」用：不屬於這篇、不是 open 就拒絕。 */
   requireOpenFinding(job: JobRow, findingId: number): FactCheckFindingRow {
     const row = this.ctx.repo.factCheckFindingById(findingId);
     if (!row || row.job_id !== job.id) throw new InvalidInputError(`找不到這篇的查證結果 ${findingId}`);

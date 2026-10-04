@@ -7,6 +7,7 @@ import {
   type RichNode,
   type RichUnit,
 } from '../../contract/rich-text.js';
+import { countNonSpace, locateTextOffset } from './check-while-writing.js';
 import { emphasisFromComputed, type ComputedEmphasis, type FormatCommand, type FormatState } from './rich-format.js';
 
 /**
@@ -58,6 +59,46 @@ export interface RichAllow {
 /** 進入編輯那一刻的正文，切成頂層區塊。存檔時拿來比對哪些區塊沒動過。 */
 export function snapshotBody(body: Element): RichUnit[] {
   return richUnits(domToRich(body.childNodes as unknown as ArrayLike<DomLike>));
+}
+
+/**
+ * 存好的那份正文 HTML 切成頂層區塊（D-036）：打字中存了一版、留在打字模式時，之後「哪些區塊沒動過」改跟這一版比。
+ * 外層視窗的 DOMParser：解析出來的文件是惰性的，script 不會跑、圖片不會載入。
+ */
+export function snapshotHtml(html: string): RichUnit[] {
+  return snapshotBody(new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html').body);
+}
+
+/**
+ * 把正文換成存進去的那份整理後 HTML，游標照「前面有幾個非空白字」放回去（審查 3：照樣存之後畫面跟存進去的一致，
+ * 不再留著存不進去的格式）。整理只拿掉格式、不動字（空白與區塊間的換行會變，所以不算），字數對得上；
+ * 對不上（超出）就放在最後一段結尾。
+ */
+export function replaceBodyKeepingCaret(doc: Document, body: Element, html: string): void {
+  const selection = doc.getSelection();
+  let offset: number | null = null;
+  if (selection && selection.rangeCount > 0 && selection.anchorNode !== null && body.contains(selection.anchorNode)) {
+    const before = doc.createRange();
+    before.selectNodeContents(body);
+    before.setEnd(selection.anchorNode, selection.anchorOffset);
+    offset = countNonSpace(before.toString());
+  }
+  body.innerHTML = html;
+  if (offset === null || !selection) return;
+  const nodes: Text[] = [];
+  const walker = doc.createTreeWalker(body, 4 /* NodeFilter.SHOW_TEXT */);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text);
+  const at = locateTextOffset(nodes.map((node) => node.data), offset);
+  const range = doc.createRange();
+  if (at === null) {
+    range.selectNodeContents(body);
+    range.collapse(false);
+  } else {
+    range.setStart(nodes[at.index]!, at.offset);
+    range.collapse(true);
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 /**
