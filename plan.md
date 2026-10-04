@@ -102,6 +102,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-034** 2026-10-01 Remus｜AI 查證採「兩趟 Agent＋程式代抓」：第一趟只開**廠商伺服器上執行**的搜尋（Codex `web_search="cached"`、Claude `WebSearch`；不給 WebFetch，agy 不開搜尋），我們的取回器抓網頁，第二趟無工具只讀取回文字，引文由程式逐字核對、對不上降為查不到，結果永不自動套用；**修訂 D-009** 為「Agent 不能在使用者機器上連外」；額度約校稿兩倍、1～3 分鐘可接受；取回器照 Agent 給的網址抓的外洩殘餘風險接受並寫進 security.md；先做 P5-T036 把現有各趟的 Codex 搜尋明確關掉、Claude 不載入使用者的 MCP｜→ [P6-T001](docs/tasks/P6-T001-factcheck.md)、[P5-T036](docs/tasks/P5-T036-lock-agent-tools.md)、[P6-T002](docs/tasks/P6-T002-safe-fetcher.md)、[P6-T003](docs/tasks/P6-T003-factcheck-contract.md)、[P6-T004](docs/tasks/P6-T004-factcheck-service.md)、[P6-T005](docs/tasks/P6-T005-factcheck-ui.md)、[ADR-0001](docs/adr/0001-agent-no-network.md)
 - **D-035** 2026-10-04 Remus｜使用者資料（`.env`、站台設定檔、SQLite、稿件、圖片、備份）搬出程式資料夾到 `~/Library/Application Support/Galley/`（`GALLEY_DATA_DIR` 可覆寫），DB 改存相對路徑；第一次啟動自動**複製**過去、舊的不刪；發布台裡的使用體驗不變。為之後可能的 Mac App／Homebrew 鋪路，但那兩個**未裁定**；不做背景常駐（使用者不想佔記憶體）、現階段不做外殼 App（`scripts/start.command` 放 Dock 就夠）｜→ [P8-T003](docs/tasks/P8-T003-user-data-dir.md)
 - **D-036** 2026-10-04 Remus｜打字模式選字也能「查證這句」：按下先自動存（只存本機）、留在打字模式再查；查證**不再鎖內容**（修訂 D-034 的執行規則；查證本來就不改文章），查的期間可以繼續寫、存，完成時不蓋掉正在打的字；不拿沒存的字查（結果要靠存過的內容定位）；一鍵查證與觀察卡片查證不改；其他 Agent 動作照舊鎖｜→ [P6-T006](docs/tasks/P6-T006-check-while-writing.md)
+- **D-038** 2026-10-04 Remus｜發布面板顯示「網址」：空的講後果（WordPress 會用標題產生，中文變一長串編碼）並當場給「建議網址」（點了才填，D-026 不變），不擋發布；日記只顯示不建議；建議網址 UI 兩處共用一個元件；改網址若讓核准失效要先講、不默默失效｜→ [P5-T039](docs/tasks/P5-T039-slug-in-publish.md)
 
 ## 待裁定
 
