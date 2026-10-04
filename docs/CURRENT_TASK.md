@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **91 檔 / 2029 測試**全綠（2026-10-04，P5-T038 rebase 到 P5-T039 之後）
+- `npm run verify`：typecheck 通過；Vitest **92 檔 / 2053 測試**全綠（2026-10-04，P5-T038 rebase 到 P8-T004 之後）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -18,6 +18,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（第一次啟動會在標記檔補記 `databaseCreated`） |
 | [P5-T038](tasks/P5-T038-image-from-selection.md) | 用真的 Codex：選兩三段 → 用此段配圖 → 選「第 N 段之後」→ 圖跟主題相關 → 用這張 → 圖在選的位置 |
 | [P5-T039](tasks/P5-T039-slug-in-publish.md) | 沒填網址的長文 → 發布面板黃色提醒 → 建議網址 → 點一個 → 存網址 → 存草稿，後台網址正確；打了沒存時發布被擋 |
 | [P8-T003](tasks/P8-T003-user-data-dir.md) | 舊稿件、舊圖都在；開一篇草稿真跑一次校稿＋Codex 生圖（Agent 在新工作目錄不出錯）。設定精靈畫面上仍寫舊路徑（known-issues） |
