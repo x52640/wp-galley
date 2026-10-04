@@ -1,7 +1,7 @@
 ---
 id: P5-T038
 phase: 5
-status: ready
+status: done
 depends_on: [P5-T018, P6-T006]
 specs: [agent-tasks.md, http-api.md, design-system.md, security.md]
 write_paths: ["src/ui/", "src/contract/", "src/core/image-generation.ts", "src/core/service/images.ts", "src/core/service/briefs.ts", "src/core/service/types.ts", "src/core/service.ts", "src/server/routes/", "tests/", "docs/specs/agent-tasks.md", "docs/specs/http-api.md", "docs/specs/design-system.md", "docs/specs/core-service.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T038-image-from-selection.md"]
