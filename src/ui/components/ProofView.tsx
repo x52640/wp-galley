@@ -47,12 +47,10 @@ import {
   capsuleNotes,
   selectionImageHeading,
   selectionImageProblem,
-  selectionImageSpotHints,
   selectionPickStale,
-  selectionImageSpots,
+  stillOnJob,
 } from '../lib/selection-image-view.js';
-import type { SelectionSpot } from '../../contract/selection-image.js';
-import type { PositionBlock } from '../../contract/position-anchor.js';
+import type { SelectionSpotsResponse } from '../service/types.js';
 import { missingTargetNotice } from '../lib/edit-target.js';
 import {
   attachEditInterceptors,
@@ -292,18 +290,15 @@ export function ProofView({
   selectionCheck?: { blockedReason: string | null; note: string | null; onCheck: (text: string) => void } | null;
   /**
    * 選字「用此段配圖」（P5-T038）。null＝不給。`blockedReason` 不是 null 時照樣出現但反灰、講原因。
-   * `onRequest` 自己接住錯誤（講在頂端），這裡只等它結束。打字模式由這裡先存再呼叫。
+   * 位置選項由後端在存好的那一版上算（`loadSpots`，第二輪審查）：打字模式由這裡先自動存，再問選項。
+   * `loadSpots` 換篇時回 null（不顯示）；錯誤丟出來，面板上講。`onRequest` 自己接住錯誤（講在頂端），這裡只等它結束。
+   * `currentHash`：畫面知道的目前版本（打字中最後存的那一版，否則工作區的版本）；不是選項來源那一版就關掉面板請重選。
    */
   selectionImage?: {
     blockedReason: string | null;
-    onRequest: (input: {
-      text: string;
-      note: string | null;
-      spot: number;
-      spotCount?: number;
-      spotBefore?: string;
-      spotAfter?: string;
-    }) => Promise<void>;
+    currentHash: string | undefined;
+    loadSpots: (text: string) => Promise<SelectionSpotsResponse | null>;
+    onRequest: (input: { text: string; note: string | null; spot: number; contentHash: string }) => Promise<void>;
   } | null;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
@@ -320,14 +315,17 @@ export function ProofView({
   const [showMarks, setShowMarks] = useState(true);
   /** 選字查證：選了哪段字、膠囊畫在哪（文件座標）。null＝沒選或不給查。 */
   const [picked, setPicked] = useState<{ text: string; top: number; left: number; inTitle: boolean } | null>(null);
-  /** 「用此段配圖」打開的面板（P5-T038）：選的那段、位置選項、畫在哪。 */
+  /**
+   * 「用此段配圖」打開的面板（P5-T038）：選的那段、畫在哪、後端給的位置選項（`spots` 是 null＝還在問）。
+   */
   const [imagePick, setImagePick] = useState<{
     text: string;
     top: number;
     left: number;
-    spots: SelectionSpot[];
-    spotMessage: string | null;
-    blocks: PositionBlock[];
+    /** 後端回的位置選項與它用的那一版；送出時原樣帶回。 */
+    spots: SelectionSpotsResponse['spots'] | null;
+    spotsHash: string | null;
+    loadError: string | null;
     /** 打開時校樣是哪一版：之後被別處改了就關掉請重選（Codex 審查 P2）。 */
     openedKey: string;
   } | null>(null);
@@ -336,6 +334,11 @@ export function ProofView({
   const [imageSending, setImageSending] = useState(false);
   const selectionCheckRef = useRef(selectionCheck);
   selectionCheckRef.current = selectionCheck;
+  const selectionImageRef = useRef(selectionImage);
+  selectionImageRef.current = selectionImage;
+  /** 目前是哪一篇：存檔後的接續動作回來時不是發起那一篇就什麼都不做（Workspace 換篇沿用這個元件，第二輪審查）。 */
+  const jobUuidRef = useRef(job.uuid);
+  jobUuidRef.current = job.uuid;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   /**
@@ -888,6 +891,9 @@ export function ProofView({
    */
   const actWhileWriting = async (act: () => void | Promise<void>, force = false): Promise<void> => {
     setActError(null);
+    // 存檔之後的每一步都先確認還在發起的那一篇（第二輪審查）。
+    const origin = job.uuid;
+    const stillHere = (): boolean => stillOnJob({ alive: true, current: jobUuidRef.current, origin });
     const body = editBody();
     if (!body) return;
     const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
@@ -938,6 +944,7 @@ export function ProofView({
       save: async () => (await onSaveEdit?.({ ...plan.save, stay: true })) ?? null,
       onSaved: (savedHash) => {
         setSaving(false);
+        if (!stillHere()) return;
         const settled = settleHold(started, savedHash);
         holdRef.current = settled;
         setHold(settled);
@@ -958,14 +965,17 @@ export function ProofView({
       },
       onSaveFailed: (cause) => {
         setSaving(false);
+        if (!stillHere()) return;
         const settled = settleHold(started, null);
         holdRef.current = settled;
         setHold(settled);
         setSaveError(describeError(cause));
       },
       // 存好之後的動作自己出錯（P5-T038 審查 3）：只講那個動作的錯，不動 hold（放掉會重載、蓋掉正在打的字）。
-      act,
-      onActFailed: (cause) => setActError(describeError(cause)),
+      act: () => (stillHere() ? act() : undefined),
+      onActFailed: (cause) => {
+        if (stillHere()) setActError(describeError(cause));
+      },
     });
   };
 
@@ -987,39 +997,61 @@ export function ProofView({
     if (!canPick || selectionImage === null) setImagePick(null);
   }, [canPick, selectionImage === null]);
 
-  /** 按「用此段配圖」：用畫面上的正文（完整文字）算位置選項，打開面板。 */
-  const openImagePick = (pick: { text: string; top: number; left: number }): void => {
-    const body = editBody();
-    const texts = body ? Array.from(body.children).map((element) => element.textContent ?? '') : [];
-    const { spots, message, blocks: seen } = selectionImageSpots(texts, pick.text);
+  // 換篇：面板與提示都收掉（第二輪審查）。
+  useEffect(() => {
+    setImagePick(null);
     setPickNotice(null);
-    setImagePick({ ...pick, spots, spotMessage: message, blocks: seen, openedKey: revisionKey });
+  }, [job.uuid]);
+
+  /**
+   * 按「用此段配圖」：打開面板，問後端在存好的那一版上算位置選項（打字模式在這之前已先自動存）。
+   * 回來時不是同一次打開（關掉又開、換篇）就不寫。
+   */
+  const openImagePick = (pick: { text: string; top: number; left: number }): void => {
+    const load = selectionImageRef.current?.loadSpots;
+    if (load === undefined) return;
+    const origin = job.uuid;
+    setPickNotice(null);
+    const opened = { ...pick, spots: null, spotsHash: null, loadError: null, openedKey: revisionKey };
+    setImagePick(opened);
+    const same = (current: typeof imagePick): boolean =>
+      current !== null && current.text === opened.text && current.top === opened.top && current.spots === null && jobUuidRef.current === origin;
+    void load(pick.text).then(
+      (result) => {
+        if (result === null) return;
+        setImagePick((current) => (same(current) ? { ...current!, spots: result.spots, spotsHash: result.contentHash } : current));
+      },
+      (cause: unknown) => {
+        setImagePick((current) => (same(current) ? { ...current!, loadError: describeError(cause) } : current));
+      },
+    );
   };
 
-  // 面板開著時文章被別處改了（不是這次打字中自己存的、也不是正在送出時的自動存）：位置選項是照舊版算的，關掉請重選。
+  // 面板開著時文章被別處改了，或位置選項來源那一版已經不是目前這一版：選項是照舊版算的，關掉請重選。
   useEffect(() => {
     if (imagePick === null) return;
-    if (selectionPickStale({ openedKey: imagePick.openedKey, currentKey: revisionKey, own: hold?.own ?? [], sending: imageSending })) {
+    if (
+      selectionPickStale({
+        spotsHash: imagePick.spotsHash,
+        currentHash: selectionImage?.currentHash,
+        openedKey: imagePick.openedKey,
+        currentKey: revisionKey,
+        own: hold?.own ?? [],
+        sending: imageSending,
+      })
+    ) {
       setImagePick(null);
       setPickNotice('文章剛被改過，「用此段配圖」的位置可能不對了，請重新選一次那段。');
     }
-  }, [revisionKey, imagePick, hold, imageSending]);
+  }, [revisionKey, imagePick, hold, imageSending, selectionImage?.currentHash]);
 
+  /** 送出：帶回後端給的 `spot` 與選項來源那一版的 `contentHash`（不是那一版後端回 409）。不再先存（打開時存過了）。 */
   const sendImage = (input: { note: string | null; spot: number }): void => {
     const pick = imagePick;
-    const request = selectionImage?.onRequest;
-    if (pick === null || request === undefined) return;
-    const act = async (): Promise<void> => {
-      await request({
-        text: pick.text,
-        note: input.note,
-        spot: input.spot,
-        // 畫面上看到幾個位置：後端用存好的那一版算出來不一樣就拒絕（審查 2）。
-        ...selectionImageSpotHints({ spots: pick.spots, message: pick.spotMessage, blocks: pick.blocks }, input.spot),
-      });
-    };
+    const request = selectionImageRef.current?.onRequest;
+    if (pick === null || pick.spotsHash === null || request === undefined) return;
     setImageSending(true);
-    void (isEditing ? actWhileWriting(act) : act()).finally(() => {
+    void request({ text: pick.text, note: input.note, spot: input.spot, contentHash: pick.spotsHash }).finally(() => {
       setImageSending(false);
       setImagePick(null);
     });
@@ -1296,8 +1328,13 @@ export function ProofView({
                         setPicked(null);
                         const selection = frameRef.current?.contentDocument?.getSelection();
                         // 打字模式游標留在選的那段字後面；看文章模式清掉選取（面板接手）。
-                        if (isEditing) selection?.collapseToEnd();
-                        else selection?.removeAllRanges();
+                        if (isEditing) {
+                          selection?.collapseToEnd();
+                          // 打字模式：先照「儲存」自動存一版，再問後端在那一版上的位置（第二輪審查）。
+                          void actWhileWriting(() => openImagePick(pick));
+                          return;
+                        }
+                        selection?.removeAllRanges();
                         openImagePick(pick);
                       }}
                     >
@@ -1321,7 +1358,7 @@ export function ProofView({
                   <SelectionImagePanel
                     heading={selectionImageHeading(imagePick.text)}
                     spots={imagePick.spots}
-                    spotMessage={imagePick.spotMessage}
+                    loadError={imagePick.loadError}
                     blockedReason={selectionImage.blockedReason}
                     editing={isEditing}
                     busy={imageSending || saving}

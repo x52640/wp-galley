@@ -32,7 +32,12 @@ import { ProofView, type ProofEditRequest, type ProofHighlight } from './ProofVi
 import { Sheet } from './Sheet.js';
 import { SuggestionColumn, findingKey, reviewKey } from './SuggestionColumn.js';
 import { MediaPanel, useImageGenerationStatus } from './panels/MediaPanel.js';
-import { selectionImageBlockedReason, selectionImageContentHash, stillOnJob } from '../lib/selection-image-view.js';
+import {
+  refreshStillCurrent,
+  selectionImageBlockedReason,
+  selectionImageContentHash,
+  stillOnJob,
+} from '../lib/selection-image-view.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -140,7 +145,10 @@ export function Workspace({
 
   const refresh = useCallback(async () => {
     const mine = ++generation.current;
-    const isCurrent = (): boolean => alive.current && mine === generation.current;
+    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
+    const origin = uuid;
+    const isCurrent = (): boolean =>
+      refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
     try {
       // 查證結果另一條路讀（GET …/factchecks）；讀不到不擋整個工作區，留著上一次的。
       const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
@@ -582,26 +590,38 @@ export function Workspace({
               canSelectToFactCheck(display, { finished: isFinished(job.state) })
                 ? {
                     blockedReason: selectionImageBlocked,
-                    onRequest: async ({ text, note, spot, spotCount, spotBefore, spotAfter }) => {
-                      // 回來時可能已經換到別篇（Workspace 重用）：不是發起的那一篇就不動畫面（跟 startFactCheck 同一套）。
+                    // 畫面知道的目前版本：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
+                    currentHash: selectionImageContentHash({
+                      editing: editing !== null,
+                      lastSaved: lastSavedHash.current,
+                      jobHash: job.currentRevision?.contentHash,
+                    }),
+                    loadSpots: async (text) => {
+                      // 換篇時沿用同一個元件：不是發起的那一篇就什麼都不做（第二輪審查）。
                       const origin = job.uuid;
                       const stillHere = (): boolean =>
                         stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
-                      // 畫面那一版：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
+                      if (!stillHere()) return null;
                       const contentHash = selectionImageContentHash({
                         editing: editing !== null,
                         lastSaved: lastSavedHash.current,
                         jobHash: job.currentRevision?.contentHash,
                       });
+                      if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
+                      const result = await api.selectionImageSpots(origin, { selection: text, contentHash });
+                      return stillHere() ? result : null;
+                    },
+                    onRequest: async ({ text, note, spot, contentHash }) => {
+                      // 回來時可能已經換到別篇（Workspace 重用）：清錯誤、送請求之前就先確認還在發起的那一篇。
+                      const origin = job.uuid;
+                      const stillHere = (): boolean =>
+                        stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
+                      if (!stillHere()) return;
                       setAgentError(null);
                       try {
-                        if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
-                        const brief = await api.requestImageFromSelection(job.uuid, {
+                        const brief = await api.requestImageFromSelection(origin, {
                           selection: text,
                           spot,
-                          ...(spotCount === undefined ? {} : { spotCount }),
-                          ...(spotBefore === undefined ? {} : { spotBefore }),
-                          ...(spotAfter === undefined ? {} : { spotAfter }),
                           contentHash,
                           ...(note === null ? {} : { note }),
                         });
@@ -642,6 +662,8 @@ export function Workspace({
                 : null
             }
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
+              // 存好之後換到別篇（Workspace 重用）：不碰 lastSavedHash、編輯狀態、refresh（第二輪審查）。
+              const origin = job.uuid;
               // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
               const base = nextSaveBase(lastSavedHash.current, job.currentRevision?.contentHash);
               // 標題與內文一起存成同一個新版本（P5-T029）；只送有改的那一邊。
@@ -662,6 +684,7 @@ export function Workspace({
                 // 編輯中被換版本時後端會回 409，不會蓋掉別人存進去的修改（P5-T005）。
                 ...(base === undefined ? {} : { expectedContentHash: base }),
               });
+              if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return saved.contentHash;
               if (stay) {
                 lastSavedHash.current = saved.contentHash;
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。

@@ -6,6 +6,8 @@ import type {
   AuthorsResponse,
   ImageAtPositionRequest,
   ImageFromSelectionRequest,
+  SelectionSpotsRequest,
+  SelectionSpotsResponse,
   ImageBriefResponse,
   ImageCandidateResponse,
   ImageGenerationStatus,
@@ -302,6 +304,9 @@ const httpApi: PublisherApi = {
     const body = await sendJson<ImageBriefResponse>(`/api/jobs/${uuid}/briefs`, 'POST', input);
     return body.brief;
   },
+
+  selectionImageSpots: (uuid: string, input: SelectionSpotsRequest) =>
+    sendJson<SelectionSpotsResponse>(`/api/jobs/${uuid}/briefs/selection-spots`, 'POST', input),
 
   async useImageCandidate(uuid: string, candidateId: number, altText?: string) {
     const request: UseCandidateRequest | undefined = altText === undefined ? undefined : { altText };

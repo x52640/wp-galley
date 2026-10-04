@@ -31,6 +31,8 @@ import type {
   FactCheckRunResult,
   ImageAtPositionRequest,
   ImageFromSelectionRequest,
+  SelectionSpotsRequest,
+  SelectionSpotsResponse,
   ImageBriefResponse,
   UseCandidateRequest,
   UpdateImageBriefRequest,
@@ -180,15 +182,20 @@ const ImageFromSelectionBody = z
   .object({
     selection: z.string().min(1).max(20_000),
     spot: z.number().int().min(0).max(10_000).optional(),
-    spotCount: z.number().int().min(1).max(10_001).optional(),
-    spotBefore: z.string().max(200).optional(),
-    spotAfter: z.string().max(200).optional(),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
     note: z
       .string()
       .max(4_000)
       .refine((value) => userNoteLength(value) <= USER_NOTE_MAX, `想要什麼樣的圖，最多 ${USER_NOTE_MAX} 個字`)
       .optional(),
+  })
+  .strict();
+
+/** 「用此段配圖」的位置選項（P5-T038 第二輪審查）：唯讀。`.strict()`。 */
+const SelectionSpotsBody = z
+  .object({
+    selection: z.string().min(1).max(20_000),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位'),
   })
   .strict();
 
@@ -268,6 +275,7 @@ export const REQUEST_CONTRACT_CHECK: {
   readonly place: Accepts<typeof PlaceBody, PlaceMediaRequest>;
   readonly imageAtPosition: Accepts<typeof ImageAtPositionBody, ImageAtPositionRequest>;
   readonly imageFromSelection: Accepts<typeof ImageFromSelectionBody, ImageFromSelectionRequest>;
+  readonly selectionSpots: Accepts<typeof SelectionSpotsBody, SelectionSpotsRequest>;
   readonly useCandidate: Accepts<typeof UseCandidateBody, UseCandidateRequest>;
   readonly resolve: Accepts<typeof ResolveReviewBody, ResolveReviewRequest>;
   readonly proposalRef: Accepts<typeof ProposalRefBody, ProposalRefRequest>;
@@ -285,6 +293,7 @@ export const REQUEST_CONTRACT_CHECK: {
   place: true,
   imageAtPosition: true,
   imageFromSelection: true,
+  selectionSpots: true,
   useCandidate: true,
   resolve: true,
   proposalRef: true,
@@ -687,9 +696,6 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
               selection: body.selection,
               contentHash: body.contentHash,
               ...(body.spot === undefined ? {} : { spot: body.spot }),
-              ...(body.spotCount === undefined ? {} : { spotCount: body.spotCount }),
-              ...(body.spotBefore === undefined ? {} : { spotBefore: body.spotBefore }),
-              ...(body.spotAfter === undefined ? {} : { spotAfter: body.spotAfter }),
               ...(body.note === undefined ? {} : { note: body.note }),
             }),
           );
@@ -707,6 +713,19 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
     reply.status(202);
     return { brief };
   });
+
+  /**
+   * 「用此段配圖」的位置選項（P5-T038 第二輪審查）：唯讀、不建任何東西。後端在 `contentHash` 那一版定位選取並算位置；
+   * 不是目前這一版 409、字數不合格／找不到／不只一處 400、含 WordPress 密碼 400。
+   */
+  app.post<{ Params: { uuid: string } }>(
+    '/api/jobs/:uuid/briefs/selection-spots',
+    async (request): Promise<SelectionSpotsResponse> => {
+      const { uuid } = parse(UuidParams, request.params);
+      const body = parse(SelectionSpotsBody, request.body);
+      return guard(() => core().selectionImageSpots(uuid, { selection: body.selection, contentHash: body.contentHash }));
+    },
+  );
 
   /**
    * 候選圖本體。只在本機，**還沒上傳到 WordPress**。檔案路徑由資料庫決定，

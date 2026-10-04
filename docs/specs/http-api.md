@@ -49,6 +49,7 @@
 | `DELETE` | `/api/jobs/:uuid/review` | 丟棄提案 | `DiscardReviewRequest` → `DiscardedResponse` |
 | `GET` | `/api/jobs/:uuid/compare` | 對照（逐段差異＋正文以外的欄位差異），`?against=proposal\|previous` | → `Comparison` |
 | `POST` | `/api/jobs/:uuid/briefs` | 在文章上「請 AI 配一張」或選一段「用此段配圖」：建使用者發起的配圖需求並開始生圖（**不等畫完**） | `ImageAtPositionRequest`／`ImageFromSelectionRequest` → `ImageBriefResponse`（202） |
+| `POST` | `/api/jobs/:uuid/briefs/selection-spots` | 「用此段配圖」的位置選項（**唯讀**）：在 `contentHash` 那一版定位選取、回圖可以放的位置 | `SelectionSpotsRequest` → `SelectionSpotsResponse` |
 | `PATCH` | `/api/jobs/:uuid/briefs/:id` | 在卡片上改配圖需求：Agent 那條改 `prompt`、使用者那條改 `note`（D-025） | `UpdateImageBriefRequest` → `UpdateImageBriefResponse` |
 | `DELETE` | `/api/jobs/:uuid/briefs/:id` | 配圖需求標成不要了（不刪列） | → `DismissedResponse` |
 | `POST` | `/api/jobs/:uuid/briefs/:id/generate` | 用 Codex 照這條需求生一張候選圖（等它畫完才回） | → `ImageCandidateResponse` |
@@ -143,9 +144,13 @@
   `ImageBrief` 多三個欄位：`origin`（`agent`／`user`）、`anchorPosition`（`after`／`before`）、`note`。
   規則見 [agent-tasks.md](agent-tasks.md)「在文章上直接請 AI 配一張」。都是新增的，舊前端不受影響。
 - 選一段文字「用此段配圖」（D-037，P5-T038，新增、不改既有欄位）：同一條 `POST /briefs`，body 有 `selection` 就是這一種
-  （`ImageFromSelectionRequest`：`selection`、選填 `spot`（整數 ≥ 0，預設 0＝這段開頭）、選填 `spotCount`（畫面上看到的位置個數，≥ 1）、選填 `spotBefore`／`spotAfter`（所選位置兩側的字，各 ≤ 200 字元）、`contentHash`、選填 `note`），否則照位置那一種。
+  （`ImageFromSelectionRequest`：`selection`、選填 `spot`（整數 ≥ 0，預設 0＝這段開頭；`selection-spots` 回的選項之一）、`contentHash`（**位置選項來源那一版**，`SelectionSpotsResponse.contentHash`）、選填 `note`），否則照位置那一種。
   兩種都是 `.strict()`：選取那種多送 `afterBlockIndex`、`prompt` 都 400。zod 只擋超大 body（`selection` ≤ 20000 字元）；字數 10～3000 由
-  CoreService 照共用規則驗（400，講太短／太長）。找不到選取、出現不只一次、`spot` 不在範圍、`spotCount` 或兩側的字跟後端用目前這一版算的不一樣（「段落整理後位置變了，請再選一次」）400；其餘狀態碼同上一條。
+  CoreService 照共用規則驗（400，講太短／太長）。找不到選取、出現不只一次、`spot` 不在範圍 400；`contentHash` 不是目前這一版 409「文章剛被改過，位置可能不對了，請重新選一次那段…」（不猜位置）；其餘狀態碼同上一條。
+- 「用此段配圖」的位置選項（P5-T038 第二輪審查，新增）：`POST /briefs/selection-spots`，body `{ selection, contentHash }`（`.strict()`）。
+  **唯讀**：不建版本、不建需求、不跑 Agent。後端在 `contentHash` 那一版（必須是目前這一版；打字模式由畫面先自動存）定位選取並算位置，
+  回 200 `{ contentHash, spots: [{ spot, kind: 'start'|'between'|'end', label }], basis }`；畫面只照抄 `label`，送出時帶回 `spot` 與這個 `contentHash`。
+  不是目前這一版 409、字數不合格／找不到／不只一處 400、含 WordPress 密碼 400。
   `ImageBrief` 多一個欄位 `fromSelection`（boolean；照選取配的才 true）。規則見 [agent-tasks.md](agent-tasks.md)「選一段文字『用此段配圖』」。
 - 在卡片上改配圖需求（D-025，P5-T025）：`PATCH /briefs/:id` 的 body 是 `.strict()`，`prompt`／`note` **只能送一個**
   （都送、都不送、多送欄位例如 `aspectRatio` 都是 400）；長度跟畫面計數同一套（`prompt` 去頭尾後數 code point、上限 2000，

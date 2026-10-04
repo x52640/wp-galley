@@ -49,8 +49,8 @@ export type SelectionLocation =
   | { readonly ok: false; readonly reason: 'missing' | 'ambiguous'; readonly message: string };
 
 export const SELECTION_MISSING_MESSAGE = '選的字在目前的文章裡找不到（可能改過了）。重新選一次再按。';
-/** 畫面上看到的位置個數跟後端用存好的那一版算的不一樣（打字模式存檔整理改了段落）：不猜，請使用者再選一次。 */
-export const SELECTION_SPOTS_CHANGED_MESSAGE = '段落整理後位置變了，請再選一次（重新選那段、再按「用此段配圖」）。';
+/** 位置選項是照某一版算的，送出時目前已經不是那一版：不猜，請使用者再選一次。 */
+export const SELECTION_SPOTS_CHANGED_MESSAGE = '文章剛被改過，位置可能不對了，請重新選一次那段再按「用此段配圖」。';
 export const SELECTION_AMBIGUOUS_MESSAGE = '選的字在文章裡出現不只一次，不確定是哪一段。多選幾個字讓位置確定。';
 
 /**
@@ -74,15 +74,7 @@ export function locateSelection(blocks: readonly PositionBlock[], text: string):
   return { ok: true, first: owner[at]!, last: owner[at + target.length - 1]! };
 }
 
-/**
- * 圖可以放的位置（使用者在送出前選）。`spot` 是送給後端的編號：
- * - `0`＝「這段開頭」（預設）：選取第一個字所在那塊**之前**。
- * - `1..n-1`＝選取範圍內第 k 段有字的段落**之後**（兩段之間）。
- * - `n`＝「這段結尾」：選取最後一個字所在那塊**之後**。
- * n 是選取範圍內有字的段落數；只選到一段時只有開頭、結尾。
- * 編號照「選取範圍內第幾段有字的段落」算，不照文章的區塊索引：打字模式先存一版時沒字的空段落可能被整理掉，
- * 照段落數就不會指錯。
- */
+/** 一個可以放圖的位置（`selectionSpots`）。`spot` 是送回後端的編號，只對算它的那一版有效。 */
 export interface SelectionSpot {
   readonly spot: number;
   readonly kind: 'start' | 'between' | 'end';
@@ -99,19 +91,55 @@ export function excerptOf(text: string, chars = EXCERPT_CHARS): string {
   return all.length <= chars ? all.join('') : `${all.slice(0, chars).join('')}…`;
 }
 
-export function selectionSpots(blocks: readonly PositionBlock[], first: number, last: number): SelectionSpot[] {
-  const texted: number[] = [];
-  for (let i = first; i <= last; i += 1) if ((blocks[i]?.text.trim() ?? '') !== '') texted.push(i);
+/** 頂層區塊沒有字時是什麼（P5-T038 第二輪審查）：圖片、分隔線、嵌入內容都是真的區塊；什麼都沒有的空段落不算。 */
+export type SpotMedia = 'image' | 'divider' | 'embed';
+
+/** 位置選項要的區塊：字，以及沒字時它是什麼（null＝空的，不算一塊）。 */
+export interface SpotBlock extends PositionBlock {
+  readonly media?: SpotMedia | null;
+}
+
+const MEDIA_LABEL: Record<SpotMedia, string> = { image: '圖片', divider: '分隔線', embed: '嵌入內容' };
+
+/**
+ * 沒有字的頂層區塊是什麼。只看標籤名與 HTML 字串（共用契約不解析 HTML；後端、示範資料都給得出這兩個）。
+ * 有字的區塊不用問（回 null）。
+ */
+export function blockMedia(block: { readonly text: string; readonly tag: string; readonly html: string }): SpotMedia | null {
+  if (block.text.trim() !== '') return null;
+  const tag = block.tag.toLowerCase();
+  if (tag === 'hr' || /<hr[\s/>]/i.test(block.html) || /wp-block-separator/.test(block.html)) return 'divider';
+  if (tag === 'img' || /<img[\s/>]/i.test(block.html)) return 'image';
+  if (/<(iframe|video|audio|embed|object)[\s/>]/i.test(block.html)) return 'embed';
+  return null;
+}
+
+/** 這塊算不算一塊：有字，或是圖片／分隔線／嵌入內容。 */
+function isRealBlock(block: SpotBlock | undefined): boolean {
+  if (block === undefined) return false;
+  return block.text.trim() !== '' || (block.media ?? null) !== null;
+}
+
+/**
+ * 圖可以放的位置。**由後端在存好的那一版上算**（`POST …/briefs/selection-spots`），畫面只顯示、送回 `spot`。
+ * 選取範圍 [first, last]（都是有字的區塊）裡每一塊真的區塊（有字、圖片、分隔線、嵌入內容；空段落不算）之後都是一個位置：
+ * `0`＝這段開頭（first 之前）、中間＝那塊之後（「第 N 段之後：『…』」、「第 N 段（圖片）之後」）、最後＝這段結尾（last 之後）。
+ */
+export function selectionSpots(blocks: readonly SpotBlock[], first: number, last: number): SelectionSpot[] {
+  const real: number[] = [];
+  for (let i = first; i <= last; i += 1) if (isRealBlock(blocks[i])) real.push(i);
   const spots: SelectionSpot[] = [{ spot: 0, kind: 'start', afterBlockIndex: first - 1, label: '這段開頭' }];
-  texted.slice(0, -1).forEach((index, k) => {
+  real.slice(0, -1).forEach((index, k) => {
+    const block = blocks[index]!;
+    const media = block.text.trim() === '' ? (block.media ?? null) : null;
     spots.push({
       spot: k + 1,
       kind: 'between',
       afterBlockIndex: index,
-      label: `第 ${index + 1} 段之後：「${excerptOf(blocks[index]!.text)}」`,
+      label: media === null ? `第 ${index + 1} 段之後：「${excerptOf(block.text)}」` : `第 ${index + 1} 段（${MEDIA_LABEL[media]}）之後`,
     });
   });
-  spots.push({ spot: Math.max(texted.length, 1), kind: 'end', afterBlockIndex: last, label: '這段結尾' });
+  spots.push({ spot: Math.max(real.length, 1), kind: 'end', afterBlockIndex: last, label: '這段結尾' });
   return spots;
 }
 
@@ -126,28 +154,4 @@ export function selectionSpotAnchor(blocks: readonly PositionBlock[], spot: Sele
 /** 卡片上的依據：「依選取段落：「開頭十幾個字…」（共 N 字）」。存在配圖需求的 purpose。 */
 export function selectionBasisLabel(text: string): string {
   return `依選取段落：「${excerptOf(text)}」（共 ${selectionImageLength(text)} 字）`;
-}
-
-/** 位置指紋每一側取幾個字（忽略空白後）。 */
-export const SPOT_EDGE_CHARS = 20;
-
-/**
- * 位置的「兩側指紋」（P5-T038 Codex 審查）：邊界**前面那塊的結尾**與**後面那塊的開頭**各取忽略空白後的 20 字
- * （文章最前面／最後面那一側是空字串）。取貼著邊界的那一截：段落被拆開或合併時，邊界兩側的字一定變，
- * 光比位置個數抓不到（例如 `<div><p>A</p><p>B</p></div>` 存檔後拆成兩段，個數一樣、邊界卻挪了）。
- */
-export function spotEdges(blocks: readonly PositionBlock[], afterBlockIndex: number): { before: string; after: string } {
-  const compact = (index: number): string[] => Array.from((blocks[index]?.text ?? '').replace(/\s+/gu, ''));
-  const before = afterBlockIndex >= 0 ? compact(afterBlockIndex) : [];
-  const after = compact(afterBlockIndex + 1);
-  return {
-    before: before.slice(Math.max(before.length - SPOT_EDGE_CHARS, 0)).join(''),
-    after: after.slice(0, SPOT_EDGE_CHARS).join(''),
-  };
-}
-
-/** 畫面送來的兩側指紋跟用目前這一版算的一不一樣（忽略空白）。 */
-export function spotEdgesMatch(seen: { before: string; after: string }, current: { before: string; after: string }): boolean {
-  const strip = (value: string): string => value.replace(/\s+/gu, '');
-  return strip(seen.before) === strip(current.before) && strip(seen.after) === strip(current.after);
 }

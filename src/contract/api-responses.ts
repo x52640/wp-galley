@@ -100,3 +100,13 @@ export interface RemovedResponse {
 export interface RevokedResponse {
   readonly revoked: true;
 }
+
+/**
+ * 「用此段配圖」的位置選項（P5-T038 第二輪審查）。後端在 `contentHash` 那一版上算；送出時帶回 `spot` 與這個 `contentHash`。
+ * `label` 照抄（「這段開頭」「第 N 段之後：『…』」「第 N 段（圖片）之後」「這段結尾」）。`basis` 是卡片上也會出現的依據。
+ */
+export interface SelectionSpotsResponse {
+  readonly contentHash: string;
+  readonly spots: readonly { readonly spot: number; readonly kind: 'start' | 'between' | 'end'; readonly label: string }[];
+  readonly basis: string;
+}

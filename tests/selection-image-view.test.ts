@@ -6,10 +6,9 @@ import {
   selectionImageContentHash,
   selectionImageHeading,
   selectionImageProblem,
-  selectionImageSpotHints,
+  refreshStillCurrent,
   selectionPickStale,
   stillOnJob,
-  selectionImageSpots,
 } from '../src/ui/lib/selection-image-view.js';
 import { planSelectionCheck } from '../src/ui/lib/check-while-writing.js';
 import { decideProofSave } from '../src/ui/lib/write-in-place.js';
@@ -66,30 +65,7 @@ describe('「用此段配圖」能不能按', () => {
   });
 });
 
-describe('送出前的位置選項（用畫面上的正文定位）', () => {
-  const texts = ['前一節最後一段。', '第二段的內容在這裡。', '第三段的內容在這裡。', '第四段的內容在這裡。'];
-
-  it('跨三段：開頭、兩個中間、結尾', () => {
-    const { spots, message } = selectionImageSpots(texts, '的內容在這裡。\n\n第三段的內容在這裡。\n\n第四段的');
-    expect(message).toBeNull();
-    expect(spots.map((spot) => spot.label)).toEqual([
-      '這段開頭',
-      '第 2 段之後：「第二段的內容在這裡。」',
-      '第 3 段之後：「第三段的內容在這裡。」',
-      '這段結尾',
-    ]);
-  });
-
-  it('只選一段：開頭、結尾', () => {
-    expect(selectionImageSpots(texts, '第三段的內容在').spots.map((spot) => spot.kind)).toEqual(['start', 'end']);
-  });
-
-  it('畫面上找不到：只剩「這段開頭」並講原因（後端再判斷）', () => {
-    const { spots, message } = selectionImageSpots(texts, '不在文章裡的字');
-    expect(spots.map((spot) => spot.spot)).toEqual([0]);
-    expect(message).toContain('找不到');
-  });
-
+describe('面板標題', () => {
   it('面板標題：開頭十幾個字與字數', () => {
     expect(selectionImageHeading('一二三四五六七八九十一二三四五六')).toEqual({ excerpt: '一二三四五六七八九十一二三四五…', length: 16 });
   });
@@ -118,23 +94,31 @@ describe('打字模式中「用這張」反灰（審查 1）', () => {
   });
 });
 
-describe('送出的位置核對資料（審查 2、Codex 審查 P2）', () => {
-  const texts = ['第二段的內容在這裡。', '第三段的內容在這裡。', '下一段。'];
+describe('面板開著時文章被別處改了：關掉請重選（Codex 審查 P2）', () => {
+  it('版本換成別處改的才算；自己這次打字中存的、正在送出時的都不算', () => {
+    const base = { spotsHash: 'h1', currentHash: 'h1', openedKey: 'h1', currentKey: 'h1', own: [] as string[], sending: false };
+    expect(selectionPickStale(base)).toBe(false);
+    expect(selectionPickStale({ ...base, currentKey: 'h2' })).toBe(true);
+    expect(selectionPickStale({ ...base, currentKey: 'h2', own: ['h2'] })).toBe(false);
+    expect(selectionPickStale({ ...base, currentKey: 'h2', sending: true })).toBe(false);
+  });
 
-  it('畫面上定位得到：帶位置個數與所選位置兩側的字；定位不到：都不帶', () => {
-    const result = selectionImageSpots(texts, '的內容在這裡。\n\n第三段');
-    expect(selectionImageSpotHints(result, 2)).toEqual({ spotCount: 3, spotBefore: '第三段的內容在這裡。', spotAfter: '下一段。' });
-    expect(selectionImageSpotHints(result, 0)).toEqual({ spotCount: 3, spotBefore: '', spotAfter: '第二段的內容在這裡。' });
-    expect(selectionImageSpotHints(selectionImageSpots(texts, '不在文章裡的字'), 0)).toEqual({});
+  it('位置選項來源那一版已經不是畫面知道的目前版本：過時（後端算的選項只對那一版有效）', () => {
+    const base = { spotsHash: 'h1', currentHash: 'h1', openedKey: 'k', currentKey: 'k', own: [] as string[], sending: false };
+    expect(selectionPickStale({ ...base, currentHash: 'h2' })).toBe(true);
+    // 還在載入選項（還沒有 spotsHash）不算。
+    expect(selectionPickStale({ ...base, spotsHash: null, currentHash: 'h2' })).toBe(false);
   });
 });
 
-describe('面板開著時文章被別處改了：關掉請重選（Codex 審查 P2）', () => {
-  it('版本換成別處改的才算；自己這次打字中存的、正在送出時的都不算', () => {
-    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h1', own: [], sending: false })).toBe(false);
-    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: [], sending: false })).toBe(true);
-    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: ['h2'], sending: false })).toBe(false);
-    expect(selectionPickStale({ openedKey: 'h1', currentKey: 'h2', own: [], sending: true })).toBe(false);
+describe('重讀綁住發起的那一篇（第二輪審查）', () => {
+  it('最新一次、而且還在同一篇才寫進畫面', () => {
+    const base = { alive: true, mine: 3, latest: 3, current: 'a', origin: 'a' };
+    expect(refreshStillCurrent(base)).toBe(true);
+    expect(refreshStillCurrent({ ...base, latest: 4 })).toBe(false);
+    // 舊篇的 refresh 剛好是最後送出的那一個：世代對、篇不對，照樣丟掉。
+    expect(refreshStillCurrent({ ...base, current: 'b' })).toBe(false);
+    expect(refreshStillCurrent({ ...base, alive: false })).toBe(false);
   });
 });
 

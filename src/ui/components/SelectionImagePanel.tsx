@@ -2,19 +2,20 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Icon } from '../icons.js';
 import { Spinner } from './panels/shared.js';
 import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
-import type { SelectionSpot } from '../../contract/selection-image.js';
+import type { SelectionSpotsResponse } from '../service/types.js';
 
 /**
  * 選一段文字「用此段配圖」按下去之後的小面板（D-037，P5-T038）。互動跟插圖面板「請 AI 配一張」同一套：
  * 選填一句想要的樣子（上限 200 字，同一套計數），可以直接送。多一步：圖放在選取範圍的哪裡
  * （「這段開頭」預設、兩段之間、「這段結尾」）。位置只影響放哪，不影響 AI 讀什麼。
+ * 位置選項由後端在存好的那一版上算（第二輪審查），這裡只照抄；還在問的時候講「正在找位置…」、送出鈕不給按。
  *
  * 送出由上層決定怎麼做（打字模式先存再送）；送出期間鎖住，送完由上層關掉。
  */
 export function SelectionImagePanel({
   heading,
   spots,
-  spotMessage,
+  loadError,
   blockedReason,
   editing,
   busy,
@@ -22,9 +23,10 @@ export function SelectionImagePanel({
   onClose,
 }: {
   heading: { excerpt: string; length: number };
-  spots: readonly SelectionSpot[];
-  /** 畫面上找不到這段（只剩「這段開頭」）時的說明。 */
-  spotMessage: string | null;
+  /** 後端給的位置選項；null＝還在問。 */
+  spots: SelectionSpotsResponse['spots'] | null;
+  /** 問位置選項失敗（找不到、太長、文章剛被改過…）：照講，不給送。 */
+  loadError: string | null;
   /** 現在不能送的原因（Codex 不能用、另一個 Agent 在跑…）；null＝可以。 */
   blockedReason: string | null;
   /** 打字模式：送出前會先自動存一版。 */
@@ -38,7 +40,7 @@ export function SelectionImagePanel({
   const rootRef = useRef<HTMLDivElement>(null);
   const noteLength = userNoteLength(note);
   const noteTooLong = noteLength > NOTE_MAX;
-  const canSend = blockedReason === null && !busy && !noteTooLong;
+  const canSend = blockedReason === null && !busy && !noteTooLong && spots !== null && loadError === null;
 
   useEffect(() => {
     rootRef.current?.querySelector<HTMLElement>('.insert-ai-note:not(:disabled)')?.focus({ preventScroll: true });
@@ -76,7 +78,14 @@ export function SelectionImagePanel({
 
       <fieldset className="insert-panel-section sel-image-spots">
         <legend className="insert-panel-label">圖放在</legend>
-        {spots.map((option) => (
+        {spots === null && loadError === null && <p className="field-hint">正在找這段在文章裡的位置…</p>}
+        {loadError !== null && (
+          <p className="field-hint insert-ai-blocked" role="alert">
+            <Icon name="alert" size={13} />
+            {loadError}
+          </p>
+        )}
+        {(spots ?? []).map((option) => (
           <label key={option.spot} className="sel-image-spot">
             <input
               type="radio"
@@ -92,7 +101,6 @@ export function SelectionImagePanel({
             </span>
           </label>
         ))}
-        {spotMessage !== null && <p className="field-hint">{spotMessage}</p>}
       </fieldset>
 
       <section className="insert-panel-section" aria-label="想要什麼樣的圖">
@@ -139,7 +147,7 @@ export function SelectionImagePanel({
                 {noteTooLong && '（太長了，刪短一點）'}
               </span>
             )}
-            {editing && '會先自動存一版（只存本機），留在打字模式。'}
+            {editing && '已先自動存一版（只存本機），位置照存好的那一版算；留在打字模式。'}
             Codex 只讀你選的這段（文章標題與小節標題當背景）決定畫面，一分鐘左右；進度看右欄「圖片」那張卡片。
             生好先給你看，按「用這張」才會上傳並放到選的位置。
           </p>

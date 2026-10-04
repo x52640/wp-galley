@@ -20,8 +20,7 @@ import {
   selectionImageLength,
   selectionSpotAnchor,
   selectionSpots,
-  spotEdges,
-  spotEdgesMatch,
+  blockMedia,
   SELECTION_IMAGE_MAX,
   SELECTION_IMAGE_MIN,
 } from '../src/contract/selection-image.js';
@@ -181,9 +180,31 @@ describe('位置選項與錨點', () => {
     expect(selectionSpotAnchor(blocks, spots[1]!)).toEqual({ anchor: blocks[2]!.text, position: 'after' });
   });
 
-  it('範圍內沒字的區塊（圖）不算一個位置', () => {
-    const withImage = [{ text: '第一段有字的段落。' }, { text: '' }, { text: '第三段有字的段落。' }];
-    expect(selectionSpots(withImage, 0, 2).map((spot) => spot.afterBlockIndex)).toEqual([-1, 0, 2]);
+  it('範圍內的圖片、分隔線是真的區塊（標出來）；空段落不算', () => {
+    const blocks = [
+      { text: '第一段有字的段落。' },
+      { text: '', media: 'image' as const },
+      { text: '' },
+      { text: '', media: 'divider' as const },
+      { text: '第五段有字的段落。' },
+    ];
+    const spots = selectionSpots(blocks, 0, 4);
+    expect(spots.map((spot) => [spot.afterBlockIndex, spot.label])).toEqual([
+      [-1, '這段開頭'],
+      [0, '第 1 段之後：「第一段有字的段落。」'],
+      [1, '第 2 段（圖片）之後'],
+      [3, '第 4 段（分隔線）之後'],
+      [4, '這段結尾'],
+    ]);
+    expect(spots.map((spot) => spot.spot)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('沒字的區塊是什麼：圖片、分隔線、嵌入內容；空的不算', () => {
+    expect(blockMedia({ text: '', tag: 'figure', html: '<figure class="wp-block-image"><img src="a.png" alt=""></figure>' })).toBe('image');
+    expect(blockMedia({ text: '', tag: 'hr', html: '<hr class="wp-block-separator">' })).toBe('divider');
+    expect(blockMedia({ text: '', tag: 'figure', html: '<figure><iframe src="x"></iframe></figure>' })).toBe('embed');
+    expect(blockMedia({ text: '', tag: 'p', html: '<p></p>' })).toBeNull();
+    expect(blockMedia({ text: '圖說', tag: 'figure', html: '<figure><img src="a"><figcaption>圖說</figcaption></figure>' })).toBeNull();
   });
 
   it('開頭那段沒有可用的錨點：照原規則換另一邊（前一段之後）', () => {
@@ -354,14 +375,15 @@ describe('請 AI 照選取配圖：後端流程', () => {
     expect(briefCount(f)).toBe(0);
   });
 
-  it('畫面那一版不是目前這一版：409 類錯誤，不建需求', async () => {
-    const { f, uuid } = await setup();
+  it('位置選項來源那一版不是目前這一版：409「文章剛被改過」，不猜、不建需求', async () => {
+    const { f, codex, uuid } = await setup();
     const stale = hashOf(f.core, uuid);
     f.core.createRevision(uuid, { origin: 'manual', editedBody: `<p>多一段。</p>${bodyOf(f.core, uuid)}` });
-    await expect(f.core.requestImageFromSelection(uuid, { selection: ACROSS, contentHash: stale })).rejects.toBeInstanceOf(
-      ContentChangedError,
-    );
+    const caught = await f.core.requestImageFromSelection(uuid, { selection: ACROSS, contentHash: stale }).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ContentChangedError);
+    expect((caught as Error).message).toContain('文章剛被改過');
     expect(briefCount(f)).toBe(0);
+    expect(codex.imageCalls).toHaveLength(0);
   });
 
   it('小節標題：往前找最近的 H2／H3 當背景', async () => {
@@ -399,18 +421,53 @@ describe('請 AI 照選取配圖：後端流程', () => {
     expect(JSON.parse(row.detail_json)).toMatchObject({ field: 'note', contextRefreshed: false });
   });
 
-  it('畫面上看到的位置總數跟後端算的不一樣（存檔整理改了段落）：400，不猜、不建需求', async () => {
+  it('位置選項（唯讀）：在那一版上算、圖片當真的區塊；送出時帶回同一個 spot 與 contentHash，放的位置跟選項一致', async () => {
     const { f, codex, uuid } = await setup();
+    // 選取跨過一張圖：圖片是真的區塊、會出現在選項裡。
+    f.core.createRevision(uuid, {
+      origin: 'manual',
+      editedBody:
+        '<p>第一段：清晨出門，巷口的早餐店已經排了隊。</p><figure class="wp-block-image"><img src="https://example.com/a.png" alt=""></figure><p>第三段：傍晚雨停，天邊透出一點橘紅。</p>',
+    });
     const contentHash = hashOf(f.core, uuid);
-    // ACROSS 跨三段：位置是 0..3，共 4 個。
-    await expect(
-      f.core.requestImageFromSelection(uuid, { selection: ACROSS, spot: 1, spotCount: 3, contentHash }),
-    ).rejects.toThrow('段落整理後位置變了，請再選一次');
+    const before = f.core.listRevisions(uuid).length;
+    const result = f.core.selectionImageSpots(uuid, { selection: '巷口的早餐店已經排了隊。\n\n第三段：傍晚雨停', contentHash });
+    expect(result.contentHash).toBe(contentHash);
+    expect(result.basis).toContain('依選取段落');
+    expect(result.spots.map((spot) => spot.label)).toEqual([
+      '這段開頭',
+      '第 1 段之後：「第一段：清晨出門，巷口的早餐店…」',
+      '第 2 段（圖片）之後',
+      '這段結尾',
+    ]);
+    // 唯讀：不建版本、不建需求、不跑 Agent。
+    expect(f.core.listRevisions(uuid)).toHaveLength(before);
     expect(briefCount(f)).toBe(0);
     expect(codex.imageCalls).toHaveLength(0);
-    const { generation } = await f.core.requestImageFromSelection(uuid, { selection: ACROSS, spot: 1, spotCount: 4, contentHash });
+
+    const { brief, generation } = await f.core.requestImageFromSelection(uuid, {
+      selection: '巷口的早餐店已經排了隊。\n\n第三段：傍晚雨停',
+      spot: 2,
+      contentHash: result.contentHash,
+    });
+    // 「第 2 段（圖片）之後」：前一塊是圖（沒字），照原規則引用後面那段、放在它之前。
+    expect(brief.anchorPosition).toBe('before');
+    expect('第三段：傍晚雨停，天邊透出一點橘紅。'.startsWith(brief.anchor!)).toBe(true);
     await generation;
-    expect(briefCount(f)).toBe(1);
+  });
+
+  it('位置選項：不是目前這一版 409、找不到 400、字數不合格 400、含密碼 400', async () => {
+    const PASSWORD = 'Zq7vXk2mPa9LwR4tBn6cYd8e';
+    const secrets = createMutableScrubber([PASSWORD]);
+    const { f, uuid } = await setup({ scrub: secrets.scrub });
+    const stale = hashOf(f.core, uuid);
+    expect(() => f.core.selectionImageSpots(uuid, { selection: '這段字根本不在文章裡面喔', contentHash: stale })).toThrow('找不到');
+    expect(() => f.core.selectionImageSpots(uuid, { selection: '太短', contentHash: stale })).toThrow('太短');
+    expect(() => f.core.selectionImageSpots(uuid, { selection: `下午的雨 ${PASSWORD}`, contentHash: stale })).toThrow(
+      APP_PASSWORD_IN_CONTENT_MESSAGE,
+    );
+    f.core.createRevision(uuid, { origin: 'manual', editedBody: `<p>多一段。</p>${bodyOf(f.core, uuid)}` });
+    expect(() => f.core.selectionImageSpots(uuid, { selection: ACROSS, contentHash: stale })).toThrow(ContentChangedError);
   });
 
   it('再生一張：用同一份 prompt', async () => {
@@ -487,7 +544,7 @@ describe('HTTP：POST /api/jobs/:uuid/briefs（選取那種 body）', () => {
       method: 'POST',
       url: `/api/jobs/${uuid}/briefs`,
       headers,
-      payload: { selection: ACROSS, spot: 1, spotCount: 4, contentHash: hashOf(fixture!.core, uuid), note: '水彩' },
+      payload: { selection: ACROSS, spot: 1, contentHash: hashOf(fixture!.core, uuid), note: '水彩' },
     });
     expect(res.statusCode).toBe(202);
     expect(res.json().brief).toMatchObject({ origin: 'user', fromSelection: true, note: '水彩', anchorPosition: 'after' });
@@ -505,60 +562,37 @@ describe('HTTP：POST /api/jobs/:uuid/briefs（選取那種 body）', () => {
     expect((await send({ selection: '字'.repeat(3001), contentHash })).statusCode).toBe(400);
     expect((await send({ selection: ACROSS, afterBlockIndex: 1, contentHash })).statusCode).toBe(400);
     expect((await send({ selection: ACROSS, contentHash, prompt: 'x' })).statusCode).toBe(400);
-    expect((await send({ selection: ACROSS, spot: 0, spotCount: 0, contentHash })).statusCode).toBe(400);
-    const moved = await send({ selection: ACROSS, spot: 0, spotCount: 2, contentHash });
-    expect(moved.statusCode).toBe(400);
-    expect(moved.json().error.message).toContain('段落整理後位置變了');
+    // 拿掉的指紋欄位現在是多送的欄位。
+    expect((await send({ selection: ACROSS, spot: 0, spotCount: 4, contentHash })).statusCode).toBe(400);
     expect(briefCount(fixture!)).toBe(0);
   });
 });
 
-describe('位置的兩側指紋（Codex 審查 P2）', () => {
-  it('取邊界前那塊的結尾、後那塊的開頭；最前面／最後面一側是空的', () => {
-    const blocks = [{ text: '甲'.repeat(25) + '前段結尾' }, { text: '後段開頭' + '乙'.repeat(25) }];
-    expect(spotEdges(blocks, 0)).toEqual({ before: '甲'.repeat(16) + '前段結尾', after: '後段開頭' + '乙'.repeat(16) });
-    expect(spotEdges(blocks, -1)).toEqual({ before: '', after: '甲'.repeat(20) });
-    expect(spotEdges(blocks, 1).after).toBe('');
-  });
+describe('HTTP：POST /api/jobs/:uuid/briefs/selection-spots（唯讀）', () => {
+  const headers = { host: '127.0.0.1:3000' };
 
-  it('wrapper 拆成兩段：位置個數一樣，但「結尾」的兩側指紋不一樣', () => {
-    const a = '第一段很長的內容一二三四五六七八九十，講的是早上的事。';
-    const b = '第二段講的是下午的雨，下得很急。';
-    const edited = [{ text: `${a}${b}` }, { text: '下一節。' }];
-    const saved = [{ text: a }, { text: b }, { text: '下一節。' }];
-    const before = selectionSpots(edited, 0, 0);
-    const after = selectionSpots(saved, 0, 0);
-    expect(before.length).toBe(after.length);
-    const end = (spots: ReturnType<typeof selectionSpots>) => spots.find((spot) => spot.kind === 'end')!;
-    expect(spotEdgesMatch(spotEdges(edited, end(before).afterBlockIndex), spotEdges(saved, end(after).afterBlockIndex))).toBe(false);
-    // 沒變的開頭照樣對得上。
-    expect(spotEdgesMatch(spotEdges(edited, before[0]!.afterBlockIndex), spotEdges(saved, after[0]!.afterBlockIndex))).toBe(true);
-  });
-
-  it('後端：送來的兩側指紋跟目前這一版不一樣就 400，不建需求；一樣就建', async () => {
-    const { f, codex, uuid } = await setup();
-    const contentHash = hashOf(f.core, uuid);
-    await expect(
-      f.core.requestImageFromSelection(uuid, {
-        selection: ACROSS,
-        spot: 3,
-        spotCount: 4,
-        spotBefore: '別的段落結尾',
-        spotAfter: '第五段：睡前寫下這一篇。',
-        contentHash,
-      }),
-    ).rejects.toThrow('段落整理後位置變了，請再選一次');
-    expect(briefCount(f)).toBe(0);
-    expect(codex.imageCalls).toHaveLength(0);
-    const { generation } = await f.core.requestImageFromSelection(uuid, {
-      selection: ACROSS,
-      spot: 3,
-      spotCount: 4,
-      spotBefore: '第四段：晚上把去年的筆記翻出來對照。',
-      spotAfter: '第五段：睡前寫下這一篇。',
-      contentHash,
+  it('200 回位置選項與那一版的 contentHash；舊版 409；多送欄位 400；不建任何東西', async () => {
+    fixture = await createCoreFixture({ adapters: [codexAdapter()] });
+    app = await buildApp({
+      config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'silent' }),
+      db: fixture.db.handle,
+      templates: await loadTemplateRegistry(paths.templates),
+      agents: new AgentRegistry({ adapters: [codexAdapter()] }),
+      targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),
+      core: fixture.core,
+      wordpress: null,
     });
-    await generation;
-    expect(briefCount(f)).toBe(1);
+    await app.ready();
+    const uuid = fixture.core.createJob({ targetKey: 'diary', sourceText: SOURCE, title: '20260828' }).uuid;
+    const contentHash = hashOf(fixture.core, uuid);
+    const url = `/api/jobs/${uuid}/briefs/selection-spots`;
+    const ok = await app.inject({ method: 'POST', url, headers, payload: { selection: ACROSS, contentHash } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ contentHash, basis: selectionBasisLabel(ACROSS) });
+    expect(ok.json().spots.map((spot: { spot: number }) => spot.spot)).toEqual([0, 1, 2, 3]);
+    expect((await app.inject({ method: 'POST', url, headers, payload: { selection: ACROSS, contentHash, spot: 1 } })).statusCode).toBe(400);
+    fixture.core.createRevision(uuid, { origin: 'manual', editedBody: `<p>多一段。</p>${bodyOf(fixture.core, uuid)}` });
+    expect((await app.inject({ method: 'POST', url, headers, payload: { selection: ACROSS, contentHash } })).statusCode).toBe(409);
+    expect(briefCount(fixture)).toBe(0);
   });
 });

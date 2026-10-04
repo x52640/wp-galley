@@ -87,9 +87,9 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #26 Codex 審查三條 P2 已修（送所選位置兩側的字 `spotBefore`／`spotAfter`、後端比對不一致回 400；面板開著時文章被別處改了就關掉請重選；送出後換篇不動畫面 `stillOnJob`）；spec 與 known-issues 已同步
-- 已通過驗證：`npm run verify` 綠（90 檔、2006 測試）
-- 下一步：主 session 審查、commit、更新 PR；使用者手動驗證（真的 Codex 生圖、只存草稿）
+- 最後完成：PR #26 第二輪 Codex 審查：位置選項改由後端在存好的那一版上算（新唯讀 API `POST …/briefs/selection-spots`，送出帶回 `spot`＋選項來源那一版的 `contentHash`，不是那一版 409；拿掉 `spotCount`／`spotBefore`／`spotAfter` 指紋；圖片、分隔線、嵌入內容算真的區塊）；Workspace `refresh` 綁 UUID、存檔後的接續動作與配圖回呼都先確認還在發起的那一篇；spec 與 known-issues 已同步
+- 已通過驗證：`npm run verify` 綠（91 檔、2027 測試）
+- 下一步：主 session 審查、commit、Codex 第三輪；使用者手動驗證（真的 Codex 生圖、只存草稿）
 - Blocker：無
 
 ## 完成結果

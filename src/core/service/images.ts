@@ -3,9 +3,14 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ImageBrief as ImageBriefView, ImageCandidate, ImageGenerationStatus } from '../../contract/api.js';
+import type {
+  ImageBrief as ImageBriefView,
+  ImageCandidate,
+  ImageGenerationStatus,
+  SelectionSpotsResponse,
+} from '../../contract/api.js';
 import { AgentError, ContentChangedError, InvalidInputError, MediaError } from '../errors.js';
-import { splitTopLevelBlocks } from '../html-blocks.js';
+import { splitTopLevelBlocks, type TopLevelBlock } from '../html-blocks.js';
 import type { AgentRunStatus, JobRow, ImageCandidateRow } from '../repository.js';
 import {
   buildImagePrompt,
@@ -19,6 +24,7 @@ import {
 } from '../image-generation.js';
 import { checkUserNote } from '../../contract/user-note.js';
 import {
+  blockMedia,
   checkSelectionImage,
   locateSelection,
   normalizeSelectionText,
@@ -26,8 +32,8 @@ import {
   selectionSpotAnchor,
   selectionSpots,
   SELECTION_SPOTS_CHANGED_MESSAGE,
-  spotEdges,
-  spotEdgesMatch,
+  type SelectionSpot,
+  type SpotBlock,
 } from '../../contract/selection-image.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import { sha256Of } from '../../media/upload.js';
@@ -292,31 +298,41 @@ export class ImagesModule {
   }
 
   /**
+   * 「用此段配圖」的位置選項（D-037，P5-T038 第二輪審查）：**唯讀**，不建任何東西。
+   * 在 `contentHash` 那一版（必須是目前這一版，打字模式由畫面先自動存）上定位選取，回傳圖可以放的位置。
+   * 位置一律由後端在存好的那一版上算：畫面只顯示、送出時帶回 `spot` 與這裡回的 `contentHash`。
+   * 圖片、分隔線、嵌入內容算真的區塊（`blockMedia`），空段落不算。
+   */
+  selectionImageSpots(
+    uuid: string,
+    input: { selection: string; contentHash: string },
+  ): SelectionSpotsResponse {
+    const job = this.ctx.requireJob(uuid);
+    const revisionRow = this.ctx.requireRevision(job);
+    this.ctx.assertNoAppPassword(input.selection);
+    const { spots } = this.locateForSelection(input.selection, input.contentHash, revisionRow);
+    return {
+      contentHash: revisionRow.content_hash,
+      spots: spots.map(({ spot, kind, label }) => ({ spot, kind, label })),
+      basis: selectionBasisLabel(input.selection),
+    };
+  }
+
+  /**
    * 選一段文字「用此段配圖」（D-037，P5-T038）。流程跟 `requestImageAtPosition` 同一套（先擋、建使用者那條需求、
    * 同一趟開始生圖不等它畫完），差別：
    *
-   * - 選取文字照共用規則驗字數（10～3000，超過不截斷），用**目前這一版**重新定位（忽略空白、可跨段，
+   * - 選取文字照共用規則驗字數（10～3000，超過不截斷），在 `contentHash` 那一版定位（忽略空白、可跨段，
    *   `locateSelection`）：找不到或出現不只一次都拒絕（400）。
-   * - 圖放哪裡由使用者選（`spot`：0＝這段開頭、中間＝選取內第 k 段之後、最後＝這段結尾，`selectionSpots`），
-   *   錨點照「在這裡插圖」同一套（「這段開頭」先引用開頭那段、放在它之前）。位置只影響放哪，不影響 prompt。
-   * - `spotCount`（選填）是畫面上看到的位置個數、`spotBefore`／`spotAfter`（選填）是所選位置兩側的字（`spotEdges`），
-   *   跟這裡用目前這一版算的不一樣就拒絕（400），不猜。
+   * - `contentHash` 是位置選項來源那一版（`selectionImageSpots` 回的）。目前已經不是那一版就 409「文章剛被改過…」，
+   *   不猜位置。`spot` 照同一套 `selectionSpots` 在那一版上找；錨點照「在這裡插圖」同一套。位置只影響放哪，不影響 prompt。
    * - prompt 用 `buildSelectionImagePrompt`：選取文字為主，文章標題與所在小節標題只當背景。
    * - purpose 記卡片上要講的依據（「依選取段落：『…』（共 N 字）」）。
    * - 選取文字、標題、那句話、組好的 prompt 有 WordPress 密碼一律先擋（D-023）。
    */
   async requestImageFromSelection(
     uuid: string,
-    input: {
-      selection: string;
-      spot?: number;
-      spotCount?: number;
-      spotBefore?: string;
-      spotAfter?: string;
-      contentHash: string;
-      note?: string | null;
-      timeoutMs?: number;
-    },
+    input: { selection: string; spot?: number; contentHash: string; note?: string | null; timeoutMs?: number },
   ): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
     const job = this.ctx.requireJob(uuid);
     this.ctx.assertMutable(job);
@@ -324,32 +340,11 @@ export class ImagesModule {
 
     this.ctx.assertNoAppPassword(input.note, input.selection);
     const note = this.checkedNote(input.note);
-    const checked = checkSelectionImage(input.selection);
-    if (!checked.ok) throw new InvalidInputError(checked.message);
-    this.assertShownRevision(input.contentHash, revisionRow);
-
-    const blocks = splitTopLevelBlocks(revisionRow.rendered_html ?? '');
-    const located = locateSelection(blocks, input.selection);
-    if (!located.ok) throw new InvalidInputError(located.message);
-    const spots = selectionSpots(blocks, located.first, located.last);
-    // 畫面上的位置是用存檔前的畫面算的；打字模式存檔整理改了段落結構時編號會對到別處：個數對不上就不猜。
-    if (input.spotCount !== undefined && input.spotCount !== spots.length) {
-      throw new InvalidInputError(SELECTION_SPOTS_CHANGED_MESSAGE);
-    }
+    const { blocks, located, spots } = this.locateForSelection(input.selection, input.contentHash, revisionRow);
     const wanted = input.spot ?? 0;
     const spot = spots.find((candidate) => candidate.spot === wanted);
     if (spot === undefined) {
       throw new InvalidInputError(`位置 ${wanted} 不在選取範圍內（可用的是 0 到 ${spots[spots.length - 1]!.spot}）`);
-    }
-    // 位置個數一樣、邊界卻挪了（段落被拆開／合併）：比邊界兩側的字（Codex 審查 P2）。
-    if (
-      (input.spotBefore !== undefined || input.spotAfter !== undefined) &&
-      !spotEdgesMatch(
-        { before: input.spotBefore ?? '', after: input.spotAfter ?? '' },
-        spotEdges(blocks, spot.afterBlockIndex),
-      )
-    ) {
-      throw new InvalidInputError(SELECTION_SPOTS_CHANGED_MESSAGE);
     }
     await this.assertCanStartUserImage(job);
     this.recheckAfterAwait(job, revisionRow.id);
@@ -381,6 +376,30 @@ export class ImagesModule {
       },
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     });
+  }
+
+  /**
+   * 驗字數、確認 `contentHash` 是目前這一版（不是就 409「文章剛被改過」）、在那一版定位選取、算位置選項。
+   * 位置選項與送出共用這一份，兩邊才一定一樣。
+   */
+  private locateForSelection(
+    selection: string,
+    contentHash: string,
+    revisionRow: { content_hash: string; rendered_html: string | null },
+  ): {
+    blocks: (TopLevelBlock & SpotBlock)[];
+    located: { first: number; last: number };
+    spots: SelectionSpot[];
+  } {
+    const checked = checkSelectionImage(selection);
+    if (!checked.ok) throw new InvalidInputError(checked.message);
+    if (contentHash !== revisionRow.content_hash) {
+      throw new ContentChangedError(SELECTION_SPOTS_CHANGED_MESSAGE, { expected: contentHash, current: revisionRow.content_hash });
+    }
+    const blocks = splitTopLevelBlocks(revisionRow.rendered_html ?? '').map((block) => ({ ...block, media: blockMedia(block) }));
+    const located = locateSelection(blocks, selection);
+    if (!located.ok) throw new InvalidInputError(located.message);
+    return { blocks, located, spots: selectionSpots(blocks, located.first, located.last) };
   }
 
   /** 跟前端計數、zod 同一套算法：摺疊空白之後數 code point（contract/user-note.ts）。 */

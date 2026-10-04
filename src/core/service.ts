@@ -15,6 +15,7 @@ import type {
   Revision,
   ReviewProposal as ReviewProposalView,
   ReviewResolveResult,
+  SelectionSpotsResponse,
   SlugSuggestionResponse,
   FactCheckListResponse,
   FactCheckRunResult,
@@ -304,7 +305,11 @@ export class CoreService {
     return this.ctx.images.requestImageAtPosition(uuid, input);
   }
 
-  requestImageFromSelection(uuid: string, input: { selection: string; spot?: number; spotCount?: number; spotBefore?: string; spotAfter?: string; contentHash: string; note?: string | null; timeoutMs?: number }): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
+  selectionImageSpots(uuid: string, input: { selection: string; contentHash: string }): SelectionSpotsResponse {
+    return this.ctx.images.selectionImageSpots(uuid, input);
+  }
+
+  requestImageFromSelection(uuid: string, input: { selection: string; spot?: number; contentHash: string; note?: string | null; timeoutMs?: number }): Promise<{ brief: ImageBriefView; generation: Promise<ImageCandidate> }> {
     return this.ctx.images.requestImageFromSelection(uuid, input);
   }
 

@@ -2,13 +2,8 @@ import type { ImageGenerationStatus } from '../service/types.js';
 import {
   checkSelectionImage,
   excerptOf,
-  locateSelection,
   selectionImageLength,
-  selectionSpots,
-  spotEdges,
-  type SelectionSpot,
 } from '../../contract/selection-image.js';
-import type { PositionBlock } from '../../contract/position-anchor.js';
 
 /**
  * 選一段文字「用此段配圖」（D-037，P5-T038）畫面的判斷。規則本身在共用契約 `contract/selection-image.ts`；
@@ -63,48 +58,21 @@ export function capsuleNotes(input: {
 }
 
 /**
- * 送出前讓使用者選的位置（「這段開頭」預設、兩段之間、「這段結尾」）。用畫面上的正文區塊（完整文字）定位，
- * 規則跟後端同一份。找不到或不只一處時回 `message`：照樣讓人送（只有「這段開頭」），後端會再判斷並講原因。
- */
-export function selectionImageSpots(
-  blockTexts: readonly string[],
-  text: string,
-): { spots: SelectionSpot[]; message: string | null; blocks: PositionBlock[] } {
-  const blocks = blockTexts.map((value) => ({ text: value.replace(/\s+/g, ' ').trim() }));
-  const located = locateSelection(blocks, text);
-  if (!located.ok) {
-    return { spots: [{ spot: 0, kind: 'start', afterBlockIndex: -1, label: '這段開頭' }], message: located.message, blocks };
-  }
-  return { spots: selectionSpots(blocks, located.first, located.last), message: null, blocks };
-}
-
-/**
- * 送出時跟著位置一起帶的核對資料（Codex 審查 P2）：畫面上看到幾個位置（`spotCount`），以及所選位置兩側的字
- * （`spotBefore`／`spotAfter`，`spotEdges`）。後端用存好的那一版算出來對不上就拒絕，不讓圖默默放錯。
- * 畫面上定位不到選取時什麼都不帶，交給後端自己定位。
- */
-export function selectionImageSpotHints(
-  result: { spots: readonly SelectionSpot[]; message: string | null; blocks: readonly PositionBlock[] },
-  spot: number,
-): { spotCount?: number; spotBefore?: string; spotAfter?: string } {
-  if (result.message !== null) return {};
-  const chosen = result.spots.find((candidate) => candidate.spot === spot);
-  if (chosen === undefined) return { spotCount: result.spots.length };
-  const edges = spotEdges(result.blocks, chosen.afterBlockIndex);
-  return { spotCount: result.spots.length, spotBefore: edges.before, spotAfter: edges.after };
-}
-
-/**
- * 「用此段配圖」面板開著時，文章被**別處**改了（不是這次打字中自己存的那幾版、也不是正在送出時的自動存）：
- * 面板上的位置選項是照舊版算的，要關掉請使用者重選（Codex 審查 P2）。
+ * 「用此段配圖」面板開著時，位置選項還能不能用（P5-T038 審查）。選項是後端照 `spotsHash` 那一版算的：
+ * - 畫面知道的目前版本（`currentHash`：打字中最後存的那一版，否則工作區的版本）已經不是那一版 → 過時。
+ * - 校樣的版本換成**別處**改的（不是這次打字中自己存的那幾版）→ 過時。
+ * 正在送出時不判斷（送出本身會照後端的 409 講）。
  */
 export function selectionPickStale(state: {
+  spotsHash: string | null;
+  currentHash: string | undefined;
   openedKey: string;
   currentKey: string;
   own: readonly string[];
   sending: boolean;
 }): boolean {
   if (state.sending) return false;
+  if (state.spotsHash !== null && state.currentHash !== undefined && state.spotsHash !== state.currentHash) return true;
   return state.currentKey !== state.openedKey && !state.own.includes(state.currentKey);
 }
 
@@ -128,4 +96,18 @@ export function selectionImageContentHash(state: {
   jobHash: string | undefined;
 }): string | undefined {
   return state.editing ? (state.lastSaved ?? state.jobHash) : state.jobHash;
+}
+
+/**
+ * 重讀的結果能不能寫進畫面（P5-T038 第二輪審查）：元件還在、是最新一次送出的重讀、**而且還是發起的那一篇**。
+ * Workspace 換篇時沿用同一個元件，舊篇的 `refresh` 若是最後一個送出的，只看世代會把舊篇的資料寫進新篇的畫面。
+ */
+export function refreshStillCurrent(state: {
+  alive: boolean;
+  mine: number;
+  latest: number;
+  current: string;
+  origin: string;
+}): boolean {
+  return state.mine === state.latest && stillOnJob({ alive: state.alive, current: state.current, origin: state.origin });
 }
