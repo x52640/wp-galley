@@ -52,7 +52,10 @@ export interface SetupFiles {
   readonly envExampleFile: string;
   readonly siteConfigFile: string;
   readonly backupsDir: string;
-  /** 回應裡的備份路徑相對這裡。 */
+  /**
+   * 資料目錄（P8-T003）。回應裡的備份路徑從 P8-T003 起是完整路徑（資料目錄在 ~/Library 底下，
+   * 只給 `backups/…` 使用者找不到檔），這一欄目前沒有用到；`routes/setup.ts` 還在傳，見 known-issues。
+   */
   readonly rootDir: string;
 }
 
@@ -93,6 +96,11 @@ export interface BuildAppOptions {
    * 讓工作區與媒體目錄指到暫存路徑，不會寫進專案的 drafts/。
    */
   readonly core?: CoreService;
+  /**
+   * 資料目錄（P8-T003）：沒注入 core 時，新建的 CoreService 把工作區與圖片放這底下。
+   * 不給就是 `resolveDataDir()`。測試一律給暫存目錄。
+   */
+  readonly dataDir?: string;
   readonly version?: string;
   /** 設定精靈寫檔的位置。不給＝精靈只能讀、不能寫（見 SetupFiles）。 */
   readonly setupFiles?: SetupFiles;
@@ -136,6 +144,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         site: config.wordpress ? siteOf(config.wordpress) : null,
         scrub,
         factCheckFetcher: options.factCheckFetcher ?? realFactCheckFetcher(options.version ?? '0.1.0'),
+        ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
       }),
     secrets,
     setupFiles: options.setupFiles ?? null,

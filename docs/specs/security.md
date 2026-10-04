@@ -70,7 +70,11 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   （**P5-T036 合併後成立**）。做不到全關的地方（agy 沒有停用工具／MCP 的參數、Codex 的 plugins 類功能未關）見「刻意接受的限制」。
   理由與仍然禁止的清單：[ADR-0001](../adr/0001-agent-no-network.md)「修訂」；各趟實際參數：[agent-cli.md](agent-cli.md)。
   每次執行要有 timeout、取消機制、最大輸出、concurrency 1，工作目錄設為隔離的 job workspace。
-- `data/`、`drafts/`、`generated-images/`、`backups/`、`.env`、SQLite 全部進 `.gitignore`。
+- 使用者資料（`.env`、站台設定檔、SQLite、`drafts/`、`generated-images/`、`backups/`）放在**程式資料夾外**的資料目錄
+  （D-035，P8-T003；位置見 [architecture.md](architecture.md)「本機資料」），不在 repo 裡，也就不可能被 commit。
+  資料目錄**新建時權限 0700**（已經存在的不改）。程式資料夾的舊位置仍留在 `.gitignore`（升級前的舊資料可能還在）。
+- **測試不碰資料目錄**：測試一律注入暫存路徑；`resolveDataDir()` 在測試行程（`VITEST`）裡沒設 `GALLEY_DATA_DIR`
+  時回系統暫存目錄，忘了注入的測試也寫不到真的資料目錄。
 - 進到需要 WordPress 網址、Application Password 等資料時向使用者索取，不要預先寫進
   任何檔案。使用者自己在設定精靈填的，照下方「設定精靈寫入的秘密」存進 `.env`。
 
@@ -137,10 +141,11 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
 
 精靈要收 Application Password、要寫檔，是整個專案唯一「從瀏覽器收秘密」的地方。
 
-- **存在哪裡：`.env`**（專案根目錄，已在 `.gitignore`）。跟手動設定是同一個檔，啟動流程不用改。
+- **存在哪裡：資料目錄的 `.env`**（P8-T003 起；以前在專案根目錄）。跟手動設定是同一個檔，啟動時從這裡讀。
+  第一次啟動從程式資料夾搬過來時是**複製**，複製後設 0600；舊的那份不刪，啟動訊息會提醒使用者裡面有密碼、確認後自己刪。
   - 只改 `WORDPRESS_URL`、`WORDPRESS_USERNAME`、`WORDPRESS_APP_PASSWORD` 三行；其他行（`APP_PORT`、
     註解、使用者自己加的東西）原樣保留。同一個鍵出現多次時留第一行、刪掉其餘（避免誰生效不明）。
-  - 檔案不存在時以 `.env.example` 為底產生。寫法是先寫同目錄暫存檔再改名（寫到一半當掉不會留下半個
+  - 檔案不存在時以程式資料夾的 `.env.example` 為底產生。寫法是先寫同目錄暫存檔再改名（寫到一半當掉不會留下半個
     `.env`），**權限一律 0600**（原本的 `.env` 若是 0644 也會被收緊）。
   - 密碼存成去掉空白的 24 個英數字（WordPress 驗證前本來就會去掉空白）。值只含英數與 `._@:/+-` 時
     直接寫（網址、密碼、一般帳號都是這樣）；有其他字元（空白、`#`、中文…）才用單引號包起來
@@ -179,9 +184,9 @@ sanitize 與結構驗證；比對用的是內容本身（正規化後的 HTML）
   沒有就立旗子，旗子立著的期間發布、上傳、換圖、放圖、設封面一律拒絕，存完放下。`reconfigure()`
   本身再檢查一次沒有動作在跑。
 - **換站不會打到錯的站**：規則見 [wordpress-site.md](wordpress-site.md)「換站」。
-- 精靈寫的站台設定檔（`config/publish-targets.json`）沒有秘密；已經有檔時的規則見
+- 精靈寫的站台設定檔（資料目錄的 `publish-targets.json`）沒有秘密；已經有檔時的規則見
   [wordpress-site.md](wordpress-site.md)「設定精靈」。
-- 測試一律注入暫存路徑；`buildApp` 沒拿到路徑時寫入路由回 503，不會退回專案裡真的 `.env`。
+- 測試一律注入暫存路徑；`buildApp` 沒拿到路徑時寫入路由回 503，不會退回資料目錄裡真的 `.env`。
 
 ## 取回器（AI 查證，D-034）
 

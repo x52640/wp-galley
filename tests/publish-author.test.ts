@@ -510,6 +510,8 @@ async function buildServer(role: Role, siteConfig: Record<string, unknown> | nul
   app = await buildApp({
     config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'silent' }),
     db: db.handle,
+    // 工作區與圖片寫進暫存目錄，不寫進資料目錄（P8-T003）。
+    dataDir: db.dir,
     templates: await loadTemplateRegistry(paths.templates),
     agents: new AgentRegistry({ adapters: [] }),
     targets: await loadPublishTargets(files.siteConfigFile),

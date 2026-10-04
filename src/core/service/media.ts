@@ -340,7 +340,7 @@ export class MediaModule {
     }
 
     this.ctx.repo.deleteMedia(assetId);
-    rmSync(asset.local_path, { force: true });
+    rmSync(this.ctx.localFile(asset.local_path), { force: true });
     this.ctx.repo.insertEvent({
       jobId: job.id,
       revisionId: null,

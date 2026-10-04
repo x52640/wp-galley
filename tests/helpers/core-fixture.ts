@@ -154,7 +154,8 @@ export function defaultWordPressHandler(): (request: RecordedRequest) => MockRes
 
 export async function createCoreFixture(options: CoreFixtureOptions = {}): Promise<CoreFixture> {
   const db = createTestDatabase();
-  const workDir = mkdtempSync(join(tmpdir(), 'wp-publisher-core-'));
+  // 資料目錄含空白（像 Application Support）：路徑處理不能因空白出錯（P8-T003）。
+  const workDir = mkdtempSync(join(tmpdir(), 'wp-publisher core '));
 
   let mock: MockWordPress | null = null;
   let client: WordPressClient | null = null;
@@ -176,6 +177,7 @@ export async function createCoreFixture(options: CoreFixtureOptions = {}): Promi
     targets: options.targets ?? (await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json'))),
     agents: new AgentRegistry({ adapters: options.adapters ?? [] }),
     wordpress: client,
+    dataDir: workDir,
     draftsDir: join(workDir, 'drafts'),
     mediaDir: join(workDir, 'media'),
     ...(options.scrub === undefined ? {} : { scrub: options.scrub }),

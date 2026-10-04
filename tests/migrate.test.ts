@@ -3,6 +3,7 @@ import { createTestDatabase, type TestDatabase } from './helpers/test-db.js';
 import { runMigrations, listAppliedMigrations } from '../src/db/migrate.js';
 import { migrations } from '../src/db/migrations/index.js';
 import { migration009 } from '../src/db/migrations/009-factcheck.js';
+import { migration010 } from '../src/db/migrations/010-relative-paths.js';
 import { openDatabase, type DatabaseSync } from '../src/db/index.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -273,6 +274,90 @@ describe('009：AI 查證的紀錄與結果（P6-T004）', () => {
       expect(handle.prepare('SELECT COUNT(*) AS n FROM factcheck_findings').get()).toEqual({ n: 0 });
     } finally {
       cleanup();
+    }
+  });
+});
+
+describe('010：DB 改存相對資料目錄的路徑（P8-T003）', () => {
+  const ROOT = '/Users/someone/My Programs/wp_galley%old';
+  function at009(): { handle: DatabaseSync; cleanup: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-publisher-m010-'));
+    const handle = openDatabase(join(dir, 'test.sqlite'));
+    runMigrations(handle, migrations.slice(0, 9));
+    const job = handle.prepare('INSERT INTO jobs (id, uuid, state, workspace_path) VALUES (?, ?, ?, ?)');
+    job.run(1, 'a', 'SOURCE', `${ROOT}/drafts/a`);
+    job.run(2, 'b', 'SOURCE', '/elsewhere/drafts/b'); // 使用者自己設過別處
+    job.run(3, 'c', 'SOURCE', 'drafts/c'); // 已經是相對的
+    job.run(4, 'd', 'SOURCE', null);
+    job.run(5, 'e', 'SOURCE', `${ROOT}-other/drafts/e`); // 前綴相似但不是同一個資料夾
+    job.run(6, 'f', 'SOURCE', `${ROOT.replace('%', 'X')}/drafts/f`); // % 不能當萬用字元
+    const media = handle.prepare(
+      "INSERT INTO media_assets (id, job_id, local_path, mime_type, byte_size, sha256) VALUES (?, 1, ?, 'image/png', 1, 's')",
+    );
+    media.run(1, `${ROOT}/generated-images/a/s.png`);
+    media.run(2, '/elsewhere/x.png');
+    handle.exec(`
+      INSERT INTO image_briefs (id, job_id, brief_key, purpose, prompt, aspect_ratio, alt_text)
+        VALUES (1, 1, 'k', 'p', 'p', '1:1', 'a');
+    `);
+    const candidate = handle.prepare(
+      "INSERT INTO image_candidates (id, job_id, image_brief_id, local_path, mime_type, byte_size, sha256) VALUES (?, 1, 1, ?, 'image/png', 1, 's')",
+    );
+    candidate.run(1, `${ROOT}/generated-images/a/candidates/s.png`);
+    candidate.run(2, 'generated-images/a/candidates/t.png');
+    return { handle, cleanup: () => { handle.close(); rmSync(dir, { recursive: true, force: true }); } };
+  }
+  const list = (): readonly (typeof migrations)[number][] => [...migrations.slice(0, 9), migration010];
+  const column = (handle: DatabaseSync, sql: string): unknown[] =>
+    (handle.prepare(sql).all() as { v: unknown }[]).map((row) => row.v);
+
+  it('舊程式根目錄開頭的三個欄位改成相對；別處、已相對、NULL、相似前綴原樣不動', () => {
+    const { handle, cleanup } = at009();
+    try {
+      runMigrations(handle, list(), { legacyRoot: ROOT });
+      expect(column(handle, 'SELECT workspace_path AS v FROM jobs ORDER BY id')).toEqual([
+        'drafts/a',
+        '/elsewhere/drafts/b',
+        'drafts/c',
+        null,
+        `${ROOT}-other/drafts/e`,
+        `${ROOT.replace('%', 'X')}/drafts/f`,
+      ]);
+      expect(column(handle, 'SELECT local_path AS v FROM media_assets ORDER BY id')).toEqual([
+        'generated-images/a/s.png',
+        '/elsewhere/x.png',
+      ]);
+      expect(column(handle, 'SELECT local_path AS v FROM image_candidates ORDER BY id')).toEqual([
+        'generated-images/a/candidates/s.png',
+        'generated-images/a/candidates/t.png',
+      ]);
+      // 暫存的參數表用完就收掉，不留在 DB 裡。
+      expect(() => handle.prepare('SELECT * FROM temp.migration_env').all()).toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('根目錄尾端多一個斜線也一樣；沒給舊根目錄就什麼都不改，重跑不重複套用', () => {
+    const a = at009();
+    try {
+      runMigrations(a.handle, list(), { legacyRoot: `${ROOT}/` });
+      expect(column(a.handle, 'SELECT workspace_path AS v FROM jobs WHERE id = 1')).toEqual(['drafts/a']);
+    } finally {
+      a.cleanup();
+    }
+    const b = at009();
+    try {
+      runMigrations(b.handle, list());
+      expect(column(b.handle, 'SELECT workspace_path AS v FROM jobs WHERE id = 1')).toEqual([`${ROOT}/drafts/a`]);
+      const applied = listAppliedMigrations(b.handle);
+      expect(applied.map((row) => row.id)).toContain('010');
+      // 已套用：之後再給舊根目錄也不會再跑一次。
+      runMigrations(b.handle, list(), { legacyRoot: ROOT });
+      expect(listAppliedMigrations(b.handle)).toEqual(applied);
+      expect(column(b.handle, 'SELECT workspace_path AS v FROM jobs WHERE id = 1')).toEqual([`${ROOT}/drafts/a`]);
+    } finally {
+      b.cleanup();
     }
   });
 });

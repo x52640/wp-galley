@@ -62,7 +62,7 @@ export class JobsModule {
       title: this.ctx.titleOf(templateData) ?? input.title ?? null,
       targetId: this.ctx.targetIds.get(target.key) ?? null,
       state: 'SOURCE',
-      workspacePath: workspace,
+      workspacePath: this.ctx.storedPath(workspace),
     });
 
     this.ctx.repo.insertRevision({

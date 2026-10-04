@@ -1,7 +1,7 @@
 ---
 id: P8-T003
 phase: 8
-status: ready
+status: in_progress
 depends_on: []
 specs: [architecture.md, security.md, wordpress-site.md]
 write_paths: ["src/config/", "src/server/main.ts", "src/server/app.ts", "src/db/", "src/core/", "src/agents/", "src/media/", "src/wordpress/setup.ts", "tests/", "docs/specs/architecture.md", "docs/specs/security.md", "docs/specs/wordpress-site.md", "docs/specs/agent-tasks.md", "docs/known-issues.md", "docs/tasks/P8-T003-user-data-dir.md", "docs/CURRENT_TASK.md", "README.md", "README.zh-TW.md"]
@@ -81,15 +81,20 @@ D-035。之後要做成可下載的 Mac App 或 Homebrew 安裝（都還沒裁�
 3. 打開一篇草稿真跑一次校稿、一次 Codex 生圖（確認 Agent 在新工作目錄不出錯）。只存草稿，不公開。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新（新增或搬動功能：architecture.md 功能地圖）
-- [ ] 留下的殘餘已寫進 `docs/known-issues.md`
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新（新增或搬動功能：architecture.md 功能地圖）
+- [x] 留下的殘餘已寫進 `docs/known-issues.md`
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：派實作 subagent
+- 最後完成：獨立審查四條修正（2026-10-04，subagent，未 commit）——
+  #1 標記檔 `.galley-data.json` 取代「DB 在不在」判斷＋舊位置有沒搬過去的 DB 時大聲警告＋git worktree 預設用 `<程式資料夾>/.galley-data`（`.gitignore` 經主 session 放行加一行）；
+  #2 鎖檔 `.migrating.lock`（記 pid、死掉的接手）、暫存檔名帶 pid＋亂數、快照唯讀開啟檢查且要有 `schema_migrations`；
+  #3 只有 `.env` 沒 DB 的情況靠標記檔不再重搬（補測試）；#4 known-issues 改成建議把舊資料複製進新 clone 再啟動一次，不再建議指向舊 clone
+- 已通過驗證：`npm run verify` 綠（87 檔／1908 測試）；migration 010 在本機 DB 副本上驗過（第一輪：絕對路徑 26 筆全轉相對、剩 0、integrity_check ok、foreign_key_check 無錯；本輪沒改 010）
+- 下一步：主 session 驗證 → 再審 → 使用者手動驗證（上方「手動驗證」三步，先備份）
 - Blocker：無
+- 判斷：精靈完成頁的備份路徑選「完整路徑」；舊程式根目錄由 `runMigrations` 的 `legacyRoot` 放進暫存表 `temp.migration_env` 給 010 讀（SQL 固定）；
+  `resolveDataDir()` 在 `VITEST` 行程裡沒設 `GALLEY_DATA_DIR` 時回系統暫存目錄；沒有標記但資料目錄已有 DB 時不覆蓋、補標記（migratedFrom null）並警告
 
 ## 完成結果

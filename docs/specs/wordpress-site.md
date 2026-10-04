@@ -4,7 +4,7 @@
 > 前半是**任何 WordPress 站**共通的部分（D-016）；後半「作者站台實況」是 www.remusplus.com 的
 > **實測事實**，據此做的範圍決定在 [ADR-0003](../adr/0003-homepage-out-of-mvp.md)
 > （首頁移出 MVP）與 [ADR-0004](../adr/0004-body-slot-only.md)（只送正文）。
-> 程式：`src/wordpress/`、`config/publish-targets.json`（本機檔，範例見 [templates.md](templates.md)「站台設定檔」）。
+> 程式：`src/wordpress/`、資料目錄的 `publish-targets.json`（本機檔，P8-T003 起不在程式資料夾，位置見 [architecture.md](architecture.md)「本機資料」；範例見 [templates.md](templates.md)「站台設定檔」）。
 
 ## 通用站台（任何 WordPress）
 
@@ -124,12 +124,12 @@ http 只准 loopback（本機測試站）。能不能發看 `users/me` 的 `capa
   `taxonomyRestBase` 用站上回報的 `rest_base`（通常是 `categories`）。D-004 不變：`allowCreateTerms: false`。
 - 寫出來的 target 欄位與順序跟 `config/publish-targets.example.json` 一字不差（有測試守著）。
 
-**已經有 `config/publish-targets.json` 時（例如作者的 read-think／diary）**：
+**已經有站台設定檔（資料目錄的 `publish-targets.json`）時（例如作者的 read-think／diary）**：
 
 - 既有的 target **原樣保留**（寫回的是檔案裡的原文，不補預設值、不改順序），精靈不刪任何東西；只能停用／打開（見下方「停用類型」）。
 - 精靈只加 `post`／`page`。同 key 已經存在時，畫面上要**明確勾「取代」**才換；沒勾就整個請求 409、檔案不動。
 - 有既有檔時預設什麼都不勾、開關照檔案裡的狀態，按鈕是「不改，下一步」。
-- 真的要寫之前，先把原本的檔複製到 `backups/publish-targets-<時間到毫秒>-<亂數>.json`（不覆蓋既有檔，同一秒存兩次也各有一份），完成頁講出備份路徑。
+- 真的要寫之前，先把原本的檔複製到資料目錄的 `backups/publish-targets-<時間到毫秒>-<亂數>.json`（不覆蓋既有檔，同一秒存兩次也各有一份），完成頁講出備份的**完整路徑**（P8-T003：資料目錄在 `~/Library` 底下，只給相對路徑找不到檔）。
 - 磁碟上的檔壞了（不是 JSON、格式不對）就不覆寫，請使用者先處理。
 - 換了站（例如從 remusplus 換到別的站）不會自動移除舊站的 target；那些 target 的連線診斷會報錯，
   要刪請手動改檔。

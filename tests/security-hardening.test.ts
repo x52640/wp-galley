@@ -57,6 +57,8 @@ async function build(options: BuildOptions = {}): Promise<FastifyInstance> {
   app = await buildApp({
     config: loadConfig(env),
     db: db.handle,
+    // 工作區與圖片寫進暫存目錄，不寫進資料目錄（P8-T003）。
+    dataDir: db.dir,
     templates: await loadTemplateRegistry(paths.templates),
     agents: options.agents ?? new AgentRegistry({ adapters: [] }),
     targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),

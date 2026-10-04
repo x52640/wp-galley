@@ -1,30 +1,160 @@
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 
-/** 專案根目錄（src/config/ 往上兩層）。 */
+/**
+ * 所有路徑的家。分兩種（D-035，P8-T003）：
+ *
+ * - **程式資料夾**（`projectRoot`）：程式本身——模板、範例設定、`.env.example`、建置好的 UI。
+ *   升級（之後可能的 Mac App／Homebrew、或作者自己重 clone）會整個換掉。
+ * - **資料目錄**（`resolveDataDir()`）：使用者的東西——`.env`、站台設定檔、SQLite、稿件、圖片、備份。
+ *   換掉程式資料夾也不會動到。
+ */
+
+/** 程式資料夾（src/config/ 往上兩層）。P8-T003 之前使用者資料也放這裡（舊位置）。 */
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/** 程式本身的路徑（跟著程式走，不是使用者資料）。 */
 export const paths = {
   root: projectRoot,
-  /** SQLite 與其他本機狀態。 */
-  data: join(projectRoot, 'data'),
-  /** 每個 job 的隔離工作區；Agent 的 cwd 只能在這裡面。 */
-  drafts: join(projectRoot, 'drafts'),
-  generatedImages: join(projectRoot, 'generated-images'),
-  /** 發布前快照。 */
-  backups: join(projectRoot, 'backups'),
   /** 模板資料夾（受信任的本機設定）。 */
   templates: join(projectRoot, 'templates'),
+  /** 站台設定範例（`publish-targets.example.json`、`examples/`）。本機站台設定檔不在這裡，在資料目錄。 */
   config: join(projectRoot, 'config'),
+  envExampleFile: join(projectRoot, '.env.example'),
   uiDist: join(projectRoot, 'dist', 'ui'),
 } as const;
 
-export const databaseFile = join(paths.data, 'publisher.sqlite');
+export class DataDirError extends Error {
+  override readonly name = 'DataDirError';
+}
 
-/** 啟動時建立需要的本機目錄；全部已列入 .gitignore。 */
-export function ensureRuntimeDirectories(): void {
-  for (const dir of [paths.data, paths.drafts, paths.generatedImages, paths.backups]) {
+/** 資料目錄的名字（macOS 慣例首字大寫，其他平台照 XDG 慣例小寫）。 */
+const APP_DIR_MAC = 'Galley';
+const APP_DIR_XDG = 'galley';
+
+/**
+ * 資料目錄在哪：
+ * - `GALLEY_DATA_DIR`（絕對路徑）優先，給開發或想放別處的人；相對路徑直接報錯，不猜相對誰。
+ * - macOS：`~/Library/Application Support/Galley`。
+ * - 其他平台：`$XDG_DATA_HOME/galley`（XDG 規定要絕對路徑，相對的忽略），沒設就 `~/.local/share/galley`。
+ *
+ * **測試行程（vitest 會設 `VITEST`）沒設 `GALLEY_DATA_DIR` 時一律回系統暫存目錄底下的一個資料夾**：
+ * 哪個測試忘了注入路徑，也只會寫到暫存目錄，不可能碰到作者真的資料。
+ *
+ * **程式資料夾是 git worktree（`.git` 是檔案）時預設用 `<程式資料夾>/.galley-data`**：並行開發的 worktree
+ * 不共用全機那一個資料目錄（不然會讀到真的 `.env` 與 DB，也會搶先建出資料目錄、讓主 checkout 以為已經搬過）。
+ * 主 checkout（`.git` 是資料夾）與不是 git 的安裝照舊。
+ */
+export function resolveDataDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+  programRoot: string = projectRoot,
+): string {
+  const override = env['GALLEY_DATA_DIR'];
+  if (override !== undefined && override.trim() !== '') {
+    if (!isAbsolute(override)) {
+      throw new DataDirError(`GALLEY_DATA_DIR 要是絕對路徑（例如 /Users/你/Galley），現在是「${override}」`);
+    }
+    return resolve(override); // 去掉尾端斜線與 `..`
+  }
+  if (env['VITEST'] !== undefined) return join(tmpdir(), 'galley-vitest-data');
+  if (isGitWorktree(programRoot)) return join(programRoot, WORKTREE_DATA_DIR);
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', APP_DIR_MAC);
+  const xdg = env['XDG_DATA_HOME'];
+  if (xdg !== undefined && isAbsolute(xdg)) return join(xdg, APP_DIR_XDG);
+  return join(home, '.local', 'share', APP_DIR_XDG);
+}
+
+/** git worktree 裡的資料目錄名（已在 `.gitignore`）。 */
+export const WORKTREE_DATA_DIR = '.galley-data';
+
+/** `.git` 是檔案＝git worktree（主 checkout 的 `.git` 是資料夾）。 */
+function isGitWorktree(root: string): boolean {
+  try {
+    return statSync(join(root, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export interface DataPaths {
+  /** 資料目錄本身。DB 裡存的相對路徑都相對這裡。 */
+  readonly dir: string;
+  /** WordPress 連線（手動填或設定精靈寫入，權限 0600）。 */
+  readonly envFile: string;
+  /** 本機站台設定檔（發布目標）。 */
+  readonly siteConfigFile: string;
+  /** SQLite 所在的資料夾。 */
+  readonly data: string;
+  readonly databaseFile: string;
+  /** 每個 job 的隔離工作區；Agent 的 cwd 只能在這裡面。 */
+  readonly drafts: string;
+  readonly generatedImages: string;
+  /** 發布前快照、設定精靈覆寫站台設定檔前的備份。 */
+  readonly backups: string;
+}
+
+export function dataPaths(dir: string): DataPaths {
+  return {
+    dir,
+    envFile: join(dir, '.env'),
+    siteConfigFile: join(dir, 'publish-targets.json'),
+    data: join(dir, 'data'),
+    databaseFile: join(dir, 'data', 'publisher.sqlite'),
+    drafts: join(dir, 'drafts'),
+    generatedImages: join(dir, 'generated-images'),
+    backups: join(dir, 'backups'),
+  };
+}
+
+/** P8-T003 之前的位置：程式資料夾底下的原路徑。第一次啟動從這裡複製到資料目錄。 */
+export function legacyDataPaths(root: string = projectRoot): Omit<DataPaths, 'dir'> {
+  return {
+    envFile: join(root, '.env'),
+    siteConfigFile: join(root, 'config', 'publish-targets.json'),
+    data: join(root, 'data'),
+    databaseFile: join(root, 'data', 'publisher.sqlite'),
+    drafts: join(root, 'drafts'),
+    generatedImages: join(root, 'generated-images'),
+    backups: join(root, 'backups'),
+  };
+}
+
+/** 建立資料目錄本身。是新建的才設 0700（裡面有 .env 與稿件）；已經有的不改使用者的設定。 */
+export function ensureDataDir(dir: string): void {
+  if (existsSync(dir)) return;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700); // mkdir 的 mode 會被 umask 吃掉，再設一次
+}
+
+/** 建立資料目錄與底下要用的資料夾。 */
+export function ensureDataDirectories(p: DataPaths): void {
+  ensureDataDir(p.dir);
+  for (const dir of [p.data, p.drafts, p.generatedImages, p.backups]) {
     mkdirSync(dir, { recursive: true });
   }
+}
+
+/** `child` 是否在 `parent` 底下（不含 `parent` 本身）。兩者都要先 resolve 過。 */
+export function isInsideDir(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel !== '' && !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+}
+
+/**
+ * DB 要存的路徑：在資料目錄裡就存相對路徑（`drafts/<uuid>`），以後資料目錄再搬也不會壞；
+ * 不在裡面（測試把目錄注入到別處）才存絕對路徑。
+ */
+export function toStoredPath(dataDir: string, absolute: string): string {
+  const base = resolve(dataDir);
+  const target = resolve(absolute);
+  return isInsideDir(base, target) ? relative(base, target) : target;
+}
+
+/** DB 讀出的路徑：相對的以資料目錄解析；舊資料的絕對路徑照舊用。 */
+export function fromStoredPath(dataDir: string, stored: string): string {
+  return isAbsolute(stored) ? stored : resolve(dataDir, stored);
 }

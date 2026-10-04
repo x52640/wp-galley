@@ -1,7 +1,7 @@
 import { constants as fsConstants } from 'node:fs';
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import type {
   PublishTargetSummary,
   SetupCheck,
@@ -737,12 +737,12 @@ export async function readSiteConfig(file: string): Promise<ExistingSiteConfig> 
     parsed = JSON.parse(text);
   } catch {
     throw new SetupConflictError(
-      '現有的 config/publish-targets.json 不是合法 JSON。精靈不會覆寫壞掉的檔：先修好或把它移走，再回來設定。',
+      `現有的站台設定檔（${file}）不是合法 JSON。精靈不會覆寫壞掉的檔：先修好或把它移走，再回來設定。`,
     );
   }
   if (!PublishTargetsFileSchema.safeParse(parsed).success) {
     throw new SetupConflictError(
-      '現有的 config/publish-targets.json 格式不對。精靈不會覆寫壞掉的檔：先修好或把它移走，再回來設定。',
+      `現有的站台設定檔（${file}）格式不對。精靈不會覆寫壞掉的檔：先修好或把它移走，再回來設定。`,
     );
   }
   const config = parsed as { targets: Record<string, unknown>[]; defaultAuthorId?: number };
@@ -817,7 +817,8 @@ export function applyDisabledTargets(
 
 /**
  * 寫站台設定檔。寫之前再用正式的 schema 驗一次；已經有檔就先複製一份到 backupsDir。
- * 回傳備份檔的路徑（相對 rootDir），沒有備份是 null。
+ * 回傳備份檔的**完整路徑**，沒有備份是 null。P8-T003 起資料目錄在 ~/Library 底下，
+ * 給相對路徑（`backups/…`）使用者找不到檔；`rootDir` 因此沒用到，留著是因為呼叫端還在傳（見 known-issues）。
  */
 export async function writeSiteConfig(
   file: string,
@@ -852,5 +853,5 @@ export async function writeSiteConfig(
     await copyFile(file, backup, fsConstants.COPYFILE_EXCL);
   }
   await writeFileAtomic(file, `${JSON.stringify(content, null, 2)}\n`, 0o644);
-  return backup === null ? null : relative(options.rootDir, backup);
+  return backup;
 }

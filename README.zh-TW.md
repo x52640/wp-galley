@@ -67,6 +67,13 @@ npm start                 # 打開 http://127.0.0.1:3000
 
 第一次打開會自動進**設定精靈**，不用先改任何設定檔。
 
+你的資料（連線設定、稿件、圖片、資料庫、備份）放在**資料目錄**，不在程式資料夾裡，升級或重新 clone 都不會弄丟：
+macOS 是 `~/Library/Application Support/Galley/`，Linux 是 `$XDG_DATA_HOME/galley`（沒設就 `~/.local/share/galley`）。
+想放別處就設環境變數 `GALLEY_DATA_DIR`（絕對路徑）。啟動時終端機會印出「資料目錄：…」。
+
+**從舊版升級**：以前資料放在程式資料夾裡。第一次啟動新版會自動把它們**複製**到資料目錄（舊的不刪），
+並在終端機列出舊資料的位置；確認舊稿件、舊圖都在之後再自己刪。舊的 `.env` 裡有密碼，記得一起刪。
+
 ## 設定精靈
 
 四步，每一步失敗都會講「卡在哪裡、下一步做什麼」：
@@ -112,8 +119,8 @@ npm start                 # 打開 http://127.0.0.1:3000
 
 ### 密碼存在哪裡
 
-精靈把網址、帳號、應用程式密碼寫進專案根目錄的 `.env`（權限 0600，只有你的帳號讀得到；
-已在 `.gitignore`，不會進 Git）。發布目標寫進 `config/publish-targets.json`（本機檔，也不進 Git）。
+精靈把網址、帳號、應用程式密碼寫進資料目錄的 `.env`（權限 0600，只有你的帳號讀得到；
+不在程式資料夾裡，不會進 Git）。發布目標寫進資料目錄的 `publish-targets.json`（本機檔，也不進 Git）。
 密碼只在按「測試連線」時從瀏覽器送到本機後端一次，之後任何畫面、回應、log 都不會再出現。
 細節見 [`docs/specs/security.md`](./docs/specs/security.md)「設定精靈寫入的秘密」。
 
@@ -134,9 +141,13 @@ Galley 直接呼叫你電腦上已經登入的官方 CLI，用的是你原本的
 
 ## 不用精靈、手動設定
 
+檔案放在資料目錄（macOS 的例子；Linux 換成 `~/.local/share/galley`，設了 `GALLEY_DATA_DIR` 就用它）：
+
 ```bash
-cp .env.example .env                                           # 填 WORDPRESS_URL、WORDPRESS_USERNAME、WORDPRESS_APP_PASSWORD
-cp config/publish-targets.example.json config/publish-targets.json
+DATA="$HOME/Library/Application Support/Galley"
+mkdir -p "$DATA" && chmod 700 "$DATA"
+cp .env.example "$DATA/.env" && chmod 600 "$DATA/.env"        # 填 WORDPRESS_URL、WORDPRESS_USERNAME、WORDPRESS_APP_PASSWORD
+cp config/publish-targets.example.json "$DATA/publish-targets.json"
 ```
 
 手動改 `.env` 要重新啟動才會生效。WordPress 相關三個變數要**一起填或一起留空**，只填一半會在啟動時報錯。
@@ -147,17 +158,17 @@ cp config/publish-targets.example.json config/publish-targets.json
 - AI 只回傳結構化資料，HTML 由固定程式產生；後端會用原始規則再驗一次 AI 的輸出。
 - AI CLI 在隔離的唯讀工作區執行，不授權它使用 shell、寫檔、連網或 WordPress 工具，有逾時、一次只跑一個；
   它也拿不到 WordPress 密碼。
-- 密碼只存在後端記憶體與 `.env`。
+- 密碼只存在後端記憶體與資料目錄的 `.env`。
 - 核准只能由本機畫面建立，內容一改核准就失效。
 
 細節見 [`docs/specs/security.md`](./docs/specs/security.md)。
 
-`.env`、`config/publish-targets.json`、`data/`、`drafts/`、`generated-images/`、`backups/` 都不進版控。
+使用者資料（`.env`、站台設定檔、`data/`、`drafts/`、`generated-images/`、`backups/`）都在程式資料夾外的資料目錄，不會進版控。
 
 ## 開發
 
 ```bash
-npm run migrate           # 建立 data/publisher.sqlite（啟動時也會自動套用）
+npm run migrate           # 建立資料目錄的 data/publisher.sqlite（啟動時也會自動套用）
 npm run dev               # 後端 127.0.0.1:3000 + Vite UI 127.0.0.1:5173
 ```
 

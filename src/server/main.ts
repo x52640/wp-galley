@@ -1,35 +1,56 @@
 import { config as loadDotenv } from 'dotenv';
-import { join } from 'node:path';
 import { buildApp } from './app.js';
 import { ConfigError, loadConfig, redactConfig } from '../config/env.js';
-import { databaseFile, ensureRuntimeDirectories, paths } from '../config/paths.js';
+import { DataDirError, paths, projectRoot } from '../config/paths.js';
+import { DataMoveError, prepareUserData, type PreparedUserData } from '../config/user-data.js';
 import { openDatabase } from '../db/index.js';
 import { runMigrations } from '../db/migrate.js';
+import { migrations } from '../db/migrations/index.js';
 import { loadTemplateRegistry } from '../templates/registry.js';
 import { AgentRegistry } from '../agents/registry.js';
 import { loadPublishTargets, PublishTargetError, startupNotice } from '../wordpress/targets.js';
 import { TemplateLoadError } from '../templates/registry.js';
 
-// 測試時不讀 .env，避免把本機秘密帶進測試環境。
-if (process.env['WP_PUBLISHER_SKIP_DOTENV'] !== '1') {
-  loadDotenv({ path: join(paths.root, '.env'), quiet: true });
-}
-
 async function main(): Promise<void> {
+  // 資料目錄（D-035，P8-T003）：第一次啟動把舊資料從程式資料夾複製過去。要在讀 .env 之前，.env 也在搬的東西裡。
+  let prepared: PreparedUserData;
+  try {
+    prepared = prepareUserData();
+  } catch (error) {
+    if (error instanceof DataDirError || error instanceof DataMoveError) {
+      const retry =
+        error instanceof DataMoveError ? '\n\n舊資料都還在原處，沒有被動到。處理好上面的問題後重新啟動，會從頭再搬一次。' : '';
+      console.error(`\n啟動失敗：${error.message}${retry}\n`);
+      process.exit(1);
+    }
+    throw error;
+  }
+  const data = prepared.paths;
+  if (prepared.notice !== null) console.log(`\n${prepared.notice}\n`);
+  if (prepared.warning !== null) console.warn(`\n⚠ ${prepared.warning}\n`);
+  console.log(`資料目錄：${data.dir}`);
+
+  // 測試時不讀 .env，避免把本機秘密帶進測試環境。
+  if (process.env['WP_PUBLISHER_SKIP_DOTENV'] !== '1') {
+    loadDotenv({ path: data.envFile, quiet: true });
+  }
+
   let config;
   try {
     config = loadConfig(process.env);
   } catch (error) {
     if (error instanceof ConfigError) {
-      console.error(`\n啟動失敗：${error.message}\n\n請參考 .env.example 修正 .env（或把 .env 裡 WORDPRESS_ 開頭的三行清空，啟動後用設定精靈重填）。\n`);
+      console.error(
+        `\n啟動失敗：${error.message}\n\n請參考 ${paths.envExampleFile} 修正 ${data.envFile}（或把裡面 WORDPRESS_ 開頭的三行清空，啟動後用設定精靈重填）。\n`,
+      );
       process.exit(1);
     }
     throw error;
   }
 
-  ensureRuntimeDirectories();
-  const db = openDatabase(databaseFile);
-  runMigrations(db);
+  const db = openDatabase(data.databaseFile);
+  // 舊程式資料夾：migration 010 把 DB 裡以它開頭的絕對路徑改成相對資料目錄。
+  runMigrations(db, migrations, { legacyRoot: projectRoot });
 
   let templates;
   try {
@@ -45,7 +66,7 @@ async function main(): Promise<void> {
 
   let targets;
   try {
-    targets = await loadPublishTargets(join(paths.config, 'publish-targets.json'));
+    targets = await loadPublishTargets(data.siteConfigFile);
   } catch (error) {
     if (error instanceof PublishTargetError) {
       console.error(`\n啟動失敗：發布目標設定錯誤\n${error.message}\n`);
@@ -65,13 +86,14 @@ async function main(): Promise<void> {
     templates,
     agents: new AgentRegistry(),
     targets,
+    dataDir: data.dir,
     // 設定精靈（P8-T002）寫這幾個檔。只有正式啟動才給；測試一律注入暫存路徑。
     setupFiles: {
-      envFile: join(paths.root, '.env'),
-      envExampleFile: join(paths.root, '.env.example'),
-      siteConfigFile: join(paths.config, 'publish-targets.json'),
-      backupsDir: paths.backups,
-      rootDir: paths.root,
+      envFile: data.envFile,
+      envExampleFile: paths.envExampleFile,
+      siteConfigFile: data.siteConfigFile,
+      backupsDir: data.backups,
+      rootDir: data.dir,
     },
   });
 

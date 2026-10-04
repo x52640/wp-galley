@@ -30,3 +30,6 @@ test-results/
 
 # --- 使用者的方法論筆記，不進版控 ---
 know_how.md
+
+# --- git worktree 的資料目錄（P8-T003：worktree 不共用全機的資料目錄）---
+.galley-data/

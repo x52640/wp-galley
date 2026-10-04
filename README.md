@@ -89,6 +89,16 @@ npm start                 # then open http://127.0.0.1:3000
 
 The first time you open it, the **setup wizard** starts. You don't need to edit any config file first.
 
+Your data (connection settings, drafts, images, database, backups) lives in a **data directory** outside the
+program folder, so upgrading or re-cloning never loses it: `~/Library/Application Support/Galley/` on macOS,
+`$XDG_DATA_HOME/galley` on Linux (or `~/.local/share/galley` if that isn't set). Set `GALLEY_DATA_DIR` (an
+absolute path) to put it somewhere else. The terminal prints the data directory at startup.
+
+**Upgrading from an older version**: data used to live inside the program folder. The first time the new
+version starts, it **copies** that data to the data directory (the old copy is left alone) and lists where the
+old files are. Once you've checked that your drafts and images are all there, delete the old files yourself.
+The old `.env` contains your password, so don't forget it.
+
 ## Setup wizard
 
 Four steps. When one fails, it tells you where it got stuck and what to do next.
@@ -145,9 +155,9 @@ create a new one and run the wizard again.
 
 ### Where the password is stored
 
-The wizard writes the URL, username and Application Password to `.env` in the project root (mode 0600,
-readable only by your user account; listed in `.gitignore`, so it never goes into Git). Publish targets
-go to `config/publish-targets.json` (a local file, also kept out of Git). The password travels from the
+The wizard writes the URL, username and Application Password to `.env` in the data directory (mode 0600,
+readable only by your user account; outside the program folder, so it never goes into Git). Publish targets
+go to `publish-targets.json` in the data directory (a local file, also kept out of Git). The password travels from the
 browser to the local backend once, when you click "Test connection", and never appears in any screen,
 response or log after that. Details: [`docs/specs/security.md`](./docs/specs/security.md) (in Chinese).
 
@@ -169,9 +179,13 @@ Again: whether each CLI's terms allow a third-party tool to call it has not been
 
 ## Manual setup (without the wizard)
 
+The files go in the data directory (macOS shown; on Linux use `~/.local/share/galley`, or `GALLEY_DATA_DIR` if set):
+
 ```bash
-cp .env.example .env                                           # fill in WORDPRESS_URL, WORDPRESS_USERNAME, WORDPRESS_APP_PASSWORD
-cp config/publish-targets.example.json config/publish-targets.json
+DATA="$HOME/Library/Application Support/Galley"
+mkdir -p "$DATA" && chmod 700 "$DATA"
+cp .env.example "$DATA/.env" && chmod 600 "$DATA/.env"        # fill in WORDPRESS_URL, WORDPRESS_USERNAME, WORDPRESS_APP_PASSWORD
+cp config/publish-targets.example.json "$DATA/publish-targets.json"
 ```
 
 Changes to `.env` made by hand take effect after a restart. The three WordPress variables must be **all
@@ -184,18 +198,18 @@ set or all empty**; setting only some of them is an error at startup.
   AI's output against the original rules.
 - AI CLIs run in an isolated job workspace, read-only, with shell, file-write, network and WordPress tools
   withheld, plus a timeout and one job at a time. They never see the WordPress password.
-- The password lives only in backend memory and `.env`.
+- The password lives only in backend memory and the `.env` in the data directory.
 - Approvals can only be created from the local UI, and any change to the content cancels them.
 
 Details: [`docs/specs/security.md`](./docs/specs/security.md) (in Chinese).
 
-`.env`, `config/publish-targets.json`, `data/`, `drafts/`, `generated-images/` and `backups/` are all kept
-out of version control.
+User data (`.env`, the site config, `data/`, `drafts/`, `generated-images/`, `backups/`) lives in the data
+directory outside the program folder, so it stays out of version control.
 
 ## Development
 
 ```bash
-npm run migrate           # creates data/publisher.sqlite (also applied automatically at startup)
+npm run migrate           # creates data/publisher.sqlite in the data directory (also applied automatically at startup)
 npm run dev               # backend on 127.0.0.1:3000 + Vite UI on 127.0.0.1:5173
 ```
 
