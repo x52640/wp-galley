@@ -27,7 +27,8 @@ import {
 } from '../repository.js';
 import { isContentMutable } from '../state-machine.js';
 import { containsSecret, createSecretScrubber, type Scrubber } from '../../config/secrets.js';
-import { paths } from '../../config/paths.js';
+import { fromStoredPath, resolveDataDir, toStoredPath } from '../../config/paths.js';
+import { createJobWorkspace, resolveInsideWorkspace, WorkspaceError } from '../../agents/workspace.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import type { AgentId } from '../../agents/types.js';
 import { renderRevision, RenderError, type RenderResult } from '../../templates/render.js';
@@ -132,6 +133,8 @@ export class CoreContext {
   readonly agents: AgentRegistry;
   wordpress: WordPressClient | null;
   readonly scrub: Scrubber;
+  /** 資料目錄：DB 裡的相對路徑以這裡解析（P8-T003）。 */
+  readonly dataDir: string;
   readonly draftsDir: string;
   readonly mediaDir: string;
   siteId: number | null;
@@ -171,8 +174,9 @@ export class CoreContext {
     this.agents = options.agents;
     this.wordpress = options.wordpress;
     this.scrub = options.scrub ?? createSecretScrubber([]);
-    this.draftsDir = options.draftsDir ?? paths.drafts;
-    this.mediaDir = options.mediaDir ?? paths.generatedImages;
+    this.dataDir = options.dataDir ?? resolveDataDir();
+    this.draftsDir = options.draftsDir ?? join(this.dataDir, 'drafts');
+    this.mediaDir = options.mediaDir ?? join(this.dataDir, 'generated-images');
     this.factCheckFetcher = options.factCheckFetcher ?? null;
 
     this.siteId = this.repo.syncSite(options.site ?? null);
@@ -319,13 +323,41 @@ export class CoreContext {
     return { result, contentHash };
   }
 
+  /** 存一份上傳過的圖到本機。回傳要寫進 DB 的路徑（相對資料目錄，見 `storedPath`）。 */
   writeLocalCopy(jobUuid: string, sha256: string, mimeType: string, bytes: Uint8Array): string {
     const extension = MIME_EXTENSIONS[mimeType] ?? 'bin';
     const dir = join(this.mediaDir, jobUuid);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${sha256}.${extension}`);
     writeFileSync(file, bytes);
-    return file;
+    return this.storedPath(file);
+  }
+
+  /** 要寫進 DB 的路徑：在資料目錄裡就存相對路徑（P8-T003），以後資料目錄再搬也不會壞。 */
+  storedPath(absolute: string): string {
+    return toStoredPath(this.dataDir, absolute);
+  }
+
+  /** DB 讀出的路徑 → 實際檔案位置。相對的以資料目錄解析；舊資料的絕對路徑照舊用。 */
+  localFile(stored: string): string {
+    return fromStoredPath(this.dataDir, stored);
+  }
+
+  /**
+   * 這個 job 的 Agent 工作目錄。**一定在 `draftsDir` 裡**：DB 記的路徑解析後在 drafts/ 裡就用它（資料夾不見了補建）；
+   * 逃出去（被改過、或舊資料指到別處）就改用 `drafts/<uuid>`，不在外面跑 Agent。
+   */
+  jobWorkspace(job: JobRow): string {
+    if (job.workspace_path !== null) {
+      try {
+        const dir = resolveInsideWorkspace(this.draftsDir, this.localFile(job.workspace_path));
+        mkdirSync(dir, { recursive: true });
+        return dir;
+      } catch (error) {
+        if (!(error instanceof WorkspaceError)) throw error;
+      }
+    }
+    return createJobWorkspace(this.draftsDir, job.uuid);
   }
 
   mediaUrl(asset: MediaAssetRow): string | null {

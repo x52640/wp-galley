@@ -149,7 +149,14 @@ export interface CoreServiceOptions {
   readonly wordpress: WordPressClient | null;
   readonly site?: { key: string; displayName: string; baseUrl: string; username: string } | null;
   readonly scrub?: Scrubber;
+  /**
+   * 資料目錄（D-035，P8-T003）。DB 裡的路徑存相對這裡、讀時以這裡解析。不給就是 `resolveDataDir()`。
+   * 測試一律給暫存目錄。
+   */
+  readonly dataDir?: string;
+  /** 不給就是 `<dataDir>/drafts`。 */
   readonly draftsDir?: string;
+  /** 不給就是 `<dataDir>/generated-images`。 */
   readonly mediaDir?: string;
   /** AI 查證的取回器（P6-T004）。沒給就不能查證（503）：測試不會因為忘了注入而連到真的網路。 */
   readonly factCheckFetcher?: FactCheckFetcherFactory;

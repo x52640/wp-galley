@@ -18,7 +18,6 @@ import {
 } from '../image-generation.js';
 import { checkUserNote } from '../../contract/user-note.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
-import { createJobWorkspace } from '../../agents/workspace.js';
 import { sha256Of } from '../../media/upload.js';
 import { inspectImage, MediaUploadError } from '../../media/validate.js';
 import type { MediaUploadOutcome } from './types.js';
@@ -69,7 +68,7 @@ export class ImagesModule {
         : buildImagePrompt({ prompt: brief.prompt, aspectRatio: brief.aspect_ratio });
     this.ctx.assertNoAppPassword(prompt);
 
-    const workspace = job.workspace_path ?? createJobWorkspace(this.ctx.draftsDir, job.uuid);
+    const workspace = this.ctx.jobWorkspace(job);
     const runRow = this.ctx.repo.insertAgentRun({
       jobId: job.id,
       revisionId: revisionRow?.id ?? null,
@@ -137,7 +136,7 @@ export class ImagesModule {
         jobId: job.id,
         imageBriefId: brief.id,
         agentRunId: runRow.id,
-        localPath,
+        localPath: this.ctx.storedPath(localPath),
         mimeType: inspected.mimeType,
         byteSize: result.data.bytes.byteLength,
         width: inspected.width,
@@ -174,7 +173,7 @@ export class ImagesModule {
   imageCandidateFile(uuid: string, candidateId: number): { path: string; mimeType: string } {
     const job = this.ctx.requireJob(uuid);
     const row = this.requireCandidate(job, candidateId);
-    return { path: row.local_path, mimeType: row.mime_type };
+    return { path: this.ctx.localFile(row.local_path), mimeType: row.mime_type };
   }
 
   /**
@@ -215,7 +214,7 @@ export class ImagesModule {
 
     try {
       const result = await this.ctx.media.addMediaWithOutcome(uuid, {
-        bytes: new Uint8Array(readFileSync(row.local_path)),
+        bytes: new Uint8Array(readFileSync(this.ctx.localFile(row.local_path))),
         mimeType: row.mime_type,
         filename,
         altText,

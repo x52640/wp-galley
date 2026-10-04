@@ -131,8 +131,8 @@ revision 的 `sourceText` 是最早貼上的原稿，接受建議、直接改文
 2. 後端用固定程式組 prompt（`buildImagePrompt`：brief 的 prompt 先 `neutralize`（同下一節，P5-T025 起）再包在分隔線裡當內容、比例、
    不要文字、只要一張、不要動檔案），交給 Codex。
 3. 拿到的位元組**不信任**：類型看檔頭（`src/media/validate.ts` 的 `inspectImage`），再過跟上傳
-   一樣的類型與大小檢查；過了才存成候選圖（`generated-images/<job>/candidates/<sha256>.<ext>`，
-   `image_candidates` 表，migration 005）。
+   一樣的類型與大小檢查；過了才存成候選圖（資料目錄的 `generated-images/<job>/candidates/<sha256>.<ext>`，
+   `image_candidates` 表，migration 005；`local_path` 存相對資料目錄的路徑，P8-T003／migration 010）。
 4. 候選圖顯示在卡片上（`GET /api/jobs/:uuid/candidates/:id`，本機送出，**沒有上傳**）。
    按鈕：「用這張」、「再生一張」；不滿意不用也沒關係，它只留在本機。
 5. 「用這張」→ `POST /api/jobs/:uuid/candidates/:id/use` → 走 `addMediaWithOutcome`（帶 briefKey、alt、

@@ -59,7 +59,6 @@ import {
 } from '../../agents/output-contract.js';
 import { AgentUnavailableError } from '../../agents/registry.js';
 import type { AgentId, AgentResult } from '../../agents/types.js';
-import { createJobWorkspace } from '../../agents/workspace.js';
 import { anyUrlContainsSecret, truncateSources, type SourceFetcher } from '../../fetch/index.js';
 import type { FactCheckInput } from './types.js';
 import { FACTCHECK_PURPOSE, MAX_AGENT_OUTPUT_BYTES, type ActiveRun, type CoreContext } from './context.js';
@@ -128,7 +127,7 @@ export class FactCheckModule {
     // 上傳或換圖進行中（等 WordPress 回應）不開始：換圖回來要改正文，查證會把內容鎖住。
     if (this.ctx.mediaUploads.has(job.uuid)) throw new AgentError(FACTCHECK_MEDIA_UPLOADING_MESSAGE);
 
-    const workspace = job.workspace_path ?? createJobWorkspace(this.ctx.draftsDir, job.uuid);
+    const workspace = this.ctx.jobWorkspace(job);
     const runRow = this.ctx.repo.insertFactCheckRun({
       jobId: job.id,
       revisionId: revisionRow.id,

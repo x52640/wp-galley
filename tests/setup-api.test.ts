@@ -68,6 +68,8 @@ async function build(
   app = await buildApp({
     config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'silent', ...options.env }),
     db: db.handle,
+    // 工作區與圖片寫進暫存目錄，不寫進資料目錄（P8-T003）。
+    dataDir: db.dir,
     templates: await loadTemplateRegistry(paths.templates),
     agents: new AgentRegistry({
       adapters: [
@@ -323,8 +325,10 @@ describe('第三步：發到哪裡', () => {
     expect(written.targets.map((target: { key: string }) => target.key)).toEqual(['read-think', 'diary', 'post']);
 
     const backupFile = save.json().backupFile as string;
-    expect(backupFile).toMatch(/^backups\/publish-targets-\d{8}-\d{6}-\d{3}-[0-9a-f]{6}\.json$/);
-    expect(readFileSync(join(files.rootDir, backupFile), 'utf8')).toBe(remus);
+    // 完整路徑（P8-T003）：資料目錄在 ~/Library 底下，只給 backups/… 使用者找不到檔。
+    expect(backupFile.startsWith(`${files.backupsDir}/`)).toBe(true);
+    expect(backupFile.slice(files.backupsDir.length + 1)).toMatch(/^publish-targets-\d{8}-\d{6}-\d{3}-[0-9a-f]{6}\.json$/);
+    expect(readFileSync(backupFile, 'utf8')).toBe(remus);
   });
 
   it('同 key 已存在：沒勾取代就 409、檔案不動；勾了才換', async () => {
@@ -392,6 +396,7 @@ describe('遮蔽器只收像密碼的東西', () => {
     app = await buildApp({
       config: loadConfig({ APP_HOST: '127.0.0.1', APP_PORT: '3000', LOG_LEVEL: 'trace' }),
       db: db.handle,
+      dataDir: db.dir,
       templates: await loadTemplateRegistry(paths.templates),
       agents: new AgentRegistry({ adapters: [] }),
       targets: await loadPublishTargets(files.siteConfigFile),
@@ -519,7 +524,7 @@ describe('停用不要的類型（P5-T032，D-032）', () => {
     expect(written.targets[1]).toEqual({ ...original.targets[1], disabled: true });
 
     const backupFile = res.json().backupFile as string;
-    expect(readFileSync(join(files.rootDir, backupFile), 'utf8')).toBe(REMUS());
+    expect(readFileSync(backupFile, 'utf8')).toBe(REMUS());
 
     // 回應與 listTargets 都帶停用狀態；停用的照樣列出來（舊稿件要靠它顯示類型名稱）。
     expect(res.json().status.siteConfig.targets.map((target: { key: string; disabled: boolean }) => [target.key, target.disabled])).toEqual([

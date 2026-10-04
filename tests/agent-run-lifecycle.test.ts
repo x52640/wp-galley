@@ -65,6 +65,7 @@ async function restart(f: CoreFixture, adapters: AgentAdapter[]): Promise<CoreSe
     targets: await loadPublishTargets(join(paths.config, 'examples', 'remusplus.json')),
     agents: new AgentRegistry({ adapters }),
     wordpress: null,
+    dataDir: f.db.dir,
     draftsDir: join(f.db.dir, 'drafts'),
     mediaDir: join(f.db.dir, 'media'),
   });

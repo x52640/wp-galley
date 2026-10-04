@@ -6,7 +6,6 @@ import type { AgentRunStatus, RevisionRow } from '../repository.js';
 import { bodyExcerpt, buildSlugSystemPrompt, buildSlugUserPrompt } from '../slug-suggestion.js';
 import { pickSlugSuggestions } from '../../contract/slug.js';
 import { EMPTY_BODY_AGENT_MESSAGE, isBlankBody } from '../../contract/empty-body.js';
-import { createJobWorkspace } from '../../agents/workspace.js';
 import {
   buildReviewSchema,
   SLUG_OUTPUT_SCHEMA,
@@ -121,7 +120,7 @@ export class AgentModule {
     const userPrompt = buildUserPrompt(payload.templateData, input.instruction);
     this.ctx.assertNoAppPassword(input.instruction, userPrompt);
 
-    const workspace = job.workspace_path ?? createJobWorkspace(this.ctx.draftsDir, job.uuid);
+    const workspace = this.ctx.jobWorkspace(job);
 
     const runRow = this.ctx.repo.insertAgentRun({
       jobId: job.id,
@@ -310,7 +309,7 @@ export class AgentModule {
     const userPrompt = buildSlugUserPrompt(title, excerpt);
     this.ctx.assertNoAppPassword(userPrompt);
 
-    const workspace = job.workspace_path ?? createJobWorkspace(this.ctx.draftsDir, job.uuid);
+    const workspace = this.ctx.jobWorkspace(job);
     const runRow = this.ctx.repo.insertAgentRun({
       jobId: job.id,
       revisionId: revisionRow.id,

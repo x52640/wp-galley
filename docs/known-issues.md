@@ -48,6 +48,23 @@
   網頁來源標題用 AI 給的標題或網域（取回器不回 `<title>`，維基才是真條目名）；按停止時正在抽文字的 worker 不中止（最多 10 秒，結果丟掉）；
   查證跑的期間取消稿件，查證不會停、跑完照存結果（不出錯，但用掉額度）。
 
+- P8-T003 資料目錄（2026-10-04）：
+  畫面文案還寫舊位置（`SetupWizard` 的「存在這台電腦的 config/publish-targets.json」「備份到 backups/」、`TaxonomyPanel`、`Workspace` 提到
+  `config/publish-targets.json`；`?fixtures=1` 的備份路徑是相對的），本 Task 不改 UI，下次碰到這些元件時一起改成「資料目錄的 publish-targets.json」；
+  精靈回應的備份路徑改成完整路徑後，`SetupFiles.rootDir`／`writeSiteConfig` 的 `rootDir` 已經用不到，但 `src/server/routes/setup.ts` 還在傳（不在 write_paths），留著沒拿掉；
+  搬家時如果新資料目錄還沒有 DB、卻已經有使用者手放的 `.env`（手動設定完才第一次啟動、而且程式資料夾還有舊資料），會被舊位置的覆蓋（舊位置為準）；
+  換了 clone 的位置（重 clone 到別的資料夾）再啟動，新程式資料夾沒有舊資料、就當全新安裝，舊 clone 裡的資料不會自動找到。
+  **不要**把 `GALLEY_DATA_DIR` 指到舊 clone（舊佈局的站台設定檔在 `config/publish-targets.json`，資料目錄要的是 `publish-targets.json`，會讓精靈重跑）。
+  要接回舊資料：關掉發布台、把資料目錄整個移走（或改名），把舊 clone 的 `data/`、`drafts/`、`generated-images/`、`backups/`、`.env`、`config/publish-targets.json`
+  複製進**新** clone 的同一位置，啟動一次就照正常流程搬進資料目錄。注意這時 migration 010 拿到的是新 clone 的根目錄，DB 裡舊 clone 的絕對路徑
+  **一筆都不會轉**（010 照樣記成已套用）；讀取時的容錯（取最後一個 `/drafts/`／`/generated-images/` 段、資料目錄裡有那個檔才用）讓圖與工作目錄照樣找得到，
+  所以舊 clone 之後可以刪。DB 裡那些路徑會一直是舊 clone 的絕對路徑（不影響使用；要轉成相對得另寫一次性的修正）；
+  git worktree（`.git` 是檔案）沒設 `GALLEY_DATA_DIR` 時預設用 `<worktree>/.galley-data`（已進 `.gitignore`），跟主 checkout 的資料完全分開，worktree 裡看不到真的稿件；
+  搬家的鎖檔 `.migrating.lock` 記 pid，pid 還活著就停止啟動；pid 還沒寫進去（對方剛建立）的鎖 60 秒內視為忙碌；pid 被別的程式重用時會誤判為忙碌，訊息有教怎麼刪鎖；
+  Agent 工作目錄只限制在 `drafts/` 底下，沒限制一定是 `drafts/<自己的 uuid>`（DB 被手改成別篇的資料夾仍會用）；
+  `resolveDataDir()` 用 `VITEST` 環境變數判斷測試行程（正式程式碼裡有一段只為測試的分支，換測試框架要跟著改）；
+  搬家時開舊 DB 做 `VACUUM INTO`，關閉時 SQLite 可能把舊位置的 WAL 併回主檔（內容不變，但舊檔的修改時間會變）。
+
 ## 收官紀錄裡的殘餘（原在 CURRENT_TASK「上次停在哪」「更早」）
 
 - P5-T030：取消時沒停掉跑到一半的 Agent，恢復後結果仍會收下（有 content hash 保護，接受）。

@@ -8,6 +8,7 @@ import { migration006 } from './006-image-brief-anchor.js';
 import { migration007 } from './007-article-content-type.js';
 import { migration008 } from './008-user-image-briefs.js';
 import { migration009 } from './009-factcheck.js';
+import { migration010 } from './010-relative-paths.js';
 
 /** 依序套用。新增 migration 就往陣列尾端加，不要改動已發布的項目。 */
 export const migrations: readonly Migration[] = [
@@ -20,4 +21,5 @@ export const migrations: readonly Migration[] = [
   migration007,
   migration008,
   migration009,
+  migration010,
 ];
