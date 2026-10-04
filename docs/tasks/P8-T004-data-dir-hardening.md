@@ -1,7 +1,7 @@
 ---
 id: P8-T004
 phase: 8
-status: ready
+status: done
 depends_on: [P8-T003]
 specs: [security.md, architecture.md]
 write_paths: ["src/config/", "src/core/service/context.ts", "src/core/service/media.ts", "src/core/service/images.ts", "src/server/main.ts", "src/db/cli-migrate.ts", "tests/", "docs/specs/security.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P8-T004-data-dir-hardening.md"]
