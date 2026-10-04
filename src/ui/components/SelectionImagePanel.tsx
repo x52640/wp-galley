@@ -3,6 +3,7 @@ import { Icon } from '../icons.js';
 import { Spinner } from './panels/shared.js';
 import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 import type { SelectionSpotsResponse } from '../service/types.js';
+import { canSendSelectionImage } from '../lib/selection-image-view.js';
 
 /**
  * 選一段文字「用此段配圖」按下去之後的小面板（D-037，P5-T038）。互動跟插圖面板「請 AI 配一張」同一套：
@@ -40,7 +41,8 @@ export function SelectionImagePanel({
   const rootRef = useRef<HTMLDivElement>(null);
   const noteLength = userNoteLength(note);
   const noteTooLong = noteLength > NOTE_MAX;
-  const canSend = blockedReason === null && !busy && !noteTooLong && spots !== null && loadError === null;
+  // 所選的位置要在目前這組選項裡才給送（第六輪審查）。
+  const canSend = canSendSelectionImage({ blockedReason, busy, noteTooLong, spots, loadError, spot });
 
   useEffect(() => {
     rootRef.current?.querySelector<HTMLElement>('.insert-ai-note:not(:disabled)')?.focus({ preventScroll: true });

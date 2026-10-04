@@ -203,3 +203,18 @@ describe('綁稿件的回呼快取只留目前這一篇（第五輪審查）', (
     expect(bind.cachedJob()).toBe('a');
   });
 });
+
+describe('送出鈕只在所選位置存在於目前選項時可按（第六輪審查）', () => {
+  it('上一次選的「結尾」（3）在只選一段的新選項 [0,1] 裡不存在：不給送；選到存在的才給', async () => {
+    const { canSendSelectionImage } = await import('../src/ui/lib/selection-image-view.js');
+    const base = { blockedReason: null, busy: false, noteTooLong: false, loadError: null, spots: [{ spot: 0 }, { spot: 1 }] };
+    expect(canSendSelectionImage({ ...base, spot: 3 })).toBe(false);
+    expect(canSendSelectionImage({ ...base, spot: 0 })).toBe(true);
+    expect(canSendSelectionImage({ ...base, spot: 1 })).toBe(true);
+    expect(canSendSelectionImage({ ...base, spots: null, spot: 0 })).toBe(false);
+    expect(canSendSelectionImage({ ...base, loadError: '找不到', spot: 0 })).toBe(false);
+    expect(canSendSelectionImage({ ...base, busy: true, spot: 0 })).toBe(false);
+    expect(canSendSelectionImage({ ...base, blockedReason: '另一個在跑', spot: 0 })).toBe(false);
+    expect(canSendSelectionImage({ ...base, noteTooLong: true, spot: 0 })).toBe(false);
+  });
+});

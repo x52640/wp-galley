@@ -172,3 +172,20 @@ export function settleSpots<T extends SpotsPickState>(
     ? { ...current, spots: outcome.result.spots, spotsHash: outcome.result.contentHash, loadError: null }
     : { ...current, spots: null, spotsHash: null, loadError: outcome.error };
 }
+
+/**
+ * 「用此段配圖」面板的送出鈕能不能按（第六輪審查）：沒有擋住的原因、不在送出中、那句話沒超過、
+ * 位置選項已經回來且沒有錯誤，**而且所選的位置在目前這組選項裡**（沒有任何一個被勾就不給送）。
+ */
+export function canSendSelectionImage(state: {
+  blockedReason: string | null;
+  busy: boolean;
+  noteTooLong: boolean;
+  spots: readonly { readonly spot: number }[] | null;
+  loadError: string | null;
+  spot: number;
+}): boolean {
+  if (state.blockedReason !== null || state.busy || state.noteTooLong) return false;
+  if (state.spots === null || state.loadError !== null) return false;
+  return state.spots.some((option) => option.spot === state.spot);
+}

@@ -1361,6 +1361,8 @@ export function ProofView({
               <div className="fc-pick-layer">
                 <div className="sel-image-pop" style={{ top: `${imagePick.top}px`, left: `${Math.max(imagePick.left, 220)}px` }}>
                   <SelectionImagePanel
+                    // 每次打開都是全新的面板（第六輪審查）：位置回到預設「這段開頭」、那句話清空，不沿用上一次的選擇。
+                    key={imagePick.token}
                     heading={selectionImageHeading(imagePick.text)}
                     spots={imagePick.spots}
                     loadError={imagePick.loadError}

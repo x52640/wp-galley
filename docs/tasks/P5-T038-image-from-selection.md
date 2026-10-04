@@ -87,9 +87,9 @@ D-037。使用者 2026-10-04：選了一大段之後只有「查證這句」，�
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #26 第五輪 Codex：「用此段配圖」每次開面板給請求編號，位置選項的結果只收同編號的、成功時清掉錯誤（`settleSpots`）；`createJobBinder` 快取只留目前這一篇（換篇整個換掉）
-- 已通過驗證：`npm run verify` 綠（91 檔、2031 測試）
-- 下一步：主 session commit、Codex 第六輪；使用者手動驗證（真的 Codex 生圖、只存草稿）
+- 最後完成：PR #26 第六輪 Codex：`SelectionImagePanel` 以 `key={imagePick.token}` 每次打開都是全新狀態（位置回到「這段開頭」）；送出鈕只在所選位置存在於目前選項時可按（`canSendSelectionImage`）
+- 已通過驗證：`npm run verify` 綠（92 檔、2054 測試；rebase 到含 P8-T004 的 main 之後）
+- 下一步：主 session commit、Codex 第七輪；使用者手動驗證（真的 Codex 生圖、只存草稿）
 - Blocker：無
 
 ## 完成結果
