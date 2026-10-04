@@ -36,6 +36,7 @@ import {
   editBarSavedNote,
   planSelectionCheck,
   saveThenAct,
+  seedHold,
   settleHold,
   shownFrame,
   type ProofHold,
@@ -238,6 +239,7 @@ export function ProofView({
   insertImage = null,
   selectionCheck = null,
   selectionImage = null,
+  savedAhead = null,
 }: {
   job: LoadedJob;
   /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
@@ -295,6 +297,11 @@ export function ProofView({
    * `loadSpots` 換篇時回 null（不顯示）；錯誤丟出來，面板上講。`onRequest` 自己接住錯誤（講在頂端），這裡只等它結束。
    * `currentHash`：畫面知道的目前版本（打字中最後存的那一版，否則工作區的版本）；不是選項來源那一版就關掉面板請重選。
    */
+  /**
+   * 之前打字中存成功、工作區還沒重讀到的那一版（P5-T040 #1）。進打字模式時 hold 一開始就認它：
+   * 之後輪詢讀到它不是外部改動，校樣不重載、不蓋掉新打的字。
+   */
+  savedAhead?: string | null;
   selectionImage?: {
     blockedReason: string | null;
     currentHash: string | undefined;
@@ -427,14 +434,25 @@ export function ProofView({
   const [autoSaved, setAutoSaved] = useState(false);
   const holdRef = useRef(hold);
   holdRef.current = hold;
+  const shown = shownFrame({ editing: isEditing, hold, revisionKey, renderEpoch });
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const savedAheadRef = useRef(savedAhead);
+  savedAheadRef.current = savedAhead;
   useEffect(() => {
     if (!isEditing) {
       setHold(null);
       setAutoSaved(false);
       setActError(null);
+      return;
+    }
+    // 進打字模式時已經有存在前面、工作區還沒讀到的那一版（P5-T040 #1）：hold 一開始就認它。
+    const seeded = seedHold(shownRef.current, savedAheadRef.current);
+    if (seeded !== null && holdRef.current === null) {
+      holdRef.current = seeded;
+      setHold(seeded);
     }
   }, [isEditing]);
-  const shown = shownFrame({ editing: isEditing, hold, revisionKey, renderEpoch });
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
   const previewSrc = `${job.previewUrl}?v=${shown.key}&r=${shown.epoch}`;
 

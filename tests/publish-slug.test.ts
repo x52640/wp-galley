@@ -9,7 +9,16 @@ import {
   slugPublishBlocker,
   withSlug,
 } from '../src/ui/lib/publish-slug.js';
-import { isSlugSaving, runSlugSave, subscribeSlugSave } from '../src/ui/lib/slug-save-store.js';
+import {
+  clearSlugDraft,
+  isSlugSaving,
+  keepSlugDraft,
+  runSlugSave,
+  runSourceSave,
+  slugDraftFor,
+  sourceSaveTouchesSlug,
+  subscribeSlugSave,
+} from '../src/ui/lib/slug-save-store.js';
 
 /**
  * 發布面板的「網址」列（D-038，P5-T039）。Vitest 沒有 DOM，只測決定畫面要講什麼的純函式。
@@ -199,5 +208,75 @@ describe('存網址的進行中狀態放在模組層級（PR #25 Codex 審查 P2
     await runSlugSave('job-d', async () => {});
     off();
     expect(n).toBe(2);
+  });
+});
+
+describe('發布面板沒存的網址：關掉再開還在、照樣擋發布（P5-T040 #2）', () => {
+  it('有沒存的改動就記下來，重開的面板拿回來，發布照樣被擋', () => {
+    keepSlugDraft('draft-a', 'my-new-slug', '');
+    const restored = slugDraftFor('draft-a', '');
+    expect(restored).toBe('my-new-slug');
+    expect(slugPublishBlocker({ dirty: isSlugDirty(restored, ''), saving: false })).toContain('還沒存');
+  });
+
+  it('換篇不帶過去：別篇拿到的是自己已存的網址', () => {
+    keepSlugDraft('draft-b', 'only-for-b', 'old');
+    expect(slugDraftFor('draft-c', 'c-saved')).toBe('c-saved');
+  });
+
+  it('按取消（框回到已存的值）或存成功（已存的值跟上框）就清掉', () => {
+    keepSlugDraft('draft-d', 'typed', 'saved');
+    keepSlugDraft('draft-d', 'saved', 'saved');
+    expect(slugDraftFor('draft-d', 'saved')).toBe('saved');
+    keepSlugDraft('draft-e', 'typed', 'saved');
+    keepSlugDraft('draft-e', 'typed', 'typed');
+    expect(slugDraftFor('draft-e', 'later')).toBe('later');
+    keepSlugDraft('draft-f', 'typed', 'saved');
+    clearSlugDraft('draft-f');
+    expect(slugDraftFor('draft-f', 'saved')).toBe('saved');
+  });
+});
+
+describe('「標題與網址」抽屜存到網址時也算「存網址進行中」（P5-T040 #3）', () => {
+  it('網址有改才算', () => {
+    expect(sourceSaveTouchesSlug({ slug: 'a' }, 'b')).toBe(true);
+    expect(sourceSaveTouchesSlug({ slug: 'a' }, '')).toBe(true);
+    expect(sourceSaveTouchesSlug({}, 'new')).toBe(true);
+    expect(sourceSaveTouchesSlug({ slug: 'a' }, 'a')).toBe(false);
+    expect(sourceSaveTouchesSlug(null, '')).toBe(false);
+  });
+
+  it('存的期間（含重讀）發布面板看得到在存、擋發布；存完放開', async () => {
+    let finish!: () => void;
+    const pending = runSourceSave('src-a', true, () => new Promise<void>((resolve) => (finish = resolve)));
+    expect(isSlugSaving('src-a')).toBe(true);
+    expect(slugPublishBlocker({ dirty: false, saving: isSlugSaving('src-a') })).toContain('正在存網址');
+    finish();
+    await pending;
+    expect(isSlugSaving('src-a')).toBe(false);
+  });
+
+  it('沒改網址不登記；失敗也放開、錯誤丟回去給抽屜顯示', async () => {
+    let seen: boolean | null = null;
+    await runSourceSave('src-b', false, async () => {
+      seen = isSlugSaving('src-b');
+    });
+    expect(seen).toBe(false);
+    await expect(runSourceSave('src-c', true, () => Promise.reject(new Error('409')))).rejects.toThrow('409');
+    expect(isSlugSaving('src-c')).toBe(false);
+  });
+
+  it('發布面板那邊還在存網址時不默默跳過：講出來', async () => {
+    let finish!: () => void;
+    const pending = runSlugSave('src-d', () => new Promise<void>((resolve) => (finish = resolve)));
+    let ran = false;
+    await expect(
+      runSourceSave('src-d', true, async () => {
+        ran = true;
+      }),
+    ).rejects.toThrow('正在存網址');
+    expect(ran).toBe(false);
+    finish();
+    await pending;
   });
 });

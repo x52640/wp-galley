@@ -12,7 +12,7 @@ import {
   withSlug,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
-import { isSlugSaving, runSlugSave, subscribeSlugSave } from '../lib/slug-save-store.js';
+import { isSlugSaving, keepSlugDraft, runSlugSave, slugDraftFor, subscribeSlugSave } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
@@ -71,7 +71,8 @@ export function PublishSheet({
 
   // 網址框（P5-T039）：放在這一層，發布按鈕才知道有沒存的改動（審查 #1、#4）。
   const savedSlug = readString(job.currentRevision?.templateData ?? null, 'slug');
-  const [slugDraft, setSlugDraft] = useState(savedSlug);
+  // 沒存的字記在模組層級、以稿件為 key（P5-T040 #2）：按 × 或點遮罩關掉再開，字還在、照樣擋發布。
+  const [slugDraft, setSlugDraft] = useState(() => slugDraftFor(job.uuid, savedSlug));
   const [slugEditing, setSlugEditing] = useState(false);
   const slugSave = useAction();
   // 「還在存」以模組層級為準（PR #25 審查 P2）：存的期間面板被關掉再打開，新的元件照樣知道、照樣擋發布。
@@ -85,6 +86,10 @@ export function PublishSheet({
     prevSavedSlug.current = savedSlug;
     setSlugDraft((draft) => nextSlugDraft(draft, prev, savedSlug));
   }, [savedSlug]);
+  // 跟已存的不一樣才記；按取消（回到已存的值）或存成功（已存的值跟上）就清掉。
+  useEffect(() => {
+    keepSlugDraft(job.uuid, slugDraft, savedSlug);
+  }, [job.uuid, slugDraft, savedSlug]);
   // Escape（審查 #3、PR #25 審查 P2）：Sheet 在 document 上聽 Escape 關面板。存網址進行中、或框裡有沒存的改動時，
   // 在 window 的捕獲階段先攔下：存的期間什麼都不動（不關面板）；有改動只還原框內的字。焦點在不在框裡都一樣。
   // 其他情況不攔，照常關面板（按「改」打開而沒改動的，由輸入框自己收起）。

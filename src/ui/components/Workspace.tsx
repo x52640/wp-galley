@@ -19,6 +19,10 @@ import {
   dropStaleFactCheck,
   editBlockedByRun,
   nextSaveBase,
+  carrySavedAhead,
+  savedAheadHash,
+  settleSavedAhead,
+  type SavedAhead,
   selectionCheckBlockedReason,
 } from '../lib/check-while-writing.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
@@ -191,6 +195,9 @@ export function Workspace({
     setEditNotice(null);
     setFocusBriefId(null);
     setView('article');
+    // 打字中存過的那一版是上一篇的：不帶到這一篇（P5-T040 #1）。
+    lastSavedHash.current = null;
+    setSavedAhead(null);
   }, [uuid]);
 
   useEffect(() => {
@@ -376,11 +383,37 @@ export function Workspace({
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
 
-  /** 這次打字中最後一次自動存成功的 hash（D-036）；離開打字模式或換篇就清掉。 */
+  /** 這次打字中最後一次存成功的 hash（D-036）；離開打字模式或換篇就清掉。 */
   const lastSavedHash = useRef<string | null>(null);
+  /**
+   * 打字中存成功、工作區還沒重讀到的那一版（P5-T040 #1）：離開打字模式時記下來，
+   * 再進打字模式時當成「最後存成功的那一版」（存檔基準、校樣 hold 都認它）。工作區快照換了就放掉。
+   */
+  const [savedAhead, setSavedAhead] = useState<SavedAhead | null>(null);
+  const jobHash = job?.currentRevision?.contentHash;
+  const jobHashRef = useRef(jobHash);
+  jobHashRef.current = jobHash;
+  const wasEditing = useRef(false);
   useEffect(() => {
-    if (editing === null) lastSavedHash.current = null;
-  }, [editing, uuid]);
+    const now = editing !== null;
+    if (now === wasEditing.current) return;
+    wasEditing.current = now;
+    if (now) {
+      // 進打字模式：之前存在前面的那一版就是這次的起點。
+      lastSavedHash.current = savedAheadHash(savedAhead, uuid);
+      return;
+    }
+    // 離開打字模式（儲存、取消、版本被換掉）：最後存的那一版工作區還沒讀到，記下來並立刻重讀一次。
+    const carried = carrySavedAhead({ uuid, lastSaved: lastSavedHash.current, jobHash: jobHashRef.current });
+    lastSavedHash.current = null;
+    setSavedAhead(carried);
+    if (carried !== null) void refresh();
+    // savedAhead 只在進出打字模式的那一刻讀。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, uuid, refresh]);
+  useEffect(() => {
+    setSavedAhead((current) => settleSavedAhead(current, uuid, jobHash));
+  }, [uuid, jobHash]);
 
   /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
   const imageGeneration = useImageGenerationStatus(true);
@@ -679,6 +712,7 @@ export function Workspace({
                   )
                 : null
             }
+            savedAhead={savedAheadHash(savedAhead, job.uuid)}
             onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
               // 存好之後換到別篇（Workspace 重用）：不碰 lastSavedHash、編輯狀態、refresh（第二輪審查）。
               const origin = job.uuid;
@@ -708,6 +742,8 @@ export function Workspace({
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
                 setEditing(afterStaySave);
               } else {
+                // 存好就離開打字模式；重讀若失敗，離開時把這一版記成「存在前面」（P5-T040 #1），下次進來拿它當基準。
+                lastSavedHash.current = saved.contentHash;
                 // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
                 endEdit();
               }

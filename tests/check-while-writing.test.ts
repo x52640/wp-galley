@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   afterStaySave,
   beginHold,
+  carrySavedAhead,
+  savedAheadHash,
+  seedHold,
+  settleSavedAhead,
   dropStaleFactCheck,
   editBlockedByRun,
   editBarSavedNote,
@@ -269,5 +273,46 @@ describe('先存再做：動作出錯不算存檔失敗（P5-T038 審查 3）', 
       onActFailed: () => calls.push('act-failed'),
     });
     expect(calls).toEqual(['save-failed']);
+  });
+});
+
+describe('自動存好但重讀失敗、離開打字模式再進來（P5-T040 #1）：存檔基準與 hold 認那一版', () => {
+  it('離開時最後存的那一版工作區還沒讀到：記下來；讀到了或沒存過就不記', () => {
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0' })).toEqual({ uuid: 'a', hash: 'H1', behind: 'H0' });
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H1' })).toBeNull();
+    expect(carrySavedAhead({ uuid: 'a', lastSaved: null, jobHash: 'H0' })).toBeNull();
+  });
+
+  it('工作區快照還停在舊的就留著；讀到新的（自己那版或別處改的）就放掉；別篇不算', () => {
+    const ahead = { uuid: 'a', hash: 'H1', behind: 'H0' };
+    expect(settleSavedAhead(ahead, 'a', 'H0')).toBe(ahead);
+    expect(settleSavedAhead(ahead, 'a', 'H1')).toBeNull();
+    expect(settleSavedAhead(ahead, 'a', 'H2')).toBeNull();
+    expect(settleSavedAhead(ahead, 'b', 'H0')).toBeNull();
+    expect(settleSavedAhead(null, 'a', 'H0')).toBeNull();
+    expect(savedAheadHash(ahead, 'a')).toBe('H1');
+    expect(savedAheadHash(ahead, 'b')).toBeNull();
+    expect(savedAheadHash(null, 'a')).toBeNull();
+  });
+
+  it('再進打字模式：存檔基準用存成功的那一版，不是工作區的舊快照（不然 409）', () => {
+    const ahead = carrySavedAhead({ uuid: 'a', lastSaved: 'H1', jobHash: 'H0' });
+    // 進打字模式時把它當成這次打字中「最後存成功」的那一版。
+    const lastSaved = savedAheadHash(ahead, 'a');
+    expect(nextSaveBase(lastSaved, 'H0')).toBe('H1');
+  });
+
+  it('再進打字模式就把那一版當自己的：之後輪詢讀到它，校樣不重載、不蓋掉新打的字', () => {
+    const shown = { key: 'H0', epoch: 3 };
+    const hold = seedHold(shown, 'H1');
+    expect(hold).toEqual({ key: 'H0', epoch: 3, own: ['H1'], pending: false });
+    expect(shownFrame({ editing: true, hold, revisionKey: 'H1', renderEpoch: 4 })).toEqual(shown);
+    // 別處改出來的版本照舊重載。
+    expect(shownFrame({ editing: true, hold, revisionKey: 'H9', renderEpoch: 4 })).toEqual({ key: 'H9', epoch: 4 });
+    // 接著再存一版：沿用同一個 hold，兩版都認。
+    const settled = settleHold(beginHold(hold, shown), 'H2');
+    expect(settled?.own).toEqual(['H1', 'H2']);
+    // 沒有存在前面的版本：不用 hold。
+    expect(seedHold(shown, null)).toBeNull();
   });
 });

@@ -92,6 +92,44 @@ export function nextSaveBase(lastSaved: string | null, jobHash: string | undefin
 }
 
 /**
+ * 打字中存成功、但工作區還沒重讀到的那一版（P5-T040 #1，#24 補審）。離開打字模式時記下來，
+ * 再進打字模式時當成「最後存成功的那一版」：存檔基準用它（不然拿舊快照當基準會 409），
+ * 校樣的 hold 也認它（之後輪詢讀到它不是外部改動，不重載、不蓋掉新打的字）。
+ * `behind`：記下來時工作區快照的 hash；快照換了（讀到它、或讀到別處改的）就不用再記。
+ */
+export interface SavedAhead {
+  readonly uuid: string;
+  readonly hash: string;
+  readonly behind: string | undefined;
+}
+
+/** 離開打字模式：最後存成功的那一版跟工作區快照不一樣就記下來；沒存過或已經讀到就不記。 */
+export function carrySavedAhead(input: {
+  uuid: string;
+  lastSaved: string | null;
+  jobHash: string | undefined;
+}): SavedAhead | null {
+  if (input.lastSaved === null || input.lastSaved === input.jobHash) return null;
+  return { uuid: input.uuid, hash: input.lastSaved, behind: input.jobHash };
+}
+
+/** 工作區快照變了（重讀成功）或換了篇：放掉；還停在記下來時的舊快照就留著（沒變回原物件）。 */
+export function settleSavedAhead(ahead: SavedAhead | null, uuid: string, jobHash: string | undefined): SavedAhead | null {
+  if (ahead === null || ahead.uuid !== uuid || ahead.behind !== jobHash) return null;
+  return ahead;
+}
+
+/** 這一篇有沒有存在前面、工作區還沒讀到的那一版。 */
+export function savedAheadHash(ahead: SavedAhead | null, uuid: string): string | null {
+  return ahead !== null && ahead.uuid === uuid ? ahead.hash : null;
+}
+
+/** 進打字模式時已經有存在前面的那一版：一開始就用 hold 認它（之後再存沿用同一個 hold）。 */
+export function seedHold(shown: ProofFrame, aheadHash: string | null): ProofHold | null {
+  return aheadHash === null ? null : { ...shown, own: [aheadHash], pending: false };
+}
+
+/**
  * 選字「查證這句」的反灰原因。打字模式照樣能按（「正在改字」不算）；正文空不空也不看**存過的**——
  * 空白新稿在打字模式打了第一句、還沒存，存過的正文是空的（Codex P2）。按下會先存，空的話存檔與後端查證會講。
  */

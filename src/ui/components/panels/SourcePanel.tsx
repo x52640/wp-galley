@@ -1,9 +1,10 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 import { api } from '../../service/client.js';
 import type { LoadedJob } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { readString } from '../../lib/format.js';
 import { clearSlugSuggest } from '../../lib/slug-suggest-store.js';
+import { isSlugSaving, runSourceSave, sourceSaveTouchesSlug, subscribeSlugSave } from '../../lib/slug-save-store.js';
 import { SlugSuggest } from '../SlugSuggest.js';
 import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
 import { sourceTemplateData } from './template-data.js';
@@ -62,6 +63,16 @@ export function SourcePanel({
     title !== readString(data, 'title', job.title ?? '') ||
     slug !== readString(data, 'slug') ||
     body !== readString(data, 'body', job.sourceText ?? '');
+
+  // 改到網址的存檔登記成「存網址進行中」（P5-T040 #3）：跟發布面板同一個狀態，抽屜關掉去開發布面板照樣擋發布。
+  const touchesSlug = sourceSaveTouchesSlug(data, slug);
+  const slugSaving = useSyncExternalStore(subscribeSlugSave, () => isSlugSaving(job.uuid));
+  /** 存一版再接著做（重讀、渲染）：改到網址時整段都算「存網址進行中」，結束（成功或失敗）才放開。 */
+  const saveThen = (then: () => Promise<void>): Promise<void> =>
+    runSourceSave(job.uuid, touchesSlug, async () => {
+      await saveRevision();
+      await then();
+    });
 
   // 表單的值是從這一版灌進來的，送出時就報這一版的 hash。
   const baseHash = job.currentRevision?.contentHash ?? null;
@@ -133,13 +144,8 @@ export function SourcePanel({
         <button
           type="button"
           className="btn btn-quiet"
-          disabled={save.busy || !dirty || titleProblem !== null}
-          onClick={() =>
-            void save.run(async () => {
-              await saveRevision();
-              await refresh();
-            })
-          }
+          disabled={save.busy || !dirty || titleProblem !== null || (touchesSlug && slugSaving)}
+          onClick={() => void save.run(() => saveThen(refresh))}
         >
           {save.busy ? <Spinner /> : <Icon name="file-text" size={14} />}
           儲存
@@ -148,12 +154,15 @@ export function SourcePanel({
         <button
           type="button"
           className="btn btn-primary"
-          disabled={render.busy || body.trim().length === 0 || titleProblem !== null}
+          disabled={render.busy || body.trim().length === 0 || titleProblem !== null || (dirty && touchesSlug && slugSaving)}
           onClick={() =>
             void render.run(async () => {
-              if (dirty) await saveRevision();
-              await api.render(job.uuid);
-              await refresh();
+              const renderNow = async (): Promise<void> => {
+                await api.render(job.uuid);
+                await refresh();
+              };
+              if (dirty) await saveThen(renderNow);
+              else await renderNow();
             })
           }
         >
