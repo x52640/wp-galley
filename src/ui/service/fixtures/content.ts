@@ -64,10 +64,7 @@ export const contentApi: Pick<PublisherApi, 'createRevision' | 'listRevisions' |
     if (input.resolveFactCheckId !== undefined && input.editedBody === undefined && input.editedTitle === undefined) {
       throw new Error('resolveFactCheckId 只能跟 editedBody 或 editedTitle 一起用（從查證卡片進去直接改文章）');
     }
-    // 查證跑的期間鎖住內容（D-034）：跟後端一樣，任何會建新版本的動作都拒絕。
-    if (job.agentRun?.status === 'running' && job.agentRun.task === 'factcheck') {
-      throw new Error('正在查證，內容先鎖住；等它跑完（或按停止）再改');
-    }
+    // 查證跑的期間不鎖內容（D-036），跟後端一樣。
     // 在文章上改的標題（P5-T029）：跟後端同一條規則。
     let editedTitle: string | undefined;
     if (input.editedTitle !== undefined) {

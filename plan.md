@@ -54,7 +54,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 | 5（續） | UI 改版為 B 版（D-013）✅、前後端共用契約（D-015）✅、拆分 CoreService ⬜ | 🔶 |
 | 6 | AI 查證、MCP Server | 🔶 查證規格定稿（P6-T001），實作 P6-T002～P6-T005 待做；MCP 未開始 |
 | 7 | 測試、文件與交付 | ⬜ |
-| 8 | 開源產品化：通用內容類型、站台設定檔、設定精靈（D-016）、資料目錄（D-035） | 🔶 P8-T001 ✅、P8-T002 ✅（精靈真站實跑待確認）、P8-T003 進行中 |
+| 8 | 開源產品化：通用內容類型、站台設定檔、設定精靈（D-016）、資料目錄（D-035） | 🔶 P8-T001 ✅、P8-T002 ✅（精靈真站實跑待確認）、P8-T003 ✅ |
 
 目前在做什麼：見 `docs/CURRENT_TASK.md`。
 
@@ -101,6 +101,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-033** 2026-10-01 Remus｜健檢後依序瘦身與拆分：文件瘦身＋功能地圖 → 拆 CoreService（含 `api.ts`）→ 拆 fixtures → 拆 styles.css → 抽出 ProofView 編輯邏輯；重構不改行為，各一個 Task、一個 PR；新規矩：前後端都要的規則一律寫成 `src/contract` 純函式，fixtures 只放假資料不重寫規則｜→ [P0-T002](docs/tasks/P0-T002-slim-docs.md)、[P5-T004](docs/tasks/P5-T004-split-core-service.md)、[P5-T033](docs/tasks/P5-T033-split-fixtures.md)～[P5-T035](docs/tasks/P5-T035-proofview-edit-logic.md)
 - **D-034** 2026-10-01 Remus｜AI 查證採「兩趟 Agent＋程式代抓」：第一趟只開**廠商伺服器上執行**的搜尋（Codex `web_search="cached"`、Claude `WebSearch`；不給 WebFetch，agy 不開搜尋），我們的取回器抓網頁，第二趟無工具只讀取回文字，引文由程式逐字核對、對不上降為查不到，結果永不自動套用；**修訂 D-009** 為「Agent 不能在使用者機器上連外」；額度約校稿兩倍、1～3 分鐘可接受；取回器照 Agent 給的網址抓的外洩殘餘風險接受並寫進 security.md；先做 P5-T036 把現有各趟的 Codex 搜尋明確關掉、Claude 不載入使用者的 MCP｜→ [P6-T001](docs/tasks/P6-T001-factcheck.md)、[P5-T036](docs/tasks/P5-T036-lock-agent-tools.md)、[P6-T002](docs/tasks/P6-T002-safe-fetcher.md)、[P6-T003](docs/tasks/P6-T003-factcheck-contract.md)、[P6-T004](docs/tasks/P6-T004-factcheck-service.md)、[P6-T005](docs/tasks/P6-T005-factcheck-ui.md)、[ADR-0001](docs/adr/0001-agent-no-network.md)
 - **D-035** 2026-10-04 Remus｜使用者資料（`.env`、站台設定檔、SQLite、稿件、圖片、備份）搬出程式資料夾到 `~/Library/Application Support/Galley/`（`GALLEY_DATA_DIR` 可覆寫），DB 改存相對路徑；第一次啟動自動**複製**過去、舊的不刪；發布台裡的使用體驗不變。為之後可能的 Mac App／Homebrew 鋪路，但那兩個**未裁定**；不做背景常駐（使用者不想佔記憶體）、現階段不做外殼 App（`scripts/start.command` 放 Dock 就夠）｜→ [P8-T003](docs/tasks/P8-T003-user-data-dir.md)
+- **D-036** 2026-10-04 Remus｜打字模式選字也能「查證這句」：按下先自動存（只存本機）、留在打字模式再查；查證**不再鎖內容**（修訂 D-034 的執行規則；查證本來就不改文章），查的期間可以繼續寫、存，完成時不蓋掉正在打的字；不拿沒存的字查（結果要靠存過的內容定位）；一鍵查證與觀察卡片查證不改；其他 Agent 動作照舊鎖｜→ [P6-T006](docs/tasks/P6-T006-check-while-writing.md)
 
 ## 待裁定
 

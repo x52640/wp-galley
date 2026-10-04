@@ -40,8 +40,7 @@ export class ContentModule {
   createRevision(uuid: string, input: CreateRevisionInput = {}): Revision {
     const job = this.ctx.requireJob(uuid);
     this.ctx.assertMutable(job);
-    // AI 查證跑的期間鎖住內容（P6-T004）：在文章上改、放圖、套用建議都經過這裡。
-    this.ctx.factcheck.assertNotRunning(job);
+    // AI 查證跑的期間不鎖內容（D-036）：查證不改文章，跑完用 excerpt 對著當時的最新版重新定位。
 
     const template = this.ctx.requireTemplate(job);
     const baseRow = this.ctx.repo.latestRevision(job.id);
@@ -92,13 +91,13 @@ export class ContentModule {
         (proposal ? this.ctx.repo.listReviewItems(proposal.id) : []).find((row) => row.id === input.resolveItemId) ?? null;
       if (!resolveRow) throw new InvalidInputError(`這一項不屬於目前的校稿提案：${input.resolveItemId}`);
     }
-    // 從查證卡片「去原文改」（P6-T004）：規則同 resolveItemId，寫入任何東西之前先驗。
+    // 從查證卡片「去原文改」（P6-T004）：寫入任何東西之前先驗。那條已經不是 open（打字中被取代等）就照存、不結案（P6-T006）。
     let resolveFactCheck: FactCheckFindingRow | null = null;
     if (input.resolveFactCheckId !== undefined) {
       if (input.editedBody === undefined && input.editedTitle === undefined) {
         throw new InvalidInputError('resolveFactCheckId 只能跟 editedBody 或 editedTitle 一起用（從查證卡片進去直接改文章）');
       }
-      resolveFactCheck = this.ctx.factcheck.requireOpenFinding(job, input.resolveFactCheckId);
+      resolveFactCheck = this.ctx.factcheck.findingToResolveByEdit(job, input.resolveFactCheckId);
     }
     const bodyData =
       input.editedBody === undefined

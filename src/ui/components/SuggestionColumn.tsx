@@ -57,7 +57,6 @@ export function SuggestionColumn({
   onFactCheckObservation,
   factCheckBlocked,
   factCheckNote,
-  contentLocked,
 }: {
   job: LoadedJob;
   /** 這篇的查證結果（`GET …/factchecks`）；還沒讀到或後端沒有這個功能是 null。 */
@@ -77,8 +76,6 @@ export function SuggestionColumn({
   factCheckBlocked: string | null;
   /** 這一家查證的限制說明（Antigravity 不能只開搜尋）；沒有是 null。 */
   factCheckNote: string | null;
-  /** 內容鎖住（查證在跑，D-034）：接受、自己改、整份採用都不能按，這是原因。 */
-  contentLocked: string | null;
 }): JSX.Element {
   const review = job.review;
   const items = useMemo(() => review?.items ?? [], [review]);
@@ -245,8 +242,7 @@ export function SuggestionColumn({
             <button
               type="button"
               className="btn btn-primary btn-tiny"
-              disabled={resolve.busy || contentLocked !== null}
-              title={contentLocked ?? undefined}
+              disabled={resolve.busy}
               onClick={() => decide(safe.map((item) => item.id), 'apply')}
             >
               {resolve.busy ? <Spinner /> : <Icon name="check" size={13} />}
@@ -266,7 +262,6 @@ export function SuggestionColumn({
             item={entry.item}
             active={activeKey === entry.key}
             busy={resolve.busy}
-            locked={contentLocked}
             factCheckBlocked={factCheckBlocked}
             factCheckNote={factCheckNote}
             onActivate={() => onActivate(activeKey === entry.key ? null : entry)}
@@ -280,7 +275,6 @@ export function SuggestionColumn({
             finding={entry.finding}
             active={activeKey === entry.key}
             busy={dismiss.busy}
-            locked={contentLocked}
             onActivate={() => onActivate(activeKey === entry.key ? null : entry)}
             onJump={() => onActivate(entry)}
             onEdit={() => onEditFinding(entry.finding)}
@@ -327,8 +321,7 @@ export function SuggestionColumn({
         <button
           type="button"
           className="btn btn-quiet btn-tiny"
-          disabled={review.stale || open.length === 0 || contentLocked !== null}
-          title={contentLocked ?? undefined}
+          disabled={review.stale || open.length === 0}
           onClick={() =>
             confirm({
               title: '採用 AI 的整份稿？',
@@ -381,7 +374,6 @@ function SuggestionCard({
   item,
   active,
   busy,
-  locked,
   factCheckBlocked,
   factCheckNote,
   onActivate,
@@ -392,8 +384,6 @@ function SuggestionCard({
   item: ReviewItem;
   active: boolean;
   busy: boolean;
-  /** 內容鎖住的原因（查證在跑）；接受、自己改反灰。 */
-  locked: string | null;
   factCheckBlocked: string | null;
   factCheckNote: string | null;
   onActivate: () => void;
@@ -448,8 +438,7 @@ function SuggestionCard({
           <button
             type="button"
             className="btn btn-primary btn-tiny"
-            disabled={busy || locked !== null}
-            title={locked ?? undefined}
+            disabled={busy}
             onClick={() => onDecide('apply')}
           >
             <Icon name="check" size={13} />
@@ -468,13 +457,7 @@ function SuggestionCard({
             查證
           </button>
         )}
-        <button
-          type="button"
-          className="btn btn-quiet btn-tiny"
-          disabled={locked !== null}
-          title={locked ?? undefined}
-          onClick={onEditSource}
-        >
+        <button type="button" className="btn btn-quiet btn-tiny" onClick={onEditSource}>
           {change ? '自己改' : '去原文改'}
         </button>
         <button type="button" className="btn btn-quiet btn-tiny" disabled={busy} onClick={() => onDecide('skip')}>

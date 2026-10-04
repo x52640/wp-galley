@@ -30,7 +30,6 @@ export function FactcheckCard({
   finding,
   active,
   busy,
-  locked,
   onActivate,
   onJump,
   onEdit,
@@ -39,8 +38,6 @@ export function FactcheckCard({
   finding: FactCheckFinding;
   active: boolean;
   busy: boolean;
-  /** 內容鎖住（查證在跑）：「去原文改」反灰。 */
-  locked: string | null;
   /** 點卡片上的那句：亮起來、文章捲過去；再點一次取消。 */
   onActivate: () => void;
   /** 「跳到該段」：一定亮起來、捲過去。 */
@@ -109,8 +106,7 @@ export function FactcheckCard({
         <button
           type="button"
           className="btn btn-quiet btn-tiny"
-          disabled={locked !== null}
-          title={locked ?? '在文章上直接改這句；存檔後這張卡片收進已處理'}
+          title="在文章上直接改這句；存檔後這張卡片收進已處理"
           onClick={onEdit}
         >
           去原文改

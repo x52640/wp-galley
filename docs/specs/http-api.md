@@ -196,8 +196,9 @@
   Agent 不能用或沒有取回器 503。
   跑的期間 `JobDetail.agentRun` 是 running、`task: 'factcheck'`，`agentRun.factCheck` 帶 `stage`（`find`／`fetch`／`judge`／`verify`）、
   `counts`、`hostedSearch`、`judged`——抓網頁、核對兩段沒有 CLI 在跑也一樣；停止走 `DELETE /agent`。這段期間改內容的路由
-  （`POST /revisions`、放圖、設封面、套用建議）一律 502 `AGENT_ERROR`「查證正在跑，內容先鎖住…」。
+  （`POST /revisions`、放圖、設封面、換圖、套用建議）**照常可用**（D-036，P6-T006：查證不鎖內容）；其他 Agent 動作照舊互斥（502 `AGENT_ERROR`）。
   `FactCheckFinding.blockIndex` 與 `excerptGone`（open 但原句已經不在文章裡＝「原句已經改了」）讀取時算。
   `JobDetail.openFactCheckContradictions`：說法不同、open、原句還在的條數，發布面板提醒用，不進 `blockers`。
   `POST /revisions` 多 `resolveFactCheckId`（規則同 `resolveItemId`）：從查證卡片去原文改，存成新版本時那條結成 `resolved-by-edit`。
+  那條屬於這篇但已經不是 open（superseded、dismissed、resolved-by-edit）時照存、不結案、不報錯；不屬於這篇 400（P6-T006）。
   `AgentRunTask` 多 `factcheck`。都是新增的。

@@ -17,8 +17,6 @@ import { AgentError, InvalidInputError } from '../src/core/errors.js';
 import { APP_PASSWORD_IN_CONTENT_MESSAGE, CoreService } from '../src/core/service.js';
 import {
   FACTCHECK_CANCELLED_MESSAGE,
-  FACTCHECK_LOCKED_MESSAGE,
-  FACTCHECK_MEDIA_UPLOADING_MESSAGE,
   SECRET_IN_CANDIDATES_MESSAGE,
   SECRET_IN_RESULT_MESSAGE,
   SECRET_IN_URLS_MESSAGE,
@@ -631,7 +629,7 @@ describe('互斥與鎖', () => {
     expect(factCheckError).toBeInstanceOf(AgentError);
   });
 
-  it('查證跑中（抓網頁階段，沒有 CLI 在跑）：agentRun 照樣 running；改文章、放圖、套用建議、發起校驗都被擋', async () => {
+  it('查證跑中（抓網頁階段，沒有 CLI 在跑）：agentRun 照樣 running；改文章、放圖、設封面、套用建議都成功（D-036），發起校驗、建議網址照舊被擋', async () => {
     const seen: Record<string, unknown> = {};
     const ctx: { core?: CoreService; uuid?: string; mediaId?: number; changeId?: number } = {};
     const { core, uuid } = await setup({
@@ -644,11 +642,13 @@ describe('互斥與鎖', () => {
           const id = ctx.uuid!;
           seen['detail'] = c.getJob(id).agentRun;
           seen['running'] = coreInternals(c).repo.runningAgentRun(coreInternals(c).repo.jobByUuid(id)!.id);
-          seen['edit'] = await caught(() => c.createRevision(id, { editedBody: `${BODY}<p class="wp-block-paragraph">多一段</p>` }));
-          seen['place'] = await caught(() => c.placeMedia(id, ctx.mediaId!, 0));
-          seen['apply'] = await caught(() => c.resolveReviewItems(id, { itemIds: [ctx.changeId!], decision: 'apply' }));
+          seen['edit'] = c.createRevision(id, { editedBody: `${BODY}<p class="wp-block-paragraph">多一段</p>` });
+          seen['place'] = c.placeMedia(id, ctx.mediaId!, 0);
+          seen['featured'] = c.setFeaturedMedia(id, ctx.mediaId!);
+          seen['apply'] = c.resolveReviewItems(id, { itemIds: [ctx.changeId!], decision: 'apply' });
           seen['review'] = await caught(c.runAgentReview(id, { provider: 'claude' }));
           seen['slug'] = await caught(c.suggestSlugs(id, { provider: 'claude' }));
+          seen['agentAfter'] = c.getJob(id).agentRun;
         },
       },
     });
@@ -659,7 +659,7 @@ describe('互斥與鎖', () => {
     ctx.changeId = core.getReview(uuid)!.items.find((item) => item.type === 'change')!.id;
     const revisionsBefore = core.listRevisions(uuid).length;
 
-    await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+    const result = await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
 
     expect(seen['detail']).toMatchObject({
       status: 'running',
@@ -669,19 +669,57 @@ describe('互斥與鎖', () => {
     });
     // 抓網頁的時候 agent_runs 沒有 running 的那一筆。
     expect(seen['running']).toBeNull();
-    for (const key of ['edit', 'place', 'apply']) {
-      expect(seen[key], key).toBeInstanceOf(AgentError);
-      expect((seen[key] as Error).message, key).toBe(FACTCHECK_LOCKED_MESSAGE);
-    }
+    // 改文章、放圖、設封面、套用建議：查證不鎖內容，各建一個新版本。
+    expect(core.listRevisions(uuid).length).toBeGreaterThanOrEqual(revisionsBefore + 4);
+    expect(core.getJob(uuid).currentRevision!.featuredMediaId).toBe(ctx.mediaId);
+    // 其他 Agent 動作照舊互斥（同一篇一次只跑一個）。
     expect(seen['review']).toBeInstanceOf(AgentError);
     expect(seen['slug']).toBeInstanceOf(AgentError);
-    expect(core.listRevisions(uuid)).toHaveLength(revisionsBefore);
-    // 跑完就解鎖。
-    expect(() => core.placeMedia(uuid, ctx.mediaId!, 0)).not.toThrow();
+    expect(seen['agentAfter']).toMatchObject({ status: 'running', task: 'factcheck' });
+    // 查證照常跑完、結果照收；那句還在（只是多了一段），讀取時重新定位。
+    expect(result.run.status).toBe('succeeded');
+    expect(core.listFactChecks(uuid).findings[0]).toMatchObject({ excerpt: EXCERPT, excerptGone: false, status: 'open' });
+  });
+
+  it('查證跑中把那句改掉：結果照收，讀取時算成「原句已經改了」，不丟整次結果', async () => {
+    const ctx: { core?: CoreService; uuid?: string } = {};
+    const { core, uuid } = await setup({
+      fetch: {
+        ...FETCH,
+        onFetch: (url) => {
+          if (url !== 'https://example.org/review') return;
+          ctx.core!.createRevision(ctx.uuid!, { editedBody: BODY.replace('1995', '1994') });
+        },
+      },
+    });
+    ctx.core = core;
+    ctx.uuid = uuid;
+    const result = await core.runFactCheck(uuid, { provider: 'claude', scope: 'selection', selection: EXCERPT });
+    expect(result.run.status).toBe('succeeded');
+    expect(result.findings).toHaveLength(1);
+    expect(core.listFactChecks(uuid).findings[0]).toMatchObject({ excerpt: EXCERPT, blockIndex: null, excerptGone: true });
+    expect(core.getJob(uuid).openFactCheckContradictions).toBe(0);
+  });
+
+  it('查證跑中在文章前面加一段：結果的 blockIndex 讀取時照新版本重算', async () => {
+    const ctx: { core?: CoreService; uuid?: string } = {};
+    const { core, uuid } = await setup({
+      fetch: {
+        ...FETCH,
+        onFetch: (url) => {
+          if (url !== 'https://example.org/review') return;
+          ctx.core!.createRevision(ctx.uuid!, { editedBody: `<p class="wp-block-paragraph">新加的第一段。</p>${BODY}` });
+        },
+      },
+    });
+    ctx.core = core;
+    ctx.uuid = uuid;
+    await core.runFactCheck(uuid, { provider: 'claude', scope: 'selection', selection: EXCERPT });
+    expect(core.listFactChecks(uuid).findings[0]).toMatchObject({ blockIndex: 2, excerptGone: false });
   });
 });
 
-describe('查證與換圖互斥（不留半套）', () => {
+describe('查證與換圖（D-036：查證不鎖內容，換圖照常）', () => {
   const isUpload = (request: RecordedRequest): boolean =>
     request.method === 'POST' && request.path.split('?')[0] === '/wp-json/wp/v2/media';
   const uploads = (f: CoreFixture): number => f.requests.filter(isUpload).length;
@@ -704,99 +742,49 @@ describe('查證與換圖互斥（不留半套）', () => {
     };
   }
 
-  /** 放一張圖進正文、核准；回傳換圖前的狀態快照。 */
-  async function placedAndApproved(core: CoreService, uuid: string) {
-    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a.png' });
-    core.placeMedia(uuid, asset.id, 0);
-    approveJob(core, uuid);
-    return asset;
-  }
-
-  function snapshot(core: CoreService, uuid: string, assetId: number) {
-    const detail = core.getJob(uuid);
-    return {
-      wordpressMediaId: detail.media.find((m) => m.id === assetId)?.wordpressMediaId,
-      hash: detail.currentRevision!.contentHash,
-      revisions: core.listRevisions(uuid).length,
-      approved: detail.approval?.valid,
-    };
-  }
-
-  it('查證進行中換圖 → 上傳前就拒絕：沒上傳、媒體紀錄、正文、核准都不變', async () => {
-    const ctx: { core?: CoreService; uuid?: string; assetId?: number; error?: unknown; uploadsBefore?: number } = {};
+  it('查證進行中換圖：照常上傳、換進發布台', async () => {
+    const ctx: { core?: CoreService; uuid?: string; assetId?: number; replaced?: Promise<unknown> } = {};
     const { core, uuid, f } = await setup({
       fetch: {
         ...FETCH,
-        onFetch: async (url) => {
+        onFetch: (url) => {
           if (url !== 'https://example.org/review') return;
-          ctx.uploadsBefore = uploads(fixture!);
-          ctx.error = await caught(ctx.core!.replaceMedia(ctx.uuid!, ctx.assetId!, PNG));
+          ctx.replaced = ctx.core!.replaceMedia(ctx.uuid!, ctx.assetId!, PNG);
         },
       },
     });
     ctx.core = core;
     ctx.uuid = uuid;
-    const asset = await placedAndApproved(core, uuid);
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a.png' });
+    core.placeMedia(uuid, asset.id, 0);
     ctx.assetId = asset.id;
-    const before = snapshot(core, uuid, asset.id);
-    expect(before.approved).toBe(true);
+    const before = uploads(f);
 
     await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+    const replaced = (await ctx.replaced) as { wordpressMediaId: number | null };
 
-    expect(ctx.error).toBeInstanceOf(AgentError);
-    expect((ctx.error as Error).message).toBe(FACTCHECK_LOCKED_MESSAGE);
-    expect(uploads(f)).toBe(ctx.uploadsBefore);
-    expect(snapshot(core, uuid, asset.id)).toEqual(before);
+    expect(uploads(f)).toBe(before + 1);
+    expect(replaced.wordpressMediaId).not.toBe(asset.wordpressMediaId);
   });
 
-  it('換圖上傳途中開始查證 → 查證被拒（不派工），換圖照常完成', async () => {
-    const ctx: { core?: CoreService; uuid?: string; error?: unknown } = {};
+  it('換圖上傳途中開始查證：查證照常派工，換圖照常完成', async () => {
+    const ctx: { core?: CoreService; uuid?: string; run?: Promise<unknown> } = {};
     const { core, uuid, adapter } = await setup({
-      handler: uploadHook(2, async () => {
-        ctx.error = await caught(ctx.core!.runFactCheck(ctx.uuid!, { provider: 'claude', scope: 'article' }));
+      handler: uploadHook(2, () => {
+        ctx.run = ctx.core!.runFactCheck(ctx.uuid!, { provider: 'claude', scope: 'article' });
       }),
     });
     ctx.core = core;
     ctx.uuid = uuid;
-    const asset = await placedAndApproved(core, uuid);
+    const asset = await core.addMedia(uuid, { bytes: TINY_PNG, mimeType: 'image/png', filename: 'a.png' });
+    core.placeMedia(uuid, asset.id, 0);
 
     const replaced = await core.replaceMedia(uuid, asset.id, PNG);
+    await ctx.run;
 
-    expect(ctx.error).toBeInstanceOf(AgentError);
-    expect((ctx.error as Error).message).toBe(FACTCHECK_MEDIA_UPLOADING_MESSAGE);
-    expect(adapter.calls).toHaveLength(0);
-    expect(count(fixture!, 'factcheck_runs')).toBe(0);
+    expect(adapter.calls.length).toBeGreaterThan(0);
     expect(replaced.wordpressMediaId).not.toBe(asset.wordpressMediaId);
-    expect(core.getJob(uuid).approval?.valid).toBe(false);
-  });
-
-  it('防禦：上傳回來時查證已經鎖住內容 → 不改媒體紀錄、不建版本，講清楚新圖留在媒體庫', async () => {
-    const ctx: { core?: CoreService; uuid?: string } = {};
-    const { core, uuid } = await setup({
-      handler: uploadHook(2, () => {
-        // 模擬「上傳途中查證已經佔住名額」（正常流程被 mediaUploads 擋著，到不了）。
-        coreInternals(ctx.core!).activeRuns.set(ctx.uuid!, {
-          runId: 'simulated',
-          provider: 'claude',
-          rowId: -1,
-          factCheck: { runRowId: -1, abort: new AbortController(), cliRunning: false },
-        });
-      }),
-    });
-    ctx.core = core;
-    ctx.uuid = uuid;
-    const asset = await placedAndApproved(core, uuid);
-    const before = snapshot(core, uuid, asset.id);
-
-    const error = await caught(core.replaceMedia(uuid, asset.id, PNG));
-    coreInternals(core).activeRuns.delete(uuid);
-
-    expect(error).toBeInstanceOf(AgentError);
-    expect((error as Error).message).toMatch(/媒體庫/);
-    // 核准在上傳前就撤銷了（既有順序）；媒體紀錄、正文、版本都不變。
-    expect(snapshot(core, uuid, asset.id)).toEqual({ ...before, approved: false });
-    const replacedEvents = core.listEvents(uuid).filter((event) => event.eventType === 'media_replaced');
-    expect(replacedEvents.map((event) => event.status)).toEqual(['failed']);
+    expect(core.listFactChecks(uuid).latestRun).toMatchObject({ status: 'succeeded' });
   });
 });
 
@@ -861,6 +849,33 @@ describe('結果的生命週期', () => {
     expect(finding!.resolvedAt).not.toBeNull();
     const row = fixture!.db.handle.prepare('SELECT resolved_revision_id FROM factcheck_findings WHERE id = ?').get(id);
     expect(row).toEqual({ resolved_revision_id: revision.id });
+  });
+
+  it('去原文改期間那條被 supersede（查證中又查了同一句）：帶舊 id 存檔照存、不結案、不報錯（審查 1）', async () => {
+    const { core, uuid } = await setup();
+    const first = await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+    const oldId = first.findings[0]!.id;
+    // 使用者按了「去原文改」進打字模式；這時又跑了一次同一句的查證，舊那條變 superseded。
+    await core.runFactCheck(uuid, { provider: 'claude', scope: 'selection', selection: EXCERPT });
+    const revision = core.createRevision(uuid, { editedBody: BODY.replace('1995', '1994'), resolveFactCheckId: oldId });
+    expect(revision.contentHash).toBe(core.getJob(uuid).currentRevision!.contentHash);
+    const row = fixture!.db.handle.prepare('SELECT status, resolved_revision_id FROM factcheck_findings WHERE id = ?').get(oldId);
+    expect(row).toEqual({ status: 'superseded', resolved_revision_id: null });
+  });
+
+  it('去原文改指向已知道了／已結案的那條：照存、不改它的下場；不屬於這篇的才拒絕', async () => {
+    const { core, uuid } = await setup();
+    const { findings } = await core.runFactCheck(uuid, { provider: 'claude', scope: 'article' });
+    const id = findings[0]!.id;
+    core.dismissFactCheck(uuid, id);
+    expect(() => core.createRevision(uuid, { editedBody: BODY.replace('1995', '1994'), resolveFactCheckId: id })).not.toThrow();
+    expect(core.listFactChecks(uuid).findings[0]!.status).toBe('dismissed');
+    expect(() => core.createRevision(uuid, { editedBody: BODY.replace('1995', '1993'), resolveFactCheckId: id })).not.toThrow();
+    const other = core.createJob({ targetKey: 'read-think', sourceText: '別篇。', title: '別篇' }).uuid;
+    core.createRevision(other, { editedBody: '<p class="wp-block-paragraph">別篇的正文。</p>' });
+    expect(
+      await caught(() => core.createRevision(other, { editedBody: '<p class="wp-block-paragraph">改了。</p>', resolveFactCheckId: id })),
+    ).toBeInstanceOf(InvalidInputError);
   });
 
   it('後端重啟：跑中的查證紀錄結成失敗（「後端重啟，這次沒有完成」）', async () => {

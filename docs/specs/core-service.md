@@ -28,7 +28,7 @@
 | `approval.ts` | 核准、撤銷；**核准失效的唯一入口 `invalidateApproval`** | `approve`、`revokeApproval` | `invalidateApproval`、`assertApprovalUnchanged` |
 | `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
 | `authors.ts` | 作者清單、預設作者檢查、發布時送哪位 | `listAuthors`、`assertAuthorChoosable` | `resolvePublishAuthor` |
-| `factcheck.ts` | AI 查證（D-034，P6-T004）：兩趟 Agent＋抓網頁＋核對、存結果、讀取與結案、跑的期間鎖內容；純函式在 `src/core/factcheck.ts` | `runFactCheck`、`listFactChecks`、`dismissFactCheck` | `cancelActive`、`cancelOrphan`（`agent.ts` 的取消轉過來）、`assertNotRunning`、`requireOpenFinding`、`resolveByEdit`（`content.ts`）、`agentRunView`、`openContradictionCount`（`jobs.ts`） |
+| `factcheck.ts` | AI 查證（D-034，P6-T004）：兩趟 Agent＋抓網頁＋核對、存結果、讀取與結案（跑的期間不鎖內容，D-036）；純函式在 `src/core/factcheck.ts` | `runFactCheck`、`listFactChecks`、`dismissFactCheck` | `cancelActive`、`cancelOrphan`（`agent.ts` 的取消轉過來）、`requireOpenFinding`、`findingToResolveByEdit`、`resolveByEdit`（`content.ts`）、`agentRunView`、`openContradictionCount`（`jobs.ts`） |
 
 **內容修改造成的核准失效**只走 `approval.ts` 的 `invalidateApproval`（`content.ts` 的 `createRevision` 與 `media.ts` 的換圖呼叫它），
 規則見 [state-machine.md](state-machine.md)「核准失效的實作點」。其他模組不准為了內容修改自己撤銷核准。
@@ -127,7 +127,7 @@ interface CoreService {
    * 命中整次失敗、不存任何結果、記 `factcheck_secret_in_result`。存結果（supersede、寫入、結成 succeeded、事件）包在同一個交易（`Repository.transaction`）。
    * 第二趟組好的 prompt 含密碼 InvalidInputError（整次失敗）。結果**永不自動套用**、不建版本、不動核准、不寫 review_items；
    * 同一句（忽略空白）已有 open 的舊結果標成 superseded。被停止丟 AgentError「查證已停止，沒有留下任何結果」。
-   * 跑的期間佔 `activeRuns`（跟其他 Agent 動作互斥），`createRevision` 一律 AgentError（`FACTCHECK_LOCKED_MESSAGE`）。
+   * 跑的期間佔 `activeRuns`（跟其他 Agent 動作互斥），但**不鎖內容**（D-036）：照樣可以改字、放圖、套用建議。
    */
   runFactCheck(uuid: string, input: FactCheckInput): Promise<FactCheckRunResult>;
   /** 這篇的查證結果（不含 superseded），依段落順序；blockIndex 與 excerptGone（原句已經改了）讀取時算。 */

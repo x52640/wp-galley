@@ -54,7 +54,7 @@ describe('canInsertImages', () => {
 
 /** 選字「查證這句」的膠囊什麼時候出現（P6-T005）：看文章、沒在改字、稿件沒結束。AI 在跑時照樣出現但反灰講原因。 */
 describe('canSelectToFactCheck', () => {
-  const idle = { editing: false, finished: false };
+  const idle = { finished: false };
 
   it('看文章時出現', () => {
     expect(canSelectToFactCheck(stageDisplay('article', false), idle)).toBe(true);
@@ -65,8 +65,12 @@ describe('canSelectToFactCheck', () => {
     expect(canSelectToFactCheck(stageDisplay('article', true), idle)).toBe(false);
   });
 
-  it('改字中、稿件結束時不出現', () => {
-    expect(canSelectToFactCheck(stageDisplay('article', false), { ...idle, editing: true })).toBe(false);
-    expect(canSelectToFactCheck(stageDisplay('article', false), { ...idle, finished: true })).toBe(false);
+  it('稿件結束時不出現', () => {
+    expect(canSelectToFactCheck(stageDisplay('article', false), { finished: true })).toBe(false);
+  });
+
+  it('改字中（打字模式）也出現（D-036）：條件裡沒有「沒在改字」', () => {
+    // 打字模式的版面跟看文章一樣（不是對照、不是成品），膠囊照樣出得來。
+    expect(canSelectToFactCheck(stageDisplay('article', false), idle)).toBe(true);
   });
 });
