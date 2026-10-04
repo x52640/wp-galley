@@ -1,7 +1,7 @@
 ---
 id: P5-T042
 phase: 5
-status: ready
+status: done
 depends_on: [P5-T041]
 specs: [architecture.md, design-system.md]
 write_paths: ["src/ui/components/ProofView.tsx", "src/ui/components/EditToolbar.tsx", "src/ui/lib/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T042-proofview-editing.md"]
@@ -50,15 +50,17 @@ P5-T041 之後 ProofView 剩下最大的一塊是**打字模式**：進出編輯
 改原文 → 打字 → 儲存；格式工具列（粗體、H2、清單、連結）；改標題；貼上網頁格式出現丟格式警告 → 照樣存；取消；卡片「自己改／去原文改」。
 
 ## 完成定義
-- [ ] `npm run verify` 綠，測試數不減
-- [ ] 改動前後截圖逐張相同
-- [ ] `docs/specs/architecture.md` 功能地圖對應欄已更新
+- [x] `npm run verify` 綠，測試數不減
+- [x] 改動前後截圖逐張相同
+- [x] `docs/specs/architecture.md` 功能地圖對應欄已更新
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：等 P5-T040（PR #28）合併後派實作 subagent
-- Blocker：P5-T040 也在改 `ProofView.tsx`／`Workspace.tsx`
+- 最後完成：抽出 `lib/use-proof-editing.ts`（`useProofEditing`：編輯狀態、原文快照、存檔含照樣存與整理後換回畫面、hold、錯誤、格式與連結狀態、`actWhileWriting`）、`lib/proof-editing.ts`（`decideEditSave`、`editBarNote`、`replaceWithSavedBody`，純函式）、`components/EditToolbar.tsx`（`EditBar` 提示列與取消／儲存、`EditToolbar` 格式工具列與連結、`DropWarning`）；`tests/proof-editing.test.ts`（16）；功能地圖三列已更新；ProofView 1343 → 896 行。effect 順序不變：hook 只有一個 effect、呼叫在它抽出前的位置；進出編輯（`syncEditing`）與版本被換掉（`abandonOnNewVersion`）的 effect 留在 ProofView 原位、只呼叫 hook 給的函式；`useSelectionActions` 改呼叫 `edit.actWhileWriting`（2026-10-05）
+- 已通過驗證：`npm run verify` 94 → 95 檔、2094 → 2110 測試；`?fixtures=1` 29 張改動前（跑兩次）／改動後（跑兩次）逐張像素比對：DOM 狀態（正文 HTML、狀態列、焦點、選取）四次逐字相同；21 張像素相同，8 張差異都是改動前兩次之間也會變的東西（版本 hash 小標、查證進度條與計時器、捲軸淡出時機、圓角反鋸齒 ±1）
+- 下一步：P5-T043（同一個 PR A）
+- Blocker：無
 
 ## 完成結果
+- 獨立審查一輪：無行為差異（effect 順序與依賴、閉包讀值、ref 更新時機、存檔流程、工具列 DOM 逐項對過）。
+- 殘餘：`tests/proof-editing.test.ts` 的守門測試靠找原始碼字串判斷 hook 順序，改名會誤報、換寫法防不了；`SelectionActions.tsx` 兩處註解仍寫 `actWhileWriting` 在 ProofView（該檔不在本 Task write_paths，待使用者決定）。

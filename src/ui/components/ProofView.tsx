@@ -5,41 +5,6 @@ import { Icon } from '../icons.js';
 import { findIgnoringSpaces } from '../../contract/text-match.js';
 import { shortHash } from '../lib/format.js';
 import type { SuggestionKind } from '../lib/review-kinds.js';
-import { FormatBar, type LinkEditorState } from './FormatBar.js';
-import {
-  availableCommands,
-  formatStateFrom,
-  nextLinkEditor,
-  type FormatCommand,
-  type FormatState,
-} from '../lib/rich-format.js';
-import {
-  applyLink,
-  cleanEditedBody,
-  snapshotBody,
-  snapshotHtml,
-  replaceBodyKeepingCaret,
-  currentLink,
-  removeLink,
-  runCommand,
-  saveSelection,
-  selectionAncestors,
-  selectionEmphasis,
-  type RichAllow,
-} from '../lib/rich-commands.js';
-import type { RichUnit } from '../../contract/rich-text.js';
-import { isBlankBody } from '../../contract/empty-body.js';
-import { readString } from '../lib/format.js';
-import { decideProofSave } from '../lib/write-in-place.js';
-import {
-  beginHold,
-  editBarSavedNote,
-  planSelectionCheck,
-  saveThenAct,
-  settleHold,
-  shownFrame,
-  type ProofHold,
-} from '../lib/check-while-writing.js';
 import { markScopes, pickClickedMark } from '../lib/factcheck-view.js';
 import {
   SelectionActions,
@@ -48,17 +13,9 @@ import {
   type SelectionCheckInput,
   type SelectionImageInput,
 } from './SelectionActions.js';
-import { stillOnJob } from '../lib/selection-image-view.js';
-import { missingTargetNotice } from '../lib/edit-target.js';
-import {
-  attachEditInterceptors,
-  disableWriting,
-  editTarget,
-  enableWriting,
-  markBlank,
-  showEditTarget,
-  unwrapHighlightMarks,
-} from '../lib/proof-edit-dom.js';
+import { attachEditInterceptors, markBlank, unwrapHighlightMarks } from '../lib/proof-edit-dom.js';
+import { useProofEditing } from '../lib/use-proof-editing.js';
+import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
 
 /**
  * 中央校樣。
@@ -94,6 +51,8 @@ import {
  * 編輯時把 `.preview-body` 設成 contenteditable：使用者看到的是排好版的文章，不是標籤。
  * 這不需要 iframe 跑任何 script——打字是瀏覽器本身的行為，貼上的攔截與游標定位都由外層做。
  * 編輯中暫停字上標記與頁邊符號（位置會隨打字跑掉）。存檔送的是正文 HTML，後端整理後照常渲染。
+ * 打字模式的狀態與流程（進出編輯、原文快照、存檔與照樣存、hold、錯誤、格式與連結）在 `lib/use-proof-editing.ts`，
+ * 提示列、格式工具列、丟格式警告的畫面在 `EditToolbar.tsx`（P5-T042）；這裡只把 iframe 文件、量測與捲動容器接給它。
  *
  * **六、格式工具列（P5-T028）。**
  * 編輯中上方多一排格式按鈕（連結、粗體、斜體、H2、H3、段落、清單、引用、分隔線），出現哪些照模板的
@@ -119,8 +78,8 @@ import {
  * 打字模式也出現：只在有非空選取時，開始打字、按 Esc、選取消失就收起。按下時內容有改就先照「儲存」存一版
  * （`onSaveEdit` 帶 `stay`），**留在打字模式、校樣不重載**（`lib/check-while-writing.ts` 的 hold：iframe 維持原本載著的那一版，
  * 游標、捲動、存檔之後又打的字都留著；離開打字模式才重載成後端存好的那一版），存好再查；存失敗就不查。
- * 膠囊、面板與按下去之後的流程在 `SelectionActions.tsx`（P5-T041）；這裡只把 iframe 的選取事件交給它，
- * 以及「先存再做」（`actWhileWriting`，跟「儲存」共用存檔狀態）。
+ * 膠囊、面板與按下去之後的流程在 `SelectionActions.tsx`（P5-T041）；這裡只把 iframe 的選取事件交給它。
+ * 「先存再做」（`actWhileWriting`，跟「儲存」共用存檔狀態）在打字模式的 hook（`lib/use-proof-editing.ts`，P5-T042）。
  *
  * **七、選字「用此段配圖」（P5-T038，D-037）。**
  * 同一顆膠囊多一顆「用此段配圖」（上層給 `selectionImage` 才有；只選到標題的不給）。按下打開一個小面板：
@@ -308,9 +267,6 @@ export function ProofView({
   /** 打開了哪一個「在這裡插圖」（插在第幾塊之後）；null＝沒打開。 */
   const [inserting, setInserting] = useState<number | null>(null);
   const [showMarks, setShowMarks] = useState(true);
-  /** 目前是哪一篇：存檔後的接續動作回來時不是發起那一篇就什麼都不做（Workspace 換篇沿用這個元件，第二輪審查）。 */
-  const jobUuidRef = useRef(job.uuid);
-  jobUuidRef.current = job.uuid;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   /**
@@ -333,45 +289,6 @@ export function ProofView({
   const activeHighlightRef = useRef(activeHighlight);
   activeHighlightRef.current = activeHighlight;
   const [loadCount, setLoadCount] = useState(0);
-  const isEditing = editing !== null;
-  const editingRef = useRef(isEditing);
-  editingRef.current = isEditing;
-  const onEndEditRef = useRef(onEndEdit);
-  onEndEditRef.current = onEndEdit;
-  const onEditTargetMissingRef = useRef(onEditTargetMissing);
-  onEditTargetMissingRef.current = onEditTargetMissing;
-  /** 進入編輯那一刻的正文，用來判斷「有沒有改」與取消時還原。 */
-  const originalBody = useRef<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  /** 打字模式存好之後的動作（查證、用此段配圖）自己出錯：只講它的錯，不當成存檔失敗（P5-T038 審查 3）。 */
-  const [actError, setActError] = useState<string | null>(null);
-  /** 進入編輯那一刻、整理過的正文：存檔時比對「有沒有改」要用同一套整理規則，不然沒改也會算改。 */
-  const originalClean = useRef<string | null>(null);
-  /** 進入編輯那一刻的頂層區塊：存檔時沒動過的區塊原樣保留，只整理改過的（P5-T028 審查）。 */
-  const originalUnits = useRef<RichUnit[] | null>(null);
-  /** 進入編輯那一刻的標題（P5-T029）：取消時還原、存檔時比對有沒有改。 */
-  const originalTitle = useRef<string | null>(null);
-  const savedTitle = readString(job.currentRevision?.templateData ?? null, 'title', job.title ?? '');
-  const isDiary = job.target.contentType === 'diary';
-
-  // --- 格式（P5-T028） ---
-  const allow: RichAllow = { tags: job.template.allowedTags, schemes: job.template.allowedSchemes };
-  const allowRef = useRef(allow);
-  allowRef.current = allow;
-  const commands = availableCommands(allow.tags);
-  const commandsRef = useRef(commands);
-  commandsRef.current = commands;
-  /** 游標所在的格式；null＝游標不在正文裡（或不在編輯中）。 */
-  const [formatState, setFormatState] = useState<FormatState | null>(null);
-  const formatStateRef = useRef(formatState);
-  formatStateRef.current = formatState;
-  const [linkEditor, setLinkEditor] = useState<LinkEditorState | null>(null);
-  /** 打開連結輸入框時存下的選取範圍與既有連結：焦點離開 iframe 後還要套在同一段字上。 */
-  const linkTarget = useRef<{ range: Range | null; existing: Element | null } | null>(null);
-  const linkSessions = useRef(0);
-  /** 存檔時發現有模板不支援、會被拿掉的格式：先講出來，使用者按「照樣存」才存。 */
-  const [dropWarning, setDropWarning] = useState<string[] | null>(null);
 
   const revisionKey = job.currentRevision?.contentHash ?? 'none';
   const hasRevision = job.currentRevision !== null;
@@ -388,20 +305,58 @@ export function ProofView({
   useEffect(() => {
     if (job.state === 'RENDERED') setRenderEpoch((epoch) => epoch + 1);
   }, [job.state]);
-  /** 打字中按「查證這句」先存的那幾版（D-036）：iframe 維持原本載著的那一版，不重載（見檔頭「六」）。 */
-  const [hold, setHold] = useState<ProofHold | null>(null);
-  /** 這次打字中自動存過一版（審查 4）：提示列講「按取消會回到這一版」。 */
-  const [autoSaved, setAutoSaved] = useState(false);
-  const holdRef = useRef(hold);
-  holdRef.current = hold;
-  useEffect(() => {
-    if (!isEditing) {
-      setHold(null);
-      setAutoSaved(false);
-      setActError(null);
+  const measure = useCallback((token: number) => {
+    if (token !== measureToken.current) return;
+    const frame = frameRef.current;
+    const doc = frame?.contentDocument;
+    if (!frame || !doc?.body) return;
+
+    // 先讓 iframe 貼齊內容高度，量到的座標才等於文件座標（contentHeight 說明為什麼不用 scrollHeight）。
+    // 文件本身不能捲（html overflow: hidden）；打字時瀏覽器為了游標把它捲下去的，捲回頂端。
+    const scrollY = frame.contentWindow?.scrollY ?? 0;
+    setHeight(Math.max(contentHeight(doc), 200));
+
+    const body = doc.querySelector('.preview-body');
+    const children = body ? Array.from(body.children) : [];
+    if (body) {
+      const box = body.getBoundingClientRect();
+      setColumn((current) =>
+        current !== null && current.left === box.left && current.width === box.width
+          ? current
+          : { left: box.left, width: box.width },
+      );
     }
-  }, [isEditing]);
-  const shown = shownFrame({ editing: isEditing, hold, revisionKey, renderEpoch });
+    const measured = children.map((element, index) => {
+      const box = element.getBoundingClientRect();
+      return {
+        index,
+        top: box.top + scrollY,
+        height: box.height,
+        text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+      };
+    });
+    setBlocks(measured);
+    onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
+    if (scrollY !== 0) frame.contentWindow?.scrollTo(0, 0);
+  }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 打字模式（P5-T042 抽出）：編輯狀態、原文快照、存檔、hold、錯誤、格式工具列。
+  // 必須呼叫在這個位置：裡面唯一的 effect（離開打字模式清掉 hold）抽出前就排在這裡；
+  // 進入／離開編輯與「版本被換掉」的 effect 仍在下面原位，只呼叫它給的函式。
+  const edit = useProofEditing({
+    job,
+    editing,
+    revisionKey,
+    renderEpoch,
+    frameRef,
+    scrollRef,
+    measure,
+    measureToken,
+    onSaveEdit,
+    onEndEdit,
+    onEditTargetMissing,
+  });
+  const { isEditing, editingRef, hold, shown, saving, refreshFormat } = edit;
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
   const previewSrc = `${job.previewUrl}?v=${shown.key}&r=${shown.epoch}`;
 
@@ -447,12 +402,8 @@ export function ProofView({
    * 區塊清空並且通知父層，等新的校樣量完才會再有東西可選。
    */
   useEffect(() => {
-    // 編輯到一半版本被換掉（理論上編輯中動作都鎖住了，這是最後一道防線）：
-    // 校樣要重載，打的字留不住，至少要講出來，不能靜靜消失。
-    if (editingRef.current) {
-      originalBody.current = null;
-      onEndEditRef.current?.('這篇稿件在你編輯的時候有了新版本，剛才打的字沒有存到。請再改一次。');
-    }
+    // 編輯到一半版本被換掉（理論上編輯中動作都鎖住了，這是最後一道防線）：打的字留不住，要講出來（useProofEditing）。
+    edit.abandonOnNewVersion();
     measureToken.current += 1;
     setLoading(true);
     setBodyMissing(false);
@@ -487,103 +438,6 @@ export function ProofView({
   }, [job.uuid, revisionKey, hasRevision]);
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
-
-  const measure = useCallback((token: number) => {
-    if (token !== measureToken.current) return;
-    const frame = frameRef.current;
-    const doc = frame?.contentDocument;
-    if (!frame || !doc?.body) return;
-
-    // 先讓 iframe 貼齊內容高度，量到的座標才等於文件座標（contentHeight 說明為什麼不用 scrollHeight）。
-    // 文件本身不能捲（html overflow: hidden）；打字時瀏覽器為了游標把它捲下去的，捲回頂端。
-    const scrollY = frame.contentWindow?.scrollY ?? 0;
-    setHeight(Math.max(contentHeight(doc), 200));
-
-    const body = doc.querySelector('.preview-body');
-    const children = body ? Array.from(body.children) : [];
-    if (body) {
-      const box = body.getBoundingClientRect();
-      setColumn((current) =>
-        current !== null && current.left === box.left && current.width === box.width
-          ? current
-          : { left: box.left, width: box.width },
-      );
-    }
-    const measured = children.map((element, index) => {
-      const box = element.getBoundingClientRect();
-      return {
-        index,
-        top: box.top + scrollY,
-        height: box.height,
-        text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
-      };
-    });
-    setBlocks(measured);
-    onBlocksRef.current?.(measured.map(({ index, text }) => ({ index, text })));
-    if (scrollY !== 0) frame.contentWindow?.scrollTo(0, 0);
-  }, []);
-
-  const editBody = (): HTMLElement | null =>
-    frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-body') ?? null;
-
-  /** 重讀游標所在的格式（按鈕亮起與停用）。 */
-  const refreshFormat = useCallback(() => {
-    const doc = frameRef.current?.contentDocument;
-    const body = doc?.querySelector('.preview-body');
-    if (!doc || !body || !editingRef.current) {
-      setFormatState(null);
-      return;
-    }
-    const ancestors = selectionAncestors(doc, body);
-    setFormatState(ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body)));
-  }, []);
-
-  const openLinkEditor = useCallback(() => {
-    const doc = frameRef.current?.contentDocument;
-    const body = doc?.querySelector('.preview-body');
-    if (!doc || !body || !commandsRef.current.includes('link')) return;
-    const existing = currentLink(doc, body);
-    linkTarget.current = { range: saveSelection(doc, body), existing };
-    linkSessions.current += 1;
-    const counter = linkSessions.current;
-    setLinkEditor((previous) => nextLinkEditor(previous, existing?.getAttribute('href') ?? null, counter));
-  }, []);
-
-  const closeLinkEditor = useCallback((refocus = true) => {
-    setLinkEditor(null);
-    const target = linkTarget.current;
-    linkTarget.current = null;
-    const frame = frameRef.current;
-    const body = frame?.contentDocument?.querySelector<HTMLElement>('.preview-body');
-    if (!refocus || !frame || !body) return;
-    frame.contentWindow?.focus();
-    body.focus();
-    if (target?.range) {
-      const selection = frame.contentDocument?.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(target.range);
-    }
-  }, []);
-
-  const doCommand = useCallback(
-    (command: FormatCommand) => {
-      const frame = frameRef.current;
-      const body = frame?.contentDocument?.querySelector<HTMLElement>('.preview-body');
-      const state = formatStateRef.current;
-      if (!frame || !body || !editingRef.current || !commandsRef.current.includes(command)) return;
-      if (command === 'link') {
-        openLinkEditor();
-        return;
-      }
-      if (state === null) return;
-      runCommand(frame, body, command, state);
-      refreshFormat();
-      measure(measureToken.current);
-    },
-    [measure, openLinkEditor, refreshFormat],
-  );
-  const doCommandRef = useRef(doCommand);
-  doCommandRef.current = doCommand;
 
   const handleLoad = useCallback(() => {
     const token = measureToken.current;
@@ -632,9 +486,9 @@ export function ProofView({
     // 貼上整理、拖放、按鍵攔截（P5-T028、P5-T029）：規則在 lib/proof-edit.ts。
     attachEditInterceptors(doc, {
       isEditing: () => editingRef.current,
-      allow: () => allowRef.current,
-      formatState: () => formatStateRef.current,
-      runCommand: (command) => doCommandRef.current(command),
+      allow: () => edit.allowRef.current,
+      formatState: () => edit.formatStateRef.current,
+      runCommand: (command) => edit.doCommandRef.current(command),
     });
     doc.addEventListener('selectionchange', () => {
       if (editingRef.current) refreshFormat();
@@ -651,7 +505,6 @@ export function ProofView({
   // 從清單點過來的那一段：捲過去並畫框。量測還沒好就先不動，等量完這個 effect
   // 會因為 blocks 改變再跑一次。
   const focused = focusBlock === null ? undefined : blocks.find((block) => block.index === focusBlock);
-  const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const frame = frameRef.current;
     const scroller = scrollRef.current;
@@ -705,249 +558,17 @@ export function ProofView({
     });
   }, [activeHighlight, mode, loadCount]);
 
-  // 進入／離開編輯。標記的拆除由上面那個 effect 負責（isEditing 變了它會重跑）。
+  // 進入／離開編輯（內容在 useProofEditing）。標記的拆除由上面那個 effect 負責（isEditing 變了它會重跑）。
   useEffect(() => {
-    const frame = frameRef.current;
-    const doc = frame?.contentDocument;
-    const body = doc?.querySelector<HTMLElement>('.preview-body');
-    if (!frame || !doc || !body) return;
-    const title = doc.querySelector<HTMLElement>('.preview-title');
-    if (editing === null) {
-      disableWriting(frame, body, title);
-      originalTitle.current = null;
-      originalBody.current = null;
-      originalClean.current = null;
-      originalUnits.current = null;
-      setFormatState(null);
-      setLinkEditor(null);
-      setDropWarning(null);
-      pendingCheck.current = null;
-      linkTarget.current = null;
-      return;
-    }
-    unwrapHighlightMarks(body);
-    // 標題要變成可打字（plaintext-only）之前，查證留在標題上的標記先拆掉。
-    if (title) unwrapHighlightMarks(title);
-    if (originalBody.current === null) {
-      originalBody.current = body.innerHTML;
-      originalUnits.current = snapshotBody(body);
-      originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
-      originalTitle.current = title?.textContent ?? null;
-      // 空文章（新稿件剛建好）：放一個有高度的空段落，游標才有地方停（存檔時照樣整理掉）。
-      if (isBlankBody(body.innerHTML)) body.innerHTML = '<p><br></p>';
-    }
-    enableWriting(doc, body, title);
-    setSaveError(null);
-
-    const { caret: range, target, inTitle } = editTarget(doc, body, title, editing);
-    showEditTarget(frame, target);
-    const missing = missingTargetNotice(editing.caret, target !== null);
-    if (missing !== null) onEditTargetMissingRef.current?.(missing);
-    frame.contentWindow?.focus();
-    // 講標題的建議（P5-T031）：焦點給標題，不然游標會被拉回正文。
-    (inTitle && title ? title : body).focus();
-    const selection = doc.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    refreshFormat();
-
-    const scroller = scrollRef.current;
-    const anchor = range.startContainer.nodeType === 1 ? (range.startContainer as Element) : range.startContainer.parentElement;
-    if (scroller && anchor) {
-      const offset = frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const top = anchor.getBoundingClientRect().top + (frame.contentWindow?.scrollY ?? 0);
-      scroller.scrollTo({
-        top: Math.max(offset + top - 160, 0),
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-      });
-    }
+    edit.syncEditing();
     // editing 物件本身每次都是新的；nonce 才代表「又要求了一次」。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.nonce, isEditing, loadCount]);
 
-  const cancelEdit = (): void => {
-    const body = editBody();
-    if (body && originalBody.current !== null) body.innerHTML = originalBody.current;
-    restoreTitle();
-    measure(measureToken.current);
-    onEndEdit?.();
-  };
-
-  const titleElement = (): HTMLElement | null =>
-    frameRef.current?.contentDocument?.querySelector<HTMLElement>('.preview-title') ?? null;
-  /** 標題改回進入編輯時的字（取消、沒改、後端說沒變）。 */
-  const restoreTitle = (): void => {
-    const title = titleElement();
-    if (title && originalTitle.current !== null) title.textContent = originalTitle.current;
-  };
-
-  /**
-   * 打字模式按「查證這句」或「用此段配圖」時內容有會被拿掉的格式、正在問「照樣存」：存好之後要做的事。
-   */
-  const pendingCheck = useRef<(() => void | Promise<void>) | null>(null);
-
-  const saveEdit = async (force = false): Promise<void> => {
-    // 按的是「儲存」：之前「查證這句」留下、等著「照樣存」的那段字作廢。
-    pendingCheck.current = null;
-    const body = editBody();
-    if (!body) return;
-    // 存檔前整理一次（P5-T028）：b／i 轉 strong／em、瀏覽器的 div／<p><ul> 整理好、模板不支援的格式拿掉。
-    // 後端照同一套規則再整理一次，再走 sanitize。
-    const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
-    // 先拿到手：存檔成功時上層會結束編輯，編輯 effect 會把 originalBody 清掉。
-    const original = originalBody.current;
-    const title = titleElement();
-    // 標題與正文一起決定（P5-T029）：有改的才送；標題清空不准存。
-    const decision = decideProofSave({
-      bodyCleaned: html,
-      bodyOriginal: originalClean.current ?? (original ?? '').trim(),
-      dropped,
-      force,
-      titleText: title === null ? null : (title.textContent ?? ''),
-      titleOriginal: originalTitle.current ?? savedTitle,
-      diary: isDiary,
-      titleMaxLength: job.template.titleMaxLength,
-    });
-    if (decision.kind === 'unchanged') {
-      // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，
-      // 不然校樣多一個空區塊，「在這裡插圖」的索引會跟後端差一格（審查 #1）。
-      if (original !== null) body.innerHTML = original;
-      restoreTitle();
-      measure(measureToken.current);
-      onEndEdit?.();
-      return;
-    }
-    if (decision.kind === 'invalid-title') {
-      setDropWarning(null);
-      setSaveError(decision.message);
-      title?.focus();
-      return;
-    }
-    // 格式不能默默消失：有會被拿掉的，先講出來。
-    if (decision.kind === 'confirm-drop') {
-      setDropWarning([...decision.dropped]);
-      return;
-    }
-    setDropWarning(null);
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const savedHash = await onSaveEdit?.({
-        ...(decision.editedBody === undefined ? {} : { editedBody: decision.editedBody }),
-        ...(decision.editedTitle === undefined ? {} : { editedTitle: decision.editedTitle }),
-      });
-      // 整理之後跟原本一樣（例如只多按了一個 Enter），後端不建新版本，校樣也不會重載；
-      // 把畫面還原成那一版，不要留著沒整理過的樣子。
-      if (savedHash === revisionKey && original !== null) {
-        body.innerHTML = original;
-        restoreTitle();
-        measure(measureToken.current);
-      }
-    } catch (cause) {
-      setSaveError(describeError(cause));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /**
-   * 打字模式按「查證這句」（D-036）或「用此段配圖」（P5-T038）：沒改直接做；有改先照「儲存」存一版（同樣的驗證與錯誤處理），
-   * 存完留在打字模式、校樣不重載，再用存好的那一版做。存失敗就不做，照存檔失敗的方式講。
-   */
-  const actWhileWriting = async (act: () => void | Promise<void>, force = false): Promise<void> => {
-    setActError(null);
-    // 存檔之後的每一步都先確認還在發起的那一篇（第二輪審查）。
-    const origin = job.uuid;
-    const stillHere = (): boolean => stillOnJob({ alive: true, current: jobUuidRef.current, origin });
-    const body = editBody();
-    if (!body) return;
-    const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
-    const title = titleElement();
-    const plan = planSelectionCheck(
-      decideProofSave({
-        bodyCleaned: html,
-        bodyOriginal: originalClean.current ?? (originalBody.current ?? '').trim(),
-        dropped,
-        force,
-        titleText: title === null ? null : (title.textContent ?? ''),
-        titleOriginal: originalTitle.current ?? savedTitle,
-        diary: isDiary,
-        titleMaxLength: job.template.titleMaxLength,
-      }),
-    );
-    if (plan.kind === 'check') {
-      pendingCheck.current = null;
-      setDropWarning(null);
-      try {
-        await act();
-      } catch (cause) {
-        setActError(describeError(cause));
-      }
-      return;
-    }
-    if (plan.kind === 'invalid-title') {
-      pendingCheck.current = null;
-      setDropWarning(null);
-      setSaveError(plan.message);
-      return;
-    }
-    if (plan.kind === 'confirm-drop') {
-      pendingCheck.current = act;
-      setDropWarning([...plan.dropped]);
-      return;
-    }
-    pendingCheck.current = null;
-    setDropWarning(null);
-    setSaving(true);
-    setSaveError(null);
-    // 存的那一刻的樣子：存好之後「有沒有改」改跟這一版比。等回應的期間使用者可能還在打，不能拿那時的畫面當基準。
-    const rawAtSave = body.innerHTML;
-    const started = beginHold(holdRef.current, shown);
-    holdRef.current = started;
-    setHold(started);
-    await saveThenAct({
-      save: async () => (await onSaveEdit?.({ ...plan.save, stay: true })) ?? null,
-      onSaved: (savedHash) => {
-        setSaving(false);
-        if (!stillHere()) return;
-        const settled = settleHold(started, savedHash);
-        holdRef.current = settled;
-        setHold(settled);
-        // 照樣存（有會被拿掉的格式）：畫面換成存進去的樣子，不然那些格式留在畫面上、之後每次存都再問一次（審查 3）。
-        // 等回應的期間又打了字就不換（換了會丟字），下次存再照常問。
-        let rawNow = rawAtSave;
-        const doc = frameRef.current?.contentDocument;
-        if (force && plan.save.editedBody !== undefined && doc && body.innerHTML === rawAtSave) {
-          replaceBodyKeepingCaret(doc, body, plan.save.editedBody);
-          rawNow = body.innerHTML;
-          measure(measureToken.current);
-        }
-        if (plan.save.editedBody !== undefined) originalUnits.current = snapshotHtml(plan.save.editedBody);
-        originalClean.current = html;
-        originalBody.current = rawNow;
-        setAutoSaved(true);
-        if (plan.save.editedTitle !== undefined) originalTitle.current = plan.save.editedTitle;
-      },
-      onSaveFailed: (cause) => {
-        setSaving(false);
-        if (!stillHere()) return;
-        const settled = settleHold(started, null);
-        holdRef.current = settled;
-        setHold(settled);
-        setSaveError(describeError(cause));
-      },
-      // 存好之後的動作自己出錯（P5-T038 審查 3）：只講那個動作的錯，不動 hold（放掉會重載、蓋掉正在打的字）。
-      act: () => (stillHere() ? act() : undefined),
-      onActFailed: (cause) => {
-        if (stillHere()) setActError(describeError(cause));
-      },
-    });
-  };
-
   const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
 
   // 選字之後的膠囊與「用此段配圖」面板（P5-T041）。iframe 的選取事件在 handleLoad 交給它；
-  // handleLoad 與「換版本」的 effect 寫在上面，但都在 render 完才跑，那時這裡已經有值。要等 actWhileWriting 定義完才能呼叫。
+  // handleLoad 與「換版本」的 effect 寫在上面，但都在 render 完才跑，那時這裡已經有值。
   const selectionActions = useSelectionActions({
     jobUuid: job.uuid,
     mode,
@@ -957,7 +578,7 @@ export function ProofView({
     frameRef,
     selectionCheck,
     selectionImage,
-    actWhileWriting,
+    actWhileWriting: edit.actWhileWriting,
   });
 
   // 不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
@@ -1000,18 +621,7 @@ export function ProofView({
           </span>
         </div>
         {isEditing ? (
-          <div className="proof-editbar" role="status">
-            <span className="proof-editbar-note">
-              {editBarSavedNote(autoSaved) ?? '直接在文章上打字，標題也可以點進去改；貼上時保留粗體、連結、標題與清單，其他樣式會拿掉。'}
-            </span>
-            <button type="button" className="btn btn-quiet btn-tiny" disabled={saving} onClick={cancelEdit}>
-              取消
-            </button>
-            <button type="button" className="btn btn-primary btn-tiny" disabled={saving} onClick={() => void saveEdit()}>
-              <Icon name="check" size={13} />
-              {saving ? '儲存中…' : '儲存'}
-            </button>
-          </div>
+          <EditBar edit={edit} />
         ) : (
           <>
         {job.marks.length > 0 && mode === 'edit' && (
@@ -1028,74 +638,17 @@ export function ProofView({
           </>
         )}
       </header>
-      {isEditing && (
-        <FormatBar
-          commands={commands}
-          state={formatState}
-          onCommand={doCommand}
-          link={linkEditor}
-          schemes={allow.schemes}
-          onApplyLink={(href) => {
-            const frame = frameRef.current;
-            const body = editBody();
-            const target = linkTarget.current;
-            setLinkEditor(null);
-            linkTarget.current = null;
-            if (!frame || !body) return;
-            applyLink(frame, body, target?.range ?? null, href, target?.existing ?? null);
-            refreshFormat();
-          }}
-          onRemoveLink={() => {
-            const frame = frameRef.current;
-            const body = editBody();
-            const existing = linkTarget.current?.existing ?? null;
-            setLinkEditor(null);
-            linkTarget.current = null;
-            if (!frame || !body || existing === null) return;
-            removeLink(frame, body, existing);
-            refreshFormat();
-          }}
-          onCloseLink={() => closeLinkEditor()}
-        />
-      )}
-      {dropWarning !== null && (
-        <div className="proof-status proof-status-warn" role="alert">
-          <Icon name="alert" size={15} />
-          <span>這個版型不支援：{dropWarning.join('、')}。存檔時會拿掉這些格式，字會留著。</span>
-          <button
-            type="button"
-            className="btn btn-quiet btn-tiny"
-            onClick={() => {
-              pendingCheck.current = null;
-              setDropWarning(null);
-            }}
-          >
-            回去改
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-tiny"
-            disabled={saving}
-            onClick={() => {
-              // 從「查證這句」／「用此段配圖」來的：照樣存之後留在打字模式、接著做（D-036、P5-T038）；從「儲存」來的照舊存完離開。
-              const act = pendingCheck.current;
-              if (act !== null) void actWhileWriting(act, true);
-              else void saveEdit(true);
-            }}
-          >
-            照樣存
-          </button>
-        </div>
-      )}
-      {saveError && (
+      {isEditing && <EditToolbar edit={edit} />}
+      <DropWarning edit={edit} />
+      {edit.saveError && (
         <p className="proof-status proof-status-bad" role="alert">
-          <Icon name="alert" size={15} /> 沒存成功：{saveError}
+          <Icon name="alert" size={15} /> 沒存成功：{edit.saveError}
         </p>
       )}
       <SelectionNotice actions={selectionActions} />
-      {actError && !saveError && (
+      {edit.actError && !edit.saveError && (
         <p className="proof-status proof-status-bad" role="alert">
-          <Icon name="alert" size={15} /> 已存，但接著的動作沒做成：{actError}
+          <Icon name="alert" size={15} /> 已存，但接著的動作沒做成：{edit.actError}
         </p>
       )}
 
