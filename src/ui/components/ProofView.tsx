@@ -40,18 +40,15 @@ import {
   shownFrame,
   type ProofHold,
 } from '../lib/check-while-writing.js';
-import { markScopes, pickClickedMark, selectionProblem } from '../lib/factcheck-view.js';
-import { FcIcon } from './FactcheckIcon.js';
-import { SelectionImagePanel } from './SelectionImagePanel.js';
+import { markScopes, pickClickedMark } from '../lib/factcheck-view.js';
 import {
-  capsuleNotes,
-  selectionImageHeading,
-  selectionImageProblem,
-  selectionPickStale,
-  settleSpots,
-  stillOnJob,
-} from '../lib/selection-image-view.js';
-import type { SelectionSpotsResponse } from '../service/types.js';
+  SelectionActions,
+  SelectionNotice,
+  useSelectionActions,
+  type SelectionCheckInput,
+  type SelectionImageInput,
+} from './SelectionActions.js';
+import { stillOnJob } from '../lib/selection-image-view.js';
 import { missingTargetNotice } from '../lib/edit-target.js';
 import {
   attachEditInterceptors,
@@ -122,11 +119,13 @@ import {
  * 打字模式也出現：只在有非空選取時，開始打字、按 Esc、選取消失就收起。按下時內容有改就先照「儲存」存一版
  * （`onSaveEdit` 帶 `stay`），**留在打字模式、校樣不重載**（`lib/check-while-writing.ts` 的 hold：iframe 維持原本載著的那一版，
  * 游標、捲動、存檔之後又打的字都留著；離開打字模式才重載成後端存好的那一版），存好再查；存失敗就不查。
+ * 膠囊、面板與按下去之後的流程在 `SelectionActions.tsx`（P5-T041）；這裡只把 iframe 的選取事件交給它，
+ * 以及「先存再做」（`actWhileWriting`，跟「儲存」共用存檔狀態）。
  *
  * **七、選字「用此段配圖」（P5-T038，D-037）。**
  * 同一顆膠囊多一顆「用此段配圖」（上層給 `selectionImage` 才有；只選到標題的不給）。按下打開一個小面板：
  * 選圖放在選取範圍的哪裡（用畫面上的正文定位）、選填一句希望，再送出。打字模式跟「查證這句」同一套：送出時先存再送
- * （`actWhileWriting`）。字數或狀態不對時照樣出現但反灰、講原因。
+ * （`actWhileWriting`）。字數或狀態不對時照樣出現但反灰、講原因。面板與流程同樣在 `SelectionActions.tsx`（P5-T041）。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
@@ -288,19 +287,14 @@ export function ProofView({
    * 選字「查證這句」（P6-T005）。null＝不給（對照、成品、改字中、稿件結束）。
    * `blockedReason` 不是 null 時膠囊照樣出現但反灰、講原因（另一個 AI 動作在跑…）。
    */
-  selectionCheck?: { blockedReason: string | null; note: string | null; onCheck: (text: string) => void } | null;
+  selectionCheck?: SelectionCheckInput | null;
   /**
    * 選字「用此段配圖」（P5-T038）。null＝不給。`blockedReason` 不是 null 時照樣出現但反灰、講原因。
    * 位置選項由後端在存好的那一版上算（`loadSpots`，第二輪審查）：打字模式由這裡先自動存，再問選項。
    * `loadSpots` 換篇時回 null（不顯示）；錯誤丟出來，面板上講。`onRequest` 自己接住錯誤（講在頂端），這裡只等它結束。
    * `currentHash`：畫面知道的目前版本（打字中最後存的那一版，否則工作區的版本）；不是選項來源那一版就關掉面板請重選。
    */
-  selectionImage?: {
-    blockedReason: string | null;
-    currentHash: string | undefined;
-    loadSpots: (text: string) => Promise<SelectionSpotsResponse | null>;
-    onRequest: (input: { text: string; note: string | null; spot: number; contentHash: string }) => Promise<void>;
-  } | null;
+  selectionImage?: SelectionImageInput | null;
 }): JSX.Element {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -314,33 +308,6 @@ export function ProofView({
   /** 打開了哪一個「在這裡插圖」（插在第幾塊之後）；null＝沒打開。 */
   const [inserting, setInserting] = useState<number | null>(null);
   const [showMarks, setShowMarks] = useState(true);
-  /** 選字查證：選了哪段字、膠囊畫在哪（文件座標）。null＝沒選或不給查。 */
-  const [picked, setPicked] = useState<{ text: string; top: number; left: number; inTitle: boolean } | null>(null);
-  /**
-   * 「用此段配圖」打開的面板（P5-T038）：選的那段、畫在哪、後端給的位置選項（`spots` 是 null＝還在問）。
-   */
-  const [imagePick, setImagePick] = useState<{
-    /** 這次打開的請求編號（`settleSpots`）。 */
-    token: number;
-    text: string;
-    top: number;
-    left: number;
-    /** 後端回的位置選項與它用的那一版；送出時原樣帶回。 */
-    spots: SelectionSpotsResponse['spots'] | null;
-    spotsHash: string | null;
-    loadError: string | null;
-    /** 打開時校樣是哪一版：之後被別處改了就關掉請重選（Codex 審查 P2）。 */
-    openedKey: string;
-  } | null>(null);
-  /** 面板因為文章被別處改了而關掉時要講的話。 */
-  const [pickNotice, setPickNotice] = useState<string | null>(null);
-  const [imageSending, setImageSending] = useState(false);
-  /** 「用此段配圖」每次打開面板加一（`settleSpots` 的 token）。 */
-  const pickToken = useRef(0);
-  const selectionCheckRef = useRef(selectionCheck);
-  selectionCheckRef.current = selectionCheck;
-  const selectionImageRef = useRef(selectionImage);
-  selectionImageRef.current = selectionImage;
   /** 目前是哪一篇：存檔後的接續動作回來時不是發起那一篇就什麼都不做（Workspace 換篇沿用這個元件，第二輪審查）。 */
   const jobUuidRef = useRef(job.uuid);
   jobUuidRef.current = job.uuid;
@@ -492,7 +459,7 @@ export function ProofView({
     setBlocks([]);
     setPinned(null);
     setInserting(null);
-    setPicked(null);
+    selectionActions.clearPick();
     onBlocksRef.current?.([]);
     onPreviewHashRef.current?.(null);
     // shown.key：打字中自己存的版本（D-036）不算「被換掉」，離開打字模式時才換。
@@ -647,19 +614,12 @@ export function ProofView({
       );
       onHighlightRef.current?.(key);
     });
-    // 選字查證（P6-T005；打字模式也算，D-036）：上層有給的時候，選了字就在選取下方浮出「查證這句」。
-    // 選取消失（打字會把選取收成游標）就收起。
-    doc.addEventListener('selectionchange', () => {
-      if (selectionCheckRef.current == null) return;
-      setPicked(pickSelection(doc));
-    });
-    doc.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') setPicked(null);
-    });
+    // 選字之後的膠囊（查證這句、用此段配圖；SelectionActions.tsx）：選了字就浮出、Esc 收起。
+    selectionActions.attach(doc);
     // 編輯中：打字會改變高度，要重量；正文空不空決定要不要顯示「從這裡開始寫…」。
     doc.addEventListener('input', () => {
       // 開始打字：膠囊收起（不擋打字）。
-      setPicked(null);
+      selectionActions.clearPick();
       if (!editingRef.current) return;
       const body = doc.querySelector<HTMLElement>('.preview-body');
       if (body) markBlank(body);
@@ -986,81 +946,19 @@ export function ProofView({
 
   const markGroups = mode === 'edit' && !isEditing ? groupMarks(job.marks) : [];
 
-  // 不給選字查證了（進了對照、打開發布面板…）就把膠囊收掉。打字模式照樣給（D-036）。
-  const canPick = selectionCheck !== null && mode === 'edit';
-  useEffect(() => {
-    if (!canPick) setPicked(null);
-  }, [canPick]);
-  const pickProblem = picked === null ? null : (selectionCheck?.blockedReason ?? selectionProblem(picked.text));
-  const pickNote = picked === null ? null : (selectionCheck?.note ?? null);
-  // 「用此段配圖」（P5-T038）：只選到標題的不給。
-  const imageShown = picked !== null && selectionImage !== null && !picked.inTitle;
-  const imageProblem = !imageShown ? null : selectionImageProblem(picked.text, selectionImage.blockedReason);
-  const pickNotes =
-    picked === null ? [] : capsuleNotes({ checkProblem: pickProblem, imageProblem, imageShown, checkNote: pickNote });
-  useEffect(() => {
-    if (!canPick || selectionImage === null) setImagePick(null);
-  }, [canPick, selectionImage === null]);
-
-  // 換篇：面板與提示都收掉（第二輪審查）。
-  useEffect(() => {
-    setImagePick(null);
-    setPickNotice(null);
-  }, [job.uuid]);
-
-  /**
-   * 按「用此段配圖」：打開面板，問後端在存好的那一版上算位置選項（打字模式在這之前已先自動存）。
-   * 回來時不是同一次打開（關掉又開、換篇）就不寫。
-   */
-  const openImagePick = (pick: { text: string; top: number; left: number }): void => {
-    const load = selectionImageRef.current?.loadSpots;
-    if (load === undefined) return;
-    const origin = job.uuid;
-    // 每次打開一個新的請求編號：關掉又重開同一段時，舊請求的結果（成功或失敗）對不上就丟掉（第五輪審查）。
-    const token = (pickToken.current += 1);
-    setPickNotice(null);
-    setImagePick({ ...pick, token, spots: null, spotsHash: null, loadError: null, openedKey: revisionKey });
-    void load(pick.text).then(
-      (result) => {
-        if (result === null || jobUuidRef.current !== origin) return;
-        setImagePick((current) => settleSpots(current, token, { ok: true, result }));
-      },
-      (cause: unknown) => {
-        if (jobUuidRef.current !== origin) return;
-        setImagePick((current) => settleSpots(current, token, { ok: false, error: describeError(cause) }));
-      },
-    );
-  };
-
-  // 面板開著時文章被別處改了，或位置選項來源那一版已經不是目前這一版：選項是照舊版算的，關掉請重選。
-  useEffect(() => {
-    if (imagePick === null) return;
-    if (
-      selectionPickStale({
-        spotsHash: imagePick.spotsHash,
-        currentHash: selectionImage?.currentHash,
-        openedKey: imagePick.openedKey,
-        currentKey: revisionKey,
-        own: hold?.own ?? [],
-        sending: imageSending,
-      })
-    ) {
-      setImagePick(null);
-      setPickNotice('文章剛被改過，「用此段配圖」的位置可能不對了，請重新選一次那段。');
-    }
-  }, [revisionKey, imagePick, hold, imageSending, selectionImage?.currentHash]);
-
-  /** 送出：帶回後端給的 `spot` 與選項來源那一版的 `contentHash`（不是那一版後端回 409）。不再先存（打開時存過了）。 */
-  const sendImage = (input: { note: string | null; spot: number }): void => {
-    const pick = imagePick;
-    const request = selectionImageRef.current?.onRequest;
-    if (pick === null || pick.spotsHash === null || request === undefined) return;
-    setImageSending(true);
-    void request({ text: pick.text, note: input.note, spot: input.spot, contentHash: pick.spotsHash }).finally(() => {
-      setImageSending(false);
-      setImagePick(null);
-    });
-  };
+  // 選字之後的膠囊與「用此段配圖」面板（P5-T041）。iframe 的選取事件在 handleLoad 交給它；
+  // handleLoad 與「換版本」的 effect 寫在上面，但都在 render 完才跑，那時這裡已經有值。要等 actWhileWriting 定義完才能呼叫。
+  const selectionActions = useSelectionActions({
+    jobUuid: job.uuid,
+    mode,
+    isEditing,
+    revisionKey,
+    hold,
+    frameRef,
+    selectionCheck,
+    selectionImage,
+    actWhileWriting,
+  });
 
   // 不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
   const canInsert = insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0;
@@ -1194,14 +1092,7 @@ export function ProofView({
           <Icon name="alert" size={15} /> 沒存成功：{saveError}
         </p>
       )}
-      {pickNotice && (
-        <p className="proof-status proof-status-warn" role="status">
-          <Icon name="alert" size={15} /> {pickNotice}
-          <button type="button" className="btn btn-quiet btn-tiny" onClick={() => setPickNotice(null)}>
-            知道了
-          </button>
-        </p>
-      )}
+      <SelectionNotice actions={selectionActions} />
       {actError && !saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 已存，但接著的動作沒做成：{actError}
@@ -1290,91 +1181,7 @@ export function ProofView({
               </div>
             )}
 
-            {canPick && picked !== null && (
-              <div className="fc-pick-layer">
-                <div
-                  className="fc-pick"
-                  role="group"
-                  aria-label="選的字"
-                  style={{ top: `${picked.top}px`, left: `${Math.max(picked.left, imageShown ? 150 : 80)}px` }}
-                >
-                  <div className="fc-pick-row">
-                  <button
-                    type="button"
-                    className="fc-pick-btn"
-                    disabled={pickProblem !== null || saving}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      const text = picked.text;
-                      setPicked(null);
-                      const selection = frameRef.current?.contentDocument?.getSelection();
-                      if (isEditing) {
-                        // 打字模式：游標留在選的那段字後面，接著打（D-036）。
-                        selection?.collapseToEnd();
-                        void actWhileWriting(() => selectionCheckRef.current?.onCheck(text));
-                        return;
-                      }
-                      selection?.removeAllRanges();
-                      selectionCheck?.onCheck(text);
-                    }}
-                  >
-                    <FcIcon name="search-check" size={13} />
-                    查證這句
-                  </button>
-                  {imageShown && (
-                    <button
-                      type="button"
-                      className="fc-pick-btn"
-                      data-kind="image"
-                      disabled={imageProblem !== null || saving || imageSending}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        const pick = { text: picked.text, top: picked.top, left: picked.left };
-                        setPicked(null);
-                        const selection = frameRef.current?.contentDocument?.getSelection();
-                        // 打字模式游標留在選的那段字後面；看文章模式清掉選取（面板接手）。
-                        if (isEditing) {
-                          selection?.collapseToEnd();
-                          // 打字模式：先照「儲存」自動存一版，再問後端在那一版上的位置（第二輪審查）。
-                          void actWhileWriting(() => openImagePick(pick));
-                          return;
-                        }
-                        selection?.removeAllRanges();
-                        openImagePick(pick);
-                      }}
-                    >
-                      <Icon name="image-plus" size={13} />
-                      用此段配圖
-                    </button>
-                  )}
-                  </div>
-                  {pickNotes.map((note) => (
-                    <span key={note.text} className="fc-pick-note" data-tone={note.tone}>
-                      {note.text}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {canPick && imagePick !== null && selectionImage !== null && (
-              <div className="fc-pick-layer">
-                <div className="sel-image-pop" style={{ top: `${imagePick.top}px`, left: `${Math.max(imagePick.left, 220)}px` }}>
-                  <SelectionImagePanel
-                    // 每次打開都是全新的面板（第六輪審查）：位置回到預設「這段開頭」、那句話清空，不沿用上一次的選擇。
-                    key={imagePick.token}
-                    heading={selectionImageHeading(imagePick.text)}
-                    spots={imagePick.spots}
-                    loadError={imagePick.loadError}
-                    blockedReason={selectionImage.blockedReason}
-                    editing={isEditing}
-                    busy={imageSending || saving}
-                    onSend={sendImage}
-                    onClose={() => setImagePick(null)}
-                  />
-                </div>
-              </div>
-            )}
+            <SelectionActions actions={selectionActions} editing={isEditing} saving={saving} />
 
             {focused !== undefined && !isEditing && (
               <div
@@ -1444,30 +1251,6 @@ function wrapFirst(doc: Document, scope: Element, highlight: ProofHighlight, act
     return true;
   }
   return false;
-}
-
-/**
- * 選字查證：目前的選取（不收空的、不收跨出正文與標題的），以及膠囊要畫在哪（選取最後一行的下方中間，文件座標）。
- * 選的字只拿純文字（`toString()`）。
- */
-function pickSelection(doc: Document): { text: string; top: number; left: number; inTitle: boolean } | null {
-  const selection = doc.getSelection();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-  const range = selection.getRangeAt(0);
-  const container = range.commonAncestorContainer;
-  const element = container.nodeType === 1 ? (container as Element) : container.parentElement;
-  if (!element || typeof element.closest !== 'function' || element.closest('.preview-body, .preview-title') === null) return null;
-  const text = selection.toString();
-  if (text.trim().length === 0) return null;
-  const rects = range.getClientRects();
-  const last = rects.length > 0 ? rects[rects.length - 1]! : range.getBoundingClientRect();
-  const scrollY = doc.defaultView?.scrollY ?? 0;
-  return {
-    text,
-    top: last.bottom + scrollY + 6,
-    left: last.left + last.width / 2,
-    inTitle: element.closest('.preview-title') !== null,
-  };
 }
 
 const KIND_LABEL: Record<ProofMark['kind'], string> = {

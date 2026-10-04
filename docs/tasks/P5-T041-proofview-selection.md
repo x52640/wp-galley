@@ -1,7 +1,7 @@
 ---
 id: P5-T041
 phase: 5
-status: ready
+status: done
 depends_on: [P5-T040]
 specs: [architecture.md, design-system.md]
 write_paths: ["src/ui/components/ProofView.tsx", "src/ui/components/SelectionActions.tsx", "src/ui/components/SelectionImagePanel.tsx", "src/ui/lib/", "tests/", "docs/specs/architecture.md", "docs/tasks/P5-T041-proofview-selection.md"]
@@ -50,15 +50,18 @@ D-040（使用者 2026-10-04：「不要把功能都擠在同一個檔案，要�
 選一句按查證這句；選一大段按用此段配圖、選位置、送出；打字模式下兩者各一次；選超過 300 字時查證反灰；關掉面板再重開。
 
 ## 完成定義
-- [ ] `npm run verify` 綠，測試數不減
-- [ ] 改動前後截圖逐張相同
-- [ ] `docs/specs/architecture.md` 功能地圖對應欄已更新
+- [x] `npm run verify` 綠，測試數不減
+- [x] 改動前後截圖逐張相同
+- [x] `docs/specs/architecture.md` 功能地圖對應欄已更新
 - [ ] CURRENT_TASK 已更新（主 session 統一更新）
 
 ## 中斷／接手紀錄
-- 最後完成：Task 開立
-- 已通過驗證：—
-- 下一步：等 P5-T040（PR #28）合併後派實作 subagent
-- Blocker：P5-T040 也在改 `ProofView.tsx`／`Workspace.tsx`
+- 最後完成：抽出 `components/SelectionActions.tsx`（`useSelectionActions` hook＋膠囊與面板 `SelectionActions`＋頂端提示 `SelectionNotice`）與 `lib/selection-actions.ts`（`pickSelection`、`capsuleView`、膠囊／面板位置，純函式）；`tests/selection-actions.test.ts`（15）；功能地圖兩列已更新；ProofView 1560 → 1343 行。`actWhileWriting` 跟「儲存」共用存檔狀態與「照樣存」，刻意留在 ProofView，由 hook 呼叫（2026-10-05）
+- 已通過驗證：`npm run verify` 93 → 94 檔、2079 → 2094 測試；`?fixtures=1` 18 張改動前後逐張像素比對：15 張相同，3 張（13、15、16，打字模式存檔後）只差版本 hash 小標與計時器——示範資料的 hash 是亂數、計時器看時間，改動前跑兩次也一樣不同
+- 下一步：P5-T042（同一個 PR A）
+- Blocker：無
 
 ## 完成結果
+- 獨立審查一輪：無行為差異；修正一處檔頭註解（「用此段配圖」一段補上實作已搬到 `SelectionActions.tsx`）。
+- 殘餘：`useSelectionActions` 每次 render 回傳新物件，只有 `attach`／`clearPick` 身分不變；之後別把整個物件放進 effect 依賴。
+- 截圖比對的 3 張差異來自示範資料亂數 hash 與計時器，不是本次改動。
