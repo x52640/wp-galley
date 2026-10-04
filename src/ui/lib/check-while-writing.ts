@@ -92,6 +92,20 @@ export function nextSaveBase(lastSaved: string | null, jobHash: string | undefin
 }
 
 /**
+ * 待同步（P5-T040 #1，PR #28 第二輪改設計）：打字中存成功之後，還沒有任何一次「在存好之後才送出」的重讀成功，
+ * 工作區的快照可能比伺服器舊。這時離開打字模式就先**不給再進打字模式**（存檔基準會是舊快照 → 409、
+ * 之後讀到自己存的那版又被當成外部改動），等下一次重讀成功（不管讀到的 hash 是什麼，那就是伺服器的真實版本）。
+ * 用重讀的序號判斷、不比 hash：`savedAt`＝存成功那一刻**已經送出**的最新重讀序號（null＝這篇還沒在打字中存過），
+ * `okSeq`＝最近一次成功重讀的序號。存好之前就送出、存好之後才回來的重讀（序號 ≤ savedAt）讀的是舊資料，不算。
+ */
+export function syncPending(state: { editing: boolean; savedAt: number | null; okSeq: number }): boolean {
+  return !state.editing && state.savedAt !== null && state.okSeq <= state.savedAt;
+}
+
+/** 待同步時進打字模式入口的說明。 */
+export const SYNC_PENDING_NOTE = '正在同步最新版本…（剛存的那一版還沒讀回來，讀到之後就能再改）';
+
+/**
  * 選字「查證這句」的反灰原因。打字模式照樣能按（「正在改字」不算）；正文空不空也不看**存過的**——
  * 空白新稿在打字模式打了第一句、還沒存，存過的正文是空的（Codex P2）。按下會先存，空的話存檔與後端查證會講。
  */

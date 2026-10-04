@@ -92,14 +92,6 @@ export function slugPublishBlocker(input: { readonly dirty: boolean; readonly sa
 }
 
 /**
- * 已存的網址換了（新版本）時，框裡該放什麼（審查 #2）：框裡沒改動（等於換之前已存的值）才跟上新值；
- * 有改動就留著使用者打的字，不默默清掉（例如同一個面板按了「儲存分類」）。
- */
-export function nextSlugDraft(draft: string, prevSaved: string, nextSaved: string): string {
-  return isSlugDirty(draft, prevSaved) ? draft : nextSaved;
-}
-
-/**
  * 在發布面板按 Escape 時網址列要做什麼（審查 #3）：存網址進行中一律擋下、什麼都不動（PR #25 審查 P2：
  * 關掉重開會讓發布按鈕在存檔還在路上時又能按）；有沒存的改動只還原框內的字、不關面板；
  * 按「改」打開而沒改動就收起編輯；其他照常關面板。

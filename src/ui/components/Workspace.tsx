@@ -19,6 +19,8 @@ import {
   dropStaleFactCheck,
   editBlockedByRun,
   nextSaveBase,
+  syncPending,
+  SYNC_PENDING_NOTE,
   selectionCheckBlockedReason,
 } from '../lib/check-while-writing.js';
 import { loadProvider, saveProvider } from '../lib/agent-tasks.js';
@@ -40,6 +42,8 @@ import {
   selectionImageContentHash,
   stillOnJob,
 } from '../lib/selection-image-view.js';
+import { createRefreshScheduler, type ReadResult, type RefreshScheduler } from '../lib/refresh-scheduler.js';
+import type { SyncOutcome } from '../lib/slug-save-store.js';
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
@@ -134,6 +138,10 @@ export function Workspace({
    * 會把畫面倒退回去。
    */
   const generation = useRef(0);
+  /** 最近一次成功的重讀是第幾個（`generation` 的序號）；待同步用（P5-T040 #1）。 */
+  const [okSeq, setOkSeq] = useState(0);
+  /** 打字中最後一次存成功時，已經送出的最新重讀序號；null＝這篇還沒在打字中存過（P5-T040 #1）。 */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
 
   // 換到這一篇：別篇已經結束的「建議網址」結果丟掉（還在跑的留著，D-026）。
   useEffect(() => forgetOtherSlugSuggests(uuid), [uuid]);
@@ -145,28 +153,74 @@ export function Workspace({
     };
   }, []);
 
-  const refresh = useCallback(async () => {
-    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的 refresh 剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
-    // 舊篇的 refresh（換篇前抓住的）在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉，
-    // 舊篇的回應又被篇別擋掉，畫面卡在「載入稿件…」。所有 `refresh(` 呼叫處（含子元件）都經過這裡。
-    const origin = uuid;
+  /**
+   * 讀一次某一篇、寫進畫面（只在還是那一篇、而且是最新一次送出的時候寫）。只由重讀排程呼叫，一次只有一個在飛。
+   * 發請求之前先確認元件還在、還在那一篇（PR #28 第四輪 Codex P2：卸載後不再發請求）。
+   */
+  const readJob = useCallback(async (origin: string): Promise<ReadResult> => {
+    if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return 'failed';
+    // 結果綁住發起的那一篇（第二輪審查）：換篇後舊篇的重讀剛好是最後送出的那一個時，只看世代會把舊篇寫進新篇的畫面。
+    // 舊篇的重讀在**推進世代之前**就返回（第三輪審查）：推進了，新篇第一次載入的回應會被當成過期丟掉。
     const mine = beginRefresh({ generation: generation.current, current: uuidRef.current, origin });
-    if (mine === null) return;
+    if (mine === null) return 'failed';
     generation.current = mine;
     const isCurrent = (): boolean =>
       refreshStillCurrent({ alive: alive.current, mine, latest: generation.current, current: uuidRef.current, origin });
     try {
       // 查證結果另一條路讀（GET …/factchecks）；讀不到不擋整個工作區，留著上一次的。
-      const [next, checks] = await Promise.all([api.getJob(uuid), api.listFactChecks(uuid).catch(() => undefined)]);
+      const [next, checks] = await Promise.all([api.getJob(origin), api.listFactChecks(origin).catch(() => undefined)]);
       if (isCurrent()) {
         setJob(next);
+        // 待同步（P5-T040 #1）看的是「哪一個序號的重讀成功了」，不比 hash。
+        setOkSeq(mine);
         if (checks !== undefined) setFactChecks(checks);
         setError(null);
+        return 'applied';
       }
     } catch (cause) {
       if (isCurrent()) setError(describeError(cause));
     }
-  }, [uuid]);
+    return 'failed';
+  }, []);
+
+  /**
+   * 這一篇的重讀排程（`lib/refresh-scheduler.ts`，PR #28 第四輪 Codex P2）：手動重讀、動作做完的重讀、查證中的輪詢、
+   * 待同步的重試、存網址後的重讀全部走它，同時最多一個在飛、上一個結束才排下一個。
+   * 用到才建（StrictMode 的 effect 會先清再建）；換篇或卸載時 dispose：在飛與等著的立刻以 gone 收尾。
+   */
+  const schedulerRef = useRef<{ uuid: string; scheduler: RefreshScheduler } | null>(null);
+  const schedulerFor = useCallback(
+    (origin: string): RefreshScheduler | null => {
+      if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return null;
+      const held = schedulerRef.current;
+      if (held !== null && held.uuid === origin) return held.scheduler;
+      held?.scheduler.dispose();
+      const scheduler = createRefreshScheduler(() => readJob(origin));
+      schedulerRef.current = { uuid: origin, scheduler };
+      return scheduler;
+    },
+    [readJob],
+  );
+  useEffect(
+    () => () => {
+      schedulerRef.current?.scheduler.dispose();
+      schedulerRef.current = null;
+    },
+    [uuid],
+  );
+
+  /**
+   * 重讀這一篇，回傳有沒有真的把新資料寫進畫面（PR #28 第三輪 Codex P2）：存網址要等 `applied` 才算存好；
+   * `failed`＝讀失敗；`gone`＝已經不在這一篇（換篇、元件卸載），不會再套用。綁住呼叫時的那一篇。
+   */
+  const syncJob = useCallback(async (): Promise<SyncOutcome> => {
+    const scheduler = schedulerFor(uuid);
+    return scheduler === null ? 'gone' : scheduler.request();
+  }, [uuid, schedulerFor]);
+  /** 大部分呼叫處不需要結果。所有 `refresh(` 呼叫處（含子元件）都經過排程。 */
+  const refresh = useCallback(async (): Promise<void> => {
+    await syncJob();
+  }, [syncJob]);
 
   /**
    * 把會改工作區畫面的回呼綁住現在這一篇（第三輪審查）：子元件的非同步動作（AgentButton 的錯誤、恢復這篇的錯誤…）
@@ -191,6 +245,10 @@ export function Workspace({
     setEditNotice(null);
     setFocusBriefId(null);
     setView('article');
+    // 打字中存過的那一版、待同步是上一篇的：不帶到這一篇（P5-T040 #1）。
+    lastSavedHash.current = null;
+    setLastSaved(null);
+    setSavedAt(null);
   }, [uuid]);
 
   useEffect(() => {
@@ -207,14 +265,25 @@ export function Workspace({
    * 進打字模式要不要擋：發布中、或查證以外的 Agent 動作在跑（D-036：查證不改文章，跑的時候照樣可以寫、可以存）。
    * 「改原文」、卡片的自己改／去原文改共用這一個條件。
    */
-  const editBlocked = editBlockedByRun({ publishing: job?.state === 'PUBLISHING', agentRun: job?.agentRun });
-  const editBlockedRef = useRef(editBlocked);
-  editBlockedRef.current = editBlocked;
+  const runBlocked = editBlockedByRun({ publishing: job?.state === 'PUBLISHING', agentRun: job?.agentRun });
+  /**
+   * 待同步（P5-T040 #1）：打字中存成功之後還沒有一次成功的重讀，工作區快照可能比伺服器舊，
+   * 這時再進打字模式存檔基準會是舊的 → 409。所有進打字模式的入口先擋，同時一直重讀到成功為止。
+   */
+  const pendingSync = syncPending({ editing: editing !== null, savedAt, okSeq });
+  const editBlocked = runBlocked || pendingSync;
+  const editBlockedNote = pendingSync && !runBlocked ? SYNC_PENDING_NOTE : 'AI 還在處理這篇，等它跑完再改。';
+  const editBlockedRef = useRef({ blocked: editBlocked, note: editBlockedNote });
+  editBlockedRef.current = { blocked: editBlocked, note: editBlockedNote };
+  // 輪詢交給同一個重讀排程（PR #28 第四輪 Codex P2）：查證在跑（1.5 秒）、待同步（3 秒）各登記一個需求，
+  // 一次只跑一個、上一次結束才排下一次；`working`／`pendingSync` 都是照最新一次套用成功的資料算的，
+  // 查證跑完、同步好了，需求拿掉就停。
   useEffect(() => {
-    if (!working) return;
-    const timer = window.setInterval(() => void refresh(), 1500);
-    return () => window.clearInterval(timer);
-  }, [working, refresh]);
+    schedulerFor(uuid)?.setNeed('working', working ? 1500 : null);
+  }, [working, uuid, schedulerFor]);
+  useEffect(() => {
+    schedulerFor(uuid)?.setNeed('pendingSync', pendingSync ? 3000 : null);
+  }, [pendingSync, uuid, schedulerFor]);
 
   // 後端在 GET /preview 時把 RENDERED 推進 PREVIEWED，所以看完校樣要重讀一次。
   const stateRef = useRef(job?.state);
@@ -313,8 +382,8 @@ export function Workspace({
 
   const startEdit = useCallback((item: ReviewItem | null) => {
     // AI 跑完會產生新版本、校樣會重載，編到一半的字就沒了。等它跑完再改（查證不在此列，D-036）。
-    if (editBlockedRef.current) {
-      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+    if (editBlockedRef.current.blocked) {
+      setEditNotice(editBlockedRef.current.note);
       return;
     }
     // 按過接受、後端在每個欄位（標題、正文…）都找不到原句的（unappliable，P5-T017）：字上標不出來，
@@ -340,8 +409,8 @@ export function Workspace({
   }, []);
   /** 查證卡片的「去原文改」：游標停在那句前面（找不到就停在那一段開頭），存檔後那條結案（resolved-by-edit）。 */
   const startFactCheckEdit = useCallback((finding: FactCheckFinding) => {
-    if (editBlockedRef.current) {
-      setEditNotice('AI 還在處理這篇，等它跑完再改。');
+    if (editBlockedRef.current.blocked) {
+      setEditNotice(editBlockedRef.current.note);
       return;
     }
     setEditNotice(null);
@@ -376,11 +445,27 @@ export function Workspace({
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
 
-  /** 這次打字中最後一次自動存成功的 hash（D-036）；離開打字模式或換篇就清掉。 */
+  /**
+   * 這次打字中最後一次存成功的 hash（D-036）；離開打字模式或換篇就清掉。
+   * ref 給非同步的回呼讀，state 給 render 算「畫面知道的目前版本」（PR #28 Codex P2：只寫 ref 不會重新 render）。
+   */
   const lastSavedHash = useRef<string | null>(null);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const rememberSaved = useCallback((hash: string) => {
+    lastSavedHash.current = hash;
+    setLastSaved(hash);
+    // 存好那一刻已經送出的最新重讀序號：之後要有序號比它大的重讀成功，才算讀到存好的那一版（待同步，P5-T040 #1）。
+    setSavedAt(generation.current);
+  }, []);
   useEffect(() => {
-    if (editing === null) lastSavedHash.current = null;
+    if (editing === null) {
+      lastSavedHash.current = null;
+      setLastSaved(null);
+    }
   }, [editing, uuid]);
+  const jobHash = job?.currentRevision?.contentHash;
+  /** 畫面知道的目前版本：打字中是最後存成功的那一版，否則工作區的版本。render 時算，傳給子元件的值與送出的請求用同一個。 */
+  const knownHash = selectionImageContentHash({ editing: editing !== null, lastSaved, jobHash });
 
   /** 選字「用此段配圖」（P5-T038）能不能生圖：跟插圖面板同一個來源（後端有 30 秒快取）。 */
   const imageGeneration = useImageGenerationStatus(true);
@@ -607,22 +692,15 @@ export function Workspace({
                 ? {
                     blockedReason: selectionImageBlocked,
                     // 畫面知道的目前版本：打字中先存過就是最後存的那一版（工作區快照可能還沒重讀到）。
-                    currentHash: selectionImageContentHash({
-                      editing: editing !== null,
-                      lastSaved: lastSavedHash.current,
-                      jobHash: job.currentRevision?.contentHash,
-                    }),
+                    currentHash: knownHash,
                     loadSpots: async (text) => {
                       // 換篇時沿用同一個元件：不是發起的那一篇就什麼都不做（第二輪審查）。
                       const origin = job.uuid;
                       const stillHere = (): boolean =>
                         stillOnJob({ alive: alive.current, current: uuidRef.current, origin });
                       if (!stillHere()) return null;
-                      const contentHash = selectionImageContentHash({
-                        editing: editing !== null,
-                        lastSaved: lastSavedHash.current,
-                        jobHash: job.currentRevision?.contentHash,
-                      });
+                      // 跟 currentHash 同一個值（PR #28 Codex P2）：查位置用的版本與面板比對的版本一致。
+                      const contentHash = knownHash;
                       if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法配圖');
                       const result = await api.selectionImageSpots(origin, { selection: text, contentHash });
                       return stillHere() ? result : null;
@@ -704,10 +782,12 @@ export function Workspace({
               });
               if (!stillOnJob({ alive: alive.current, current: uuidRef.current, origin })) return saved.contentHash;
               if (stay) {
-                lastSavedHash.current = saved.contentHash;
+                rememberSaved(saved.contentHash);
                 // 打字模式按「查證這句」先存的那一版（D-036）：留在打字模式；從卡片進來的那張已經跟著結案，之後再存不再送。
                 setEditing(afterStaySave);
               } else {
+                // 存好就離開打字模式；之後的重讀若失敗，會進入待同步、擋住再進打字模式（P5-T040 #1）。
+                rememberSaved(saved.contentHash);
                 // 存好了：「找不到」之類的進場提示一起收掉（Codex 審查）。
                 endEdit();
               }
@@ -726,12 +806,17 @@ export function Workspace({
                       type="button"
                       className="btn btn-quiet btn-tiny"
                       disabled={editBlocked}
-                      title={editBlocked ? 'AI 還在處理這篇，等它跑完再改' : undefined}
+                      title={editBlocked ? editBlockedNote : undefined}
                       onClick={() => startEdit(null)}
                     >
                       <Icon name="file-text" size={13} />
                       {job.bodyEmpty ? '開始寫' : '改原文'}
                     </button>
+                    {pendingSync && (
+                      <span className="field-hint" role="status">
+                        正在同步最新版本…
+                      </span>
+                    )}
                   </>
                 )}
               </>
@@ -797,7 +882,7 @@ export function Workspace({
 
       {sheet === 'source' && (
         <Sheet title="標題與網址" onClose={closeSheet}>
-          <SourcePanel job={job} refresh={refresh} />
+          <SourcePanel job={job} refresh={refresh} sync={syncJob} />
         </Sheet>
       )}
 
@@ -806,6 +891,7 @@ export function Workspace({
           <PublishSheet
             job={job}
             refresh={refresh}
+            sync={syncJob}
             previewHash={previewHash}
             onGoTo={(where) => {
               setSheet(null);

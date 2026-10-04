@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **92 檔 / 2053 測試**全綠（2026-10-04，P5-T038 rebase 到 P8-T004 之後）
+- `npm run verify`：typecheck 通過；Vitest **93 檔 / 2079 測試**全綠（2026-10-05，P5-T040）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,13 +12,16 @@
 
 ## 進行中
 
-無。
+無。拆檔 Task P5-T041～P5-T045（D-040）已開立但**還沒開工**：Task 檔與 D-040 在分支 `p5-t041-proofview-selection`（worktree `../wp-galley-P5-T041`，commit f76dd5e），尚未進 main；開工前先 rebase 到 main。使用者提議的分組：PR A＝T041～T043（同一 PR、一 Task 一 commit）、PR B＝T044、PR C＝T045。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
+
+2026-10-05 使用者：目前無法手動測試，Codex 審到沒問題就由主 session 直接合併；下表留待日後驗。
 
 | Task | 驗什麼 |
 | --- | --- |
 | [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（2026-10-05 使用者確認正常；搬家來的舊標記讀取時視為已建過 DB，不需補記） |
+| [P5-T040](tasks/P5-T040-review-followups.md) | 發布面板打網址不存 → 按 × 關掉再開 → 仍擋發布；「標題與網址」存網址中開發布面板 → 被擋 |
 | [P5-T038](tasks/P5-T038-image-from-selection.md) | 用真的 Codex：選兩三段 → 用此段配圖 → 選「第 N 段之後」→ 圖跟主題相關 → 用這張 → 圖在選的位置 |
 | [P5-T039](tasks/P5-T039-slug-in-publish.md) | 沒填網址的長文 → 發布面板黃色提醒 → 建議網址 → 點一個 → 存網址 → 存草稿，後台網址正確；打了沒存時發布被擋 |
 | [P8-T003](tasks/P8-T003-user-data-dir.md) | 舊稿件、舊圖都在；開一篇草稿真跑一次校稿＋Codex 生圖（Agent 在新工作目錄不出錯）。設定精靈畫面上仍寫舊路徑（known-issues） |
@@ -37,6 +40,14 @@
 | [P5-T025](tasks/P5-T025-edit-image-prompt.md) | 一鍵配圖 → 改封面 prompt → 存 → Codex 生圖照新描述 |
 | [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
+
+## 上次停在哪（2026-10-05 收官）
+
+- 合併 #23（P8-T003 資料目錄，真實資料 2026-10-04 已搬到 `~/Library/Application Support/Galley/`）、#24（P6-T006）、#25（P5-T039）、#26（P5-T038，Codex 七輪）、#27（P8-T004 補審修正，Codex 三輪）。
+- PR #28（P5-T040）：Codex 四輪，**第四輪的修正（refresh-scheduler、卸載時 sync 收尾）沒有再經過 Codex 審**（使用者指定第四輪為最後一輪）。
+- 新規矩（memory `publisher-github-pr-flow`）：每個 PR Codex 最多三輪，第三輪有問題修完直接推、不再審；**合併由使用者按**，主 session 不 `gh pr merge`。使用者目前無法手動測試。
+- 同時跑 ui-drive 截圖會撞 9333 埠，截圖要排隊。
+- 上一個收官段落（2026-10-02）以下保留。
 
 ## 上次停在哪（2026-10-02 收官）
 

@@ -12,6 +12,7 @@ import {
   countNonSpace,
   planSelectionCheck,
   settleHold,
+  syncPending,
   shownFrame,
   type ProofHold,
 } from '../src/ui/lib/check-while-writing.js';
@@ -269,5 +270,28 @@ describe('先存再做：動作出錯不算存檔失敗（P5-T038 審查 3）', 
       onActFailed: () => calls.push('act-failed'),
     });
     expect(calls).toEqual(['save-failed']);
+  });
+});
+
+describe('自動存好但重讀失敗（P5-T040 #1）：待同步，重讀成功之前不給再進打字模式', () => {
+  it('存好之後重讀失敗、離開打字模式：待同步（擋進入）；之後任何一次重讀成功就解除，不看讀到的 hash', () => {
+    // 存好那一刻已經送出的重讀是第 5 個；存好之後那一個（第 6 個）失敗了，最近成功的還是第 4 個。
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 4 })).toBe(true);
+    // 輪詢的第 7 個成功（就算讀到的版本剛好跟進打字模式前的 H0 一模一樣，那就是伺服器的真實版本）。
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 7 })).toBe(false);
+  });
+
+  it('存好之前就送出、存好之後才回來的重讀讀的是舊資料，不算同步', () => {
+    expect(syncPending({ editing: false, savedAt: 5, okSeq: 5 })).toBe(true);
+  });
+
+  it('打字中不擋（打字中的基準是最後存成功的那一版）；這篇沒在打字中存過也不擋', () => {
+    expect(syncPending({ editing: true, savedAt: 5, okSeq: 4 })).toBe(false);
+    expect(syncPending({ editing: false, savedAt: null, okSeq: 0 })).toBe(false);
+  });
+
+  it('同步之後再進打字模式：基準就是工作區的版本（H0 還原的情境也不會拿 H1 當基準而 409）', () => {
+    // 進打字模式時打字中還沒存過，lastSaved 是 null。
+    expect(nextSaveBase(null, 'H0')).toBe('H0');
   });
 });

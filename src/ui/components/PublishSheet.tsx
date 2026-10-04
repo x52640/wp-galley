@@ -1,18 +1,24 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 import { api } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { readString, shortHash } from '../lib/format.js';
 import {
   isSlugDirty,
-  nextSlugDraft,
   publishSlugView,
   slugEscapeAction,
   slugPublishBlocker,
   withSlug,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
-import { isSlugSaving, runSlugSave, subscribeSlugSave } from '../lib/slug-save-store.js';
+import {
+  isSlugSaving,
+  runSlugSave,
+  setSlugDraft as storeSlugDraft,
+  slugDraftFor,
+  subscribeSlugSave,
+  type SyncOutcome,
+} from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
@@ -49,11 +55,14 @@ const HANDLED_BLOCKER =
 export function PublishSheet({
   job,
   refresh,
+  sync,
   previewHash,
   onGoTo,
 }: {
   job: LoadedJob;
   refresh: () => Promise<void>;
+  /** 重讀工作區、回傳有沒有真的套用（存網址要讀到新值才算存好，PR #28 第三輪 Codex P2）。 */
+  sync: () => Promise<SyncOutcome>;
   /** 校樣回應的 ETag。null = 還沒問到或後端沒給，這時不阻擋，只是不做保證。 */
   previewHash: string | null;
   /** 「回去看」：關掉面板，跳到建議清單或圖片區。 */
@@ -71,20 +80,17 @@ export function PublishSheet({
 
   // 網址框（P5-T039）：放在這一層，發布按鈕才知道有沒存的改動（審查 #1、#4）。
   const savedSlug = readString(job.currentRevision?.templateData ?? null, 'slug');
-  const [slugDraft, setSlugDraft] = useState(savedSlug);
+  // 沒存的字只記在模組層級、以稿件為 key（P5-T040 #2；PR #28 第三輪 Codex P2：面板不另存一份）：
+  // 按 × 或點遮罩關掉再開，字還在、照樣擋發布；別處存好網址時 store 清掉草稿，開著的面板也跟著讀到新值。
+  // 已存的網址換了、框裡沒改動（沒有草稿）就跟上；有改動就留著（審查 #2：按「儲存分類」不能把打好的字清掉）。
+  const slugDraft = useSyncExternalStore(subscribeSlugSave, () => slugDraftFor(job.uuid, savedSlug));
+  const setSlugDraft = (value: string): void => storeSlugDraft(job.uuid, value, savedSlug);
   const [slugEditing, setSlugEditing] = useState(false);
   const slugSave = useAction();
   // 「還在存」以模組層級為準（PR #25 審查 P2）：存的期間面板被關掉再打開，新的元件照樣知道、照樣擋發布。
   const slugSavingShared = useSyncExternalStore(subscribeSlugSave, () => isSlugSaving(job.uuid));
   const slugSaving = slugSavingShared || slugSave.busy;
   const slugDirty = isSlugDirty(slugDraft, savedSlug);
-  // 已存的網址換了才同步，而且只在框裡沒改動時（審查 #2：按「儲存分類」不能把打好的字清掉）。
-  const prevSavedSlug = useRef(savedSlug);
-  useEffect(() => {
-    const prev = prevSavedSlug.current;
-    prevSavedSlug.current = savedSlug;
-    setSlugDraft((draft) => nextSlugDraft(draft, prev, savedSlug));
-  }, [savedSlug]);
   // Escape（審查 #3、PR #25 審查 P2）：Sheet 在 document 上聽 Escape 關面板。存網址進行中、或框裡有沒存的改動時，
   // 在 window 的捕獲階段先攔下：存的期間什麼都不動（不關面板）；有改動只還原框內的字。焦點在不在框裡都一樣。
   // 其他情況不攔，照常關面板（按「改」打開而沒改動的，由輸入框自己收起）。
@@ -96,29 +102,34 @@ export function PublishSheet({
       if (action !== 'block' && action !== 'revert') return;
       event.stopPropagation();
       event.preventDefault();
-      if (action === 'revert') setSlugDraft(savedSlug);
+      if (action === 'revert') storeSlugDraft(job.uuid, savedSlug, savedSlug);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [slugDirty, slugEditing, savedSlug, slugSaving]);
+  }, [slugDirty, slugEditing, savedSlug, slugSaving, job.uuid]);
 
   const storeSlug = (): void => {
     if (!slugDirty || slugSaving) return;
-    void slugSave.run(() => runSlugSave(job.uuid, async () => {
-      const baseHash = job.currentRevision?.contentHash ?? null;
-      // 整份取代：其他欄位原樣帶上；帶 expectedContentHash，中間被別處改過就擋下來，不蓋掉。
-      await guardEdit(() =>
-        api.createRevision(job.uuid, {
-          origin: 'manual',
-          templateData: withSlug(job.currentRevision?.templateData ?? null, slugDraft),
-          reason: '在發布面板改網址',
-          ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
-        }),
-      );
-      clearSlugSuggest(job.uuid);
-      setSlugEditing(false);
-      await refresh();
-    }));
+    void slugSave.run(() =>
+      runSlugSave(job.uuid, {
+        save: async () => {
+          const baseHash = job.currentRevision?.contentHash ?? null;
+          // 整份取代：其他欄位原樣帶上；帶 expectedContentHash，中間被別處改過就擋下來，不蓋掉。
+          await guardEdit(() =>
+            api.createRevision(job.uuid, {
+              origin: 'manual',
+              templateData: withSlug(job.currentRevision?.templateData ?? null, slugDraft),
+              reason: '在發布面板改網址',
+              ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+            }),
+          );
+          clearSlugSuggest(job.uuid);
+          setSlugEditing(false);
+        },
+        // 重讀到新值才算存好；沒套用就維持「正在存網址」、每 3 秒再讀（`runSlugSave`）。
+        sync,
+      }),
+    );
   };
 
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
