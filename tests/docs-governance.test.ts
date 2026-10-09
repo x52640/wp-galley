@@ -230,7 +230,7 @@ function checkLinks(file: string, text: string, exists: (absPath: string) => boo
   const issues: Issue[] = [];
   const dir = dirname(join(root, file));
   stripCode(text).forEach((l, i) => {
-    for (const m of l.matchAll(/!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+"[^"]*")?\s*\)/g)) {
+    for (const m of l.matchAll(/!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g)) {
       let target = (m[1] ?? '').replace(/^<|>$/g, '');
       if (!target || target.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
       target = target.replace(/[#?].*$/, '');
@@ -252,6 +252,26 @@ function checkLinks(file: string, text: string, exists: (absPath: string) => boo
 }
 
 // ---------- 讀真實文件 ----------
+
+/** Task ID → status。同一個 ID 出現在兩個檔就報錯（不然後面的會蓋掉前面的，漏抓沒列進 CURRENT_TASK 的 Task）。 */
+function buildStatusById(
+  files: readonly { file: string; text: string }[],
+): { statusById: Map<string, { status: string; file: string }>; issues: Issue[] } {
+  const statusById = new Map<string, { status: string; file: string }>();
+  const issues: Issue[] = [];
+  for (const { file, text } of files) {
+    const fm = parseFrontMatter(text);
+    const id = fm?.fields.get('id')?.value;
+    if (!id) continue;
+    const prev = statusById.get(id);
+    if (prev) {
+      issues.push(`${file} — id ${id} 跟 ${prev.file} 重複。改法：ID 不重用，換一個新編號。`);
+      continue;
+    }
+    statusById.set(id, { status: fm?.fields.get('status')?.value ?? '', file });
+  }
+  return { statusById, issues };
+}
 
 function read(rel: string): string {
   return readFileSync(join(ROOT, rel), 'utf8');
@@ -354,6 +374,22 @@ describe('docs-governance 規則自我測試（壞例子必須被抓到）', () 
     expect(issues[0]).toContain('1 行續行');
   });
 
+  it('規則 2、3：兩個檔用同一個 Task ID 會紅', () => {
+    const { issues } = buildStatusById([
+      { file: 'docs/tasks/P1-T001-a.md', text: '---\nid: P1-T001\nstatus: ready\n---\n' },
+      { file: 'docs/tasks/P1-T001-b.md', text: '---\nid: P1-T001\nstatus: done\n---\n' },
+    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain('P1-T001-b.md');
+  });
+
+  it('規則 6：帶單引號或括號 title 的壞連結也會紅', () => {
+    const none = () => false;
+    expect(checkLinks('docs/README.md', "[a](missing.md 'title')\n", none)).toHaveLength(1);
+    expect(checkLinks('docs/README.md', '[a](missing.md (title))\n', none)).toHaveLength(1);
+    expect(checkLinks('docs/README.md', '[a](missing.md "title")\n', none)).toHaveLength(1);
+  });
+
   it('規則 5：超過檔頭註解寫的上限', () => {
     const text = `# C\n\n<!-- 上限 3 行 -->\n第四行\n`;
     expect(checkLineLimit('docs/CURRENT_TASK.md', text)[0]).toContain('上限 3 行');
@@ -386,13 +422,11 @@ describe('docs-governance（真實文件；npm run verify:docs）', () => {
   });
 
   it('規則 2、3：CURRENT_TASK「進行中」「Ready」跟 Task status 對得上', () => {
-    const statusById = new Map<string, { status: string; file: string }>();
-    for (const f of taskFiles) {
-      const fm = parseFrontMatter(read(f));
-      const id = fm?.fields.get('id')?.value;
-      if (id) statusById.set(id, { status: fm?.fields.get('status')?.value ?? '', file: f });
-    }
-    const issues = checkCurrentTaskConsistency('docs/CURRENT_TASK.md', read('docs/CURRENT_TASK.md'), statusById);
+    const built = buildStatusById(taskFiles.map((f) => ({ file: f, text: read(f) })));
+    const issues = [
+      ...built.issues,
+      ...checkCurrentTaskConsistency('docs/CURRENT_TASK.md', read('docs/CURRENT_TASK.md'), built.statusById),
+    ];
     expect(issues.length, report(issues)).toBe(0);
   });
 
