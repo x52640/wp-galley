@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:docs": "vitest run tests/docs-governance.test.ts",
     "verify": "npm run typecheck && npm test"
   },
   "dependencies": {

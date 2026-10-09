@@ -45,7 +45,11 @@ CURRENT_TASK 的「主樹基準」記錄目前的數字；跑出來對不上就�
 文件更新是**完成定義的一部分**：改了行為就改擁有它的 spec，新決定就在決策記錄加一行；
 新增或搬動功能就更新 `docs/specs/architecture.md` 的功能地圖；留下的殘餘寫進 `docs/known-issues.md`。
 
-索引與 `verify:docs` 目前手動維護；Task 累積到 5–10 個再寫腳本（D-014）。
+`npm run verify:docs`（`tests/docs-governance.test.ts`，`npm test` 也會跑到）守文件狀態一致（D-042）：
+Task front matter 的 `id` 等於檔名前綴、`status` 合法；CURRENT_TASK「進行中」「Ready」提到的 Task
+都是 `ready`／`in_progress`，反過來這兩種 status 的 Task 都要列在其中；`plan.md` 決策每條 ≤ 250 字
+（連結網址不算）、編號遞增不重複；CURRENT_TASK 不超過檔頭寫的行數上限；冷啟動文件、specs、adr、tasks
+裡的相對連結指到存在的檔。紅了照失敗訊息的檔名、行號與改法修文件，不要放寬測試。
 
 ## 本機使用者偏好
 

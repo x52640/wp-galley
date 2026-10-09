@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **98 檔 / 2177 測試**全綠（2026-10-05 主樹，D-040 三個拆檔 PR #29～#31 合併後）
+- `npm run verify`：typecheck 通過；Vitest **99 檔 / 2191 測試**全綠（2026-10-09，分支 `p0-t003-doc-health-fixes`；main 仍是 98／2177）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,11 +12,11 @@
 
 ## 進行中
 
-無。拆檔 Task P5-T041～P5-T045（D-040）已開立但**還沒開工**：Task 檔與 D-040 在分支 `p5-t041-proofview-selection`（worktree `../wp-galley-P5-T041`，commit f76dd5e），尚未進 main；開工前先 rebase 到 main。使用者提議的分組：PR A＝T041～T043（同一 PR、一 Task 一 commit）、PR B＝T044、PR C＝T045。
+無。2026-10-09 文件健檢修正與 `verify:docs`（D-042）已完成，在本機分支 `p0-t003-doc-health-fixes`（含先前 `docs-split-pointers` 的 commit），**沒推、不單獨開 PR**：下一個 Task 從這個分支開，一起進那個 PR。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
-2026-10-05 使用者：目前無法手動測試，Codex 審到沒問題就由主 session 直接合併；下表留待日後驗。
+2026-10-05 使用者：目前無法手動測試，PR 照 D-041（Codex 最多三輪、合併由使用者按）；下表留待日後驗。
 
 | Task | 驗什麼 |
 | --- | --- |
@@ -66,7 +66,7 @@
 
 ## 待專案擁有者
 
-`plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
+`plan.md` 的「待裁定」Q-1～Q-5、Q-7、Q-8（Q-6 已裁定 → D-017）。Q-1～Q-3 目前照 B 版的做法，使用者還沒正式裁定。
 
 ## 已知問題
 
@@ -75,4 +75,4 @@
 ## 治理
 
 - 人維護：本檔、plan.md、各 Task 的 front matter 與接手紀錄。
-- 腳本（`task:index`、`verify:docs`、`task:close`）等 Task 累積到 5–10 個再做。
+- `npm run verify:docs`（P0-T004，跟著 `npm run verify` 跑）檢查 Task 狀態、本檔「進行中」、決策長度、相對連結；`task:index`、`task:close` 未做。
