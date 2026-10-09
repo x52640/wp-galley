@@ -61,7 +61,7 @@
   --kind-source-bg:  #F6EDCF;
   --kind-style:      #3F5B4F;
   --kind-style-bg:   #E4EDE8;
-  /* AI 查證（D-034）：靛藍，跟「事實」的藍分得開；文章上是虛線底線（ProofView 的 HIGHLIGHT_COLORS.factcheck） */
+  /* AI 查證（D-034）：靛藍，跟「事實」的藍分得開；文章上是虛線底線（lib/proof-highlights.ts 的 HIGHLIGHT_COLORS.factcheck） */
   --kind-check:      #3730A3;
   --kind-check-bg:   #F0EFFB;
 

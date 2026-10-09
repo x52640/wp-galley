@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **98 檔 / 2177 測試**全綠（2026-10-05，D-040 拆檔 PR A＋B＋C 三個都合併後；本機試合三個分支量得。只合其中一兩個時數字會不同：A 單獨 96／2136、B 單獨 94／2106、C 單獨 94／2093）
+- `npm run verify`：typecheck 通過；Vitest **100 檔 / 2218 測試**全綠（2026-10-09，P5-T046 分支，含 P0-T003／P0-T004；合併前 main 是 98／2177）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,14 +12,15 @@
 
 ## 進行中
 
-無。拆檔 Task P5-T041～P5-T045（D-040）已開立但**還沒開工**：Task 檔與 D-040 在分支 `p5-t041-proofview-selection`（worktree `../wp-galley-P5-T041`，commit f76dd5e），尚未進 main；開工前先 rebase 到 main。使用者提議的分組：PR A＝T041～T043（同一 PR、一 Task 一 commit）、PR B＝T044、PR C＝T045。
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
-2026-10-05 使用者：目前無法手動測試，Codex 審到沒問題就由主 session 直接合併；下表留待日後驗。
+2026-10-05 使用者：目前無法手動測試，PR 照 D-041（Codex 最多三輪、合併由使用者按）；下表留待日後驗。
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
 | [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |
 | [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（2026-10-05 使用者確認正常；搬家來的舊標記讀取時視為已建過 DB，不需補記） |
 | [P5-T040](tasks/P5-T040-review-followups.md) | 發布面板打網址不存 → 按 × 關掉再開 → 仍擋發布；「標題與網址」存網址中開發布面板 → 被擋 |
@@ -45,8 +46,9 @@
 ## 上次停在哪（2026-10-05 拆檔）
 
 - D-040 拆檔分三個 PR、都從 main 開：A＝P5-T041～P5-T043（ProofView 1560 → 360 行）、B＝P5-T044（MediaPanel 1010 → 222）、C＝P5-T045（Workspace 989 → 714）。每張 Task 實作 → verify → 獨立審查（皆無行為差異）→ Codex。
-- 三個 PR 都改 `docs/specs/architecture.md` 功能地圖相鄰的列：程式碼互不衝突，但後合的會在這個檔衝突，需要 rebase。
-- 殘餘（各 Task 檔「完成結果」）：MediaPanel 暫時轉出 `useImageGenerationStatus`／`assetLabel`；`SelectionActions.tsx` 檔頭兩三處註解仍寫 ProofView（不在任何 Task write_paths，待使用者決定）；`proof-editing`／`proof-frame` 守門測試靠找原始碼字串判斷 hook 順序。
+- 合併順序 #30 → #29 → #31；#31 在 `architecture.md` 功能地圖衝突，逐列合併後 rebase（只動文件）。三個 PR 都 Codex 一輪無問題、每張 Task 獨立審查一輪無行為差異。
+- 合併後發現 5 處文件／註解仍指向拆檔前的位置（design-system、agent-tasks、tokens.css、SelectionActions），已修在本分支第一個 commit，跟下一個 Task 一起進 PR。
+- 殘餘（各 Task 檔「完成結果」）：MediaPanel 暫時轉出 `useImageGenerationStatus`／`assetLabel`；`proof-editing`／`proof-frame` 守門測試靠找原始碼字串判斷 hook 順序。
 - Vite 8 沒有 `--cacheDir` 參數：worktree 起 Vite 要另寫 config 指 cacheDir，否則快取寫進主目錄 `node_modules/.vite`（worktree 的 node_modules 是 symlink）。
 - 截圖排隊：同一時間只一個 ui-drive（9333 埠）；示範資料版本 hash 是亂數、計時器看時間、捲軸會淡出，比對前先連跑兩次找出本來就會變的。
 
@@ -65,7 +67,7 @@
 
 ## 待專案擁有者
 
-`plan.md` 的「待裁定」Q-1～Q-8。其中 Q-1～Q-3 預定在 P5-T001 實測時回答。
+`plan.md` 的「待裁定」Q-1～Q-5、Q-7、Q-8（Q-6 已裁定 → D-017）。Q-1～Q-3 目前照 B 版的做法，使用者還沒正式裁定。
 
 ## 已知問題
 
@@ -74,4 +76,4 @@
 ## 治理
 
 - 人維護：本檔、plan.md、各 Task 的 front matter 與接手紀錄。
-- 腳本（`task:index`、`verify:docs`、`task:close`）等 Task 累積到 5–10 個再做。
+- `npm run verify:docs`（P0-T004，跟著 `npm run verify` 跑）檢查 Task 狀態、本檔「進行中」、決策長度、相對連結；`task:index`、`task:close` 未做。

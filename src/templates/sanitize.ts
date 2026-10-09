@@ -1,6 +1,7 @@
 import sanitizeHtml from 'sanitize-html';
 import type { TemplateManifest } from './types.js';
 import { safeHref } from '../contract/rich-text.js';
+import { normalizeLinkAttrs } from '../contract/link-target.js';
 
 /**
  * 正文 HTML 清理。
@@ -55,7 +56,10 @@ function buildOptions(manifest: TemplateManifest, onRejectedLink: () => void = (
           onRejectedLink();
           return { tagName: REJECTED_LINK, attribs: {} };
         }
-        return { tagName, attribs };
+        // 「在新分頁開啟」（D-043）：target 只收 _blank、rel 正規化成 noopener（＋nofollow 等其他值），不留孤兒 rel。
+        // 規則在 contract/link-target.ts，前端連結編輯框用同一份。這是整理，不算移除屬性。
+        const entries = normalizeLinkAttrs(Object.entries(attribs).map(([name, value]) => ({ name, value })));
+        return { tagName, attribs: Object.fromEntries(entries.map((attr) => [attr.name, attr.value])) };
       },
     },
   };
