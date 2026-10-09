@@ -1,7 +1,7 @@
 ---
 id: P0-T003
 phase: 0
-status: in_progress
+status: done
 depends_on: []
 specs: []
 write_paths: ["plan.md", "docs/README.md", "docs/CURRENT_TASK.md", "docs/tasks/P5-T004-split-core-service.md", "docs/tasks/P0-T003-doc-health-fixes.md", "docs/tasks/*.md（只在搬決策細節時補「目標」）"]
@@ -40,13 +40,18 @@ D-039「直到沒問題才合併」已被使用者 2026-10-05 改成最多三輪
 `npm run verify`（P0-T004 的 docs 檢查一起過）。
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task
-- 已通過驗證：—
-- 下一步：照範圍改
+- 最後完成：範圍內全部改完（`docs/README.md` 那句由 P0-T004 一起改）
+- 已通過驗證：見完成結果
+- 下一步：跟 P0-T004 一起 verify 後 commit；不單獨開 PR（D-042）
 - Blocker：無
 
 ## 完成結果
+- 壓到 250 字以內的決策：D-028、D-034、D-035、D-037、D-039、D-040（連結網址不算字，依 P0-T004 的算法；D-016、D-023、D-033 去掉網址後已在上限內，不動）。
+- 搬走的細節逐條查過：留在 Task 或 spec 的不再補；沒有的補進 P8-T003（不做常駐／外殼 App 的理由）、P5-T041（暫不拆四個大檔的理由等）「目標」。
+- D-042 的「收官文件」一句：開 Task 時寫「直接開小 PR」，使用者 2026-10-09 改裁定為「照舊不單獨開 PR，跟下一個 Task 一起進」（嫌 PR 臃腫），已改。
+- 審查順手修：CURRENT_TASK「由主 session 直接合併」改指 D-041；待裁定清單排除已裁定的 Q-6；D-035 補回「現階段」。
+- `plan.md` 19,826 → 約 19,000 bytes（只省約 4%）：250 字上限擋的是之後繼續長，不是大幅瘦身；冷啟動大頭仍是決策記錄 42 條。

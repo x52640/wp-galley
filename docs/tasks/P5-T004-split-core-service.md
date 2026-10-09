@@ -1,7 +1,7 @@
 ---
 id: P5-T004
 phase: 5
-status: in_progress
+status: done
 depends_on: [P5-T002, P0-T002]
 specs: [core-service.md, architecture.md]
 write_paths: ["src/core/", "src/contract/", "src/server/", "src/ui/", "tests/", "docs/specs/core-service.md", "docs/specs/architecture.md", "docs/tasks/P5-T004-split-core-service.md", "docs/CURRENT_TASK.md"]
@@ -61,6 +61,7 @@ core-service.md、state-machine.md（核准失效必須仍集中在一處）
 - Blocker：無
 
 ## 完成結果
+- 已合併：PR #14（commit 9f208b4）。front matter 漏改成 done，2026-10-09 P0-T003 補上。
 - 獨立審查（2026-10-01）：用 TypeScript 解析器自動比對 134 個方法、門面 43 個公開方法、contract 97 個匯出，全部一致，行為不變。
   low 已修：contract 守門測試改用 `ts.preProcessFile`（regex 擋不住同一行兩個敘述）；core-service.md 補 `getReview`。
   low 待使用者：`state-machine.md`、`wordpress-site.md` 三處舊路徑 `src/core/service.ts`（不在 write_paths）。
