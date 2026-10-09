@@ -230,7 +230,7 @@ function checkLinks(file: string, text: string, exists: (absPath: string) => boo
   const issues: Issue[] = [];
   const dir = dirname(join(root, file));
   stripCode(text).forEach((l, i) => {
-    for (const m of l.matchAll(/!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g)) {
+    for (const m of l.matchAll(/!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\)))?\s*\)/g)) {
       let target = (m[1] ?? '').replace(/^<|>$/g, '');
       if (!target || target.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
       target = target.replace(/[#?].*$/, '');
@@ -388,6 +388,9 @@ describe('docs-governance 規則自我測試（壞例子必須被抓到）', () 
     expect(checkLinks('docs/README.md', "[a](missing.md 'title')\n", none)).toHaveLength(1);
     expect(checkLinks('docs/README.md', '[a](missing.md (title))\n', none)).toHaveLength(1);
     expect(checkLinks('docs/README.md', '[a](missing.md "title")\n', none)).toHaveLength(1);
+    expect(checkLinks('docs/README.md', "[a](missing.md 'author\\'s title')\n", none)).toHaveLength(1);
+    // 括號 title 裡沒跳脫的括號不是合法連結（CommonMark），不檢查
+    expect(checkLinks('docs/README.md', '[a](missing.md (nested(title)))\n', none)).toEqual([]);
   });
 
   it('規則 5：超過檔頭註解寫的上限', () => {
