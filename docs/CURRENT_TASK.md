@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。2026-10-09 文件健檢修正與 `verify:docs`（D-042）已完成，在本機分支 `p0-t003-doc-health-fixes`（含先前 `docs-split-pointers` 的 commit），**沒推、不單獨開 PR**：下一個 Task 從這個分支開，一起進那個 PR。
+[P5-T046](tasks/P5-T046-link-new-tab.md)（D-043，連結在新分頁開啟）：分支 `p5-t046-link-new-tab`，從本機未推的文件分支 `p0-t003-doc-health-fixes` 開，PR 會一起帶那 4 個文件 commit（D-042）。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
