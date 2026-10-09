@@ -25,6 +25,7 @@ import {
 } from './rich-commands.js';
 import type { RichUnit } from '../../contract/rich-text.js';
 import { isBlankBody } from '../../contract/empty-body.js';
+import { isNewTabTarget } from '../../contract/link-target.js';
 import { readString } from './format.js';
 import {
   beginHold,
@@ -86,7 +87,7 @@ export interface ProofEditing {
   refreshFormat: () => void;
   doCommand: (command: FormatCommand) => void;
   doCommandRef: MutableRefObject<(command: FormatCommand) => void>;
-  applyLinkHref: (href: string) => void;
+  applyLinkHref: (href: string, newTab: boolean) => void;
   removeCurrentLink: () => void;
   closeLinkEditor: (refocus?: boolean) => void;
   // --- 流程 ---
@@ -212,7 +213,9 @@ export function useProofEditing({
     linkTarget.current = { range: saveSelection(doc, body), existing };
     linkSessions.current += 1;
     const counter = linkSessions.current;
-    setLinkEditor((previous) => nextLinkEditor(previous, existing?.getAttribute('href') ?? null, counter));
+    setLinkEditor((previous) =>
+      nextLinkEditor(previous, existing?.getAttribute('href') ?? null, counter, isNewTabTarget(existing?.getAttribute('target'))),
+    );
   }, []);
 
   const closeLinkEditor = useCallback((refocus = true) => {
@@ -251,14 +254,14 @@ export function useProofEditing({
   const doCommandRef = useRef(doCommand);
   doCommandRef.current = doCommand;
 
-  const applyLinkHref = (href: string): void => {
+  const applyLinkHref = (href: string, newTab: boolean): void => {
     const frame = frameRef.current;
     const body = editBody();
     const target = linkTarget.current;
     setLinkEditor(null);
     linkTarget.current = null;
     if (!frame || !body) return;
-    applyLink(frame, body, target?.range ?? null, href, target?.existing ?? null);
+    applyLink(frame, body, target?.range ?? null, href, target?.existing ?? null, newTab);
     refreshFormat();
   };
 

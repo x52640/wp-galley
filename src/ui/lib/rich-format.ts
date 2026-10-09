@@ -179,6 +179,8 @@ export const COMMAND_LABELS: Readonly<Record<FormatCommand, { label: string; hin
 export interface LinkEditorState {
   /** 已經是連結時的網址；新連結是 null。 */
   readonly current: string | null;
+  /** 「在新分頁開啟」勾選的起始狀態：新連結不勾；改既有連結時是它目前的狀態（D-043）。 */
+  readonly newTab: boolean;
   /**
    * 第幾次打開。輸入框以它當 key：開著 A 的輸入框時改選連結 B 再按連結，要換成 B 的網址重新開始，
    * 不能留著 A 打到一半的字——不然按「更新」會把 B 改成 A 的網址（審查 #6）。
@@ -187,8 +189,13 @@ export interface LinkEditorState {
 }
 
 /** 打開（或在開著的時候重新打開）連結輸入框。每次都是新的一次，輸入框內容從 `current` 重新開始。 */
-export function nextLinkEditor(previous: LinkEditorState | null, current: string | null, counter: number): LinkEditorState {
-  return { current, session: Math.max(counter, (previous?.session ?? 0) + 1) };
+export function nextLinkEditor(
+  previous: LinkEditorState | null,
+  current: string | null,
+  counter: number,
+  newTab = false,
+): LinkEditorState {
+  return { current, newTab: current !== null && newTab, session: Math.max(counter, (previous?.session ?? 0) + 1) };
 }
 
 export type EditSaveDecision = 'unchanged' | 'confirm-drop' | 'save';

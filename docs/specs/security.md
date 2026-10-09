@@ -44,6 +44,13 @@ script 不跑、圖片不載），只保留模板 `allowedTags` 內的標籤、�
   （瀏覽器會忽略網址裡的 tab／換行，`java\tscript:`、`/\t/evil.test` 在它眼中就是 `javascript:`、`//evil.test`）。
 - 不收的連結整個拆掉、字留著（不留沒有 href 的空殼 `<a>`）；sanitize 回報 `a.href`，編輯整理時進 dropped 提醒。
 
+**連結在新分頁開啟（D-043，P5-T046）**：規則只有一份，`src/contract/link-target.ts`；連結編輯框（`withNewTab`）與後端 `sanitize.ts`（`normalizeLinkAttrs`）都呼叫它。
+- 連結編輯框的「在新分頁開啟」：勾 → `<a href="…" target="_blank" rel="noopener">`（屬性順序 href → target → rel，跟 WordPress 7.1 起的編輯器逐字相同）；不勾 → 拿掉 `target`，`rel` 拿掉 noopener（連舊的 noreferrer）、其他值留著。
+- 後端再驗（每次渲染都跑，不管連結來自 Agent 還是編輯存檔）：`target` 只收 `_blank`（不分大小寫，輸出小寫），其他值拿掉；
+  有 `_blank` 時 `rel` 一定以 `noopener` 開頭（**noopener 是安全要求**：新分頁拿不到 `window.opener`），原有的其他值（如 `nofollow`）接在後面（＝ WordPress 的 `noopener nofollow`）；
+  舊內容（WordPress 7.0 以前）的 `noreferrer` 也算新分頁專用值，整理後拿掉。沒有 target 時只有 noreferrer／noopener 的 `rel` 是孤兒、拿掉，有其他值就整個照原樣。這是整理、不算移除屬性（不進 `removedAttributes`）。
+- 貼上照 D-028 只留 href，外面網站的 target／rel 不帶進來。
+
 **存檔時沒改的頂層區塊原樣保留**（P5-T028 審查）：前後端都把編輯後的正文跟**同一份基準**逐個頂層區塊做序列比對：
 基準是上一版**實際會發布的正文**（templateData 正文經 sanitize、補段落之後的 publishHtml——前端校樣顯示的就是它，
 後端自己再算一次）。對得上的區塊輸出基準裡那份（HTML 解析器修補過、已 sanitize）的 HTML，不跑整理規則；

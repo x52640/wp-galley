@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **99 檔 / 2191 測試**全綠（2026-10-09，分支 `p0-t003-doc-health-fixes`；main 仍是 98／2177）
+- `npm run verify`：typecheck 通過；Vitest **100 檔 / 2216 測試**全綠（2026-10-09，P5-T046 分支，含 P0-T003／P0-T004；合併前 main 是 98／2177）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-[P5-T046](tasks/P5-T046-link-new-tab.md)（D-043，連結在新分頁開啟）：分支 `p5-t046-link-new-tab`，從本機未推的文件分支 `p0-t003-doc-health-fixes` 開，PR 會一起帶那 4 個文件 commit（D-042）。
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,6 +20,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
 | [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |
 | [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（2026-10-05 使用者確認正常；搬家來的舊標記讀取時視為已建過 DB，不需補記） |
 | [P5-T040](tasks/P5-T040-review-followups.md) | 發布面板打網址不存 → 按 × 關掉再開 → 仍擋發布；「標題與網址」存網址中開發布面板 → 被擋 |

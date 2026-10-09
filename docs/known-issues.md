@@ -15,6 +15,11 @@
   整塊會走 wp:html 保底，不是帶 `linkDestination: custom` 的圖片區塊。要改 `block-parse.ts`／`block-types.ts`／`block-serialize.ts`
   （P5-T028 的 write_paths 只含最後一個），另開 Task（P5-T028 第三輪審查 #4）。
 
+- 連結「在新分頁開啟」（P5-T046）照 WordPress 7.1 寫 `rel="noopener"`：舊文章（7.0 以前寫的）的 `rel="noreferrer noopener"`
+  在這裡編輯、存檔後會變成 `noopener`（D-043 裁定的整理，WordPress 兩種都接受）。
+- 連結編輯框只改勾選（網址不變）時，target／rel 是直接改屬性，不單獨進 ⌘Z 復原堆疊（取消編輯仍可整個還原）。
+  勾選一律顯示：目前三份模板的 `a` 都允許 target／rel；日後有模板不允許時，勾了會在後端 sanitize 被靜靜拿掉（前端拿不到 allowedAttributes）。
+
 - 設定精靈：Antigravity 的安裝／登入指令未查證；換站後舊 target 不會自動移除；shell 裡 export 的
   `WORDPRESS_*` 下次啟動會蓋掉精靈寫的 `.env`（P8-T002，見 wordpress-site.md「設定精靈」）。
 

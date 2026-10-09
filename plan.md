@@ -108,7 +108,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-040** 2026-10-05 Remus｜大檔模組化，重構不改行為、一個 Task 一個 commit；ProofView 拆三張同一個 PR，MediaPanel、Workspace 各一個 PR，都從 main 開、可並行；改動前後 `?fixtures=1` 截圖逐張比對；`repository.ts`、`rich-text.ts`、`SetupWizard.tsx`、`routes/jobs.ts` 暫不拆｜→ [P5-T041](docs/tasks/P5-T041-proofview-selection.md)～[P5-T045](docs/tasks/P5-T045-split-workspace.md)
 - **D-041** 2026-10-05 Remus｜修訂 D-039：每個 PR Codex 審查最多三輪，第三輪的修正直接推、不再審，交接寫明「最後一輪沒經過 Codex」；合併由使用者按，主 session 不 `gh pr merge`｜無 Task
 - **D-042** 2026-10-09 Remus｜文件健檢後：修正過期狀態並把決策記錄每條壓到 250 字以內（細節留在 Task）；加 `verify:docs` 併進 `npm run verify` 擋住「CURRENT_TASK、Task 狀態、決策長度」對不上；只改文件的照舊不單獨開 PR，跟下一個 Task 一起進｜→ [P0-T003](docs/tasks/P0-T003-doc-health-fixes.md)、[P0-T004](docs/tasks/P0-T004-verify-docs.md)
-- **D-043** 2026-10-09 Remus｜連結可選「在新分頁開啟」：連結編輯框加勾選、預設不勾（照舊原視窗），勾了輸出 `target="_blank" rel="noreferrer noopener"`（跟 WordPress 逐字相同），取消就拿掉；後端只收 `_blank`；貼上的連結照舊只留 href。引用框不做新功能（工具列已有「引用」）｜→ [P5-T046](docs/tasks/P5-T046-link-new-tab.md)
+- **D-043** 2026-10-09 Remus｜連結可選「在新分頁開啟」：連結編輯框加勾選、預設不勾（照舊原視窗），勾了輸出 `target="_blank" rel="noopener"`（跟 WordPress 7.1+ 編輯器逐字相同；其他 rel 接在後面，舊的 noreferrer 整理掉），取消就拿掉；後端只收 `_blank`；貼上的連結照舊只留 href。引用框不做新功能（工具列已有「引用」）｜→ [P5-T046](docs/tasks/P5-T046-link-new-tab.md)
 
 ## 待裁定
 

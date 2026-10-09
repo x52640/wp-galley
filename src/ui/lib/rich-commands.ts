@@ -7,6 +7,7 @@ import {
   type RichNode,
   type RichUnit,
 } from '../../contract/rich-text.js';
+import { NEW_TAB_REL, NEW_TAB_TARGET, withNewTab } from '../../contract/link-target.js';
 import { countNonSpace, locateTextOffset } from './check-while-writing.js';
 import { emphasisFromComputed, type ComputedEmphasis, type FormatCommand, type FormatState } from './rich-format.js';
 
@@ -183,13 +184,57 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** 連結元素上改 target／rel 用到的那幾個 DOM 方法（測試用假元素也能套）。 */
+export interface LinkAttrTarget {
+  readonly attributes: ArrayLike<{ readonly name: string; readonly value: string }>;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
 /**
- * 加上或改連結。`href` 已經驗過（`parseLinkInput`）。
- * - 游標在既有連結裡：整個連結換網址（字不動）。
+ * 把一個連結設成新分頁或原視窗（D-043，規則在 `contract/link-target.ts`）。
+ * 已有的屬性就地改值（位置不動），沒有的 setAttribute 接在最後——createLink 產生的 `<a href>` 會變成
+ * `href target rel`，跟 WordPress 編輯器的順序一樣。
+ */
+export function setLinkNewTab(link: LinkAttrTarget, newTab: boolean): void {
+  const current = Array.from(link.attributes).map((attr) => ({ name: attr.name, value: attr.value }));
+  const next = withNewTab(current, newTab);
+  for (const attr of current) {
+    if (!next.some((kept) => kept.name === attr.name)) link.removeAttribute(attr.name);
+  }
+  for (const attr of next) {
+    if (current.find((old) => old.name === attr.name)?.value !== attr.value) link.setAttribute(attr.name, attr.value);
+  }
+}
+
+/** createLink 之後，選取範圍碰到、網址是 `href` 的連結（Chrome 會把選到的字切成好幾個 `<a>`）。 */
+function linksInSelection(doc: Document, body: Element, href: string): Element[] {
+  const selection = doc.getSelection();
+  if (!selection || selection.rangeCount === 0) return [];
+  const range = selection.getRangeAt(0);
+  const inRange: Element[] = Array.from(body.querySelectorAll('a')).filter((link) => link.getAttribute('href') === href && range.intersectsNode(link));
+  const around = closestIn(doc, body, 'a');
+  if (around !== null && around.getAttribute('href') === href && !inRange.includes(around)) inRange.push(around);
+  return inRange;
+}
+
+/**
+ * 加上或改連結。`href` 已經驗過（`parseLinkInput`）。`newTab`：連結編輯框的「在新分頁開啟」（D-043）。
+ * - 游標在既有連結裡：整個連結換網址（字不動），target／rel 照勾選改。
  * - 有選字：選到的字變連結。
  * - 什麼都沒選：插入一段以網址本身為字的連結。
+ *
+ * target／rel 是 createLink 之後直接改屬性：⌘Z 會還原連結本身，但「只改勾選」那一下不會單獨進復原堆疊
+ * （取消編輯仍可整個還原）。
  */
-export function applyLink(frame: HTMLIFrameElement, body: HTMLElement, range: Range | null, href: string, existing: Element | null): void {
+export function applyLink(
+  frame: HTMLIFrameElement,
+  body: HTMLElement,
+  range: Range | null,
+  href: string,
+  existing: Element | null,
+  newTab = false,
+): void {
   const doc = frame.contentDocument;
   if (!doc) return;
   restoreSelection(frame, body, range);
@@ -198,13 +243,18 @@ export function applyLink(frame: HTMLIFrameElement, body: HTMLElement, range: Ra
     whole.selectNodeContents(existing);
     restoreSelection(frame, body, whole);
     doc.execCommand('createLink', false, href);
+    const links = linksInSelection(doc, body, href);
+    if (existing.isConnected && !links.includes(existing)) links.push(existing);
+    for (const link of links) setLinkNewTab(link, newTab);
     return;
   }
   if (range === null || range.collapsed) {
-    doc.execCommand('insertHTML', false, `<a href="${escapeHtml(href)}">${escapeHtml(href)}</a>`);
+    const attrs = newTab ? ` target="${NEW_TAB_TARGET}" rel="${NEW_TAB_REL}"` : '';
+    doc.execCommand('insertHTML', false, `<a href="${escapeHtml(href)}"${attrs}>${escapeHtml(href)}</a>`);
     return;
   }
   doc.execCommand('createLink', false, href);
+  for (const link of linksInSelection(doc, body, href)) setLinkNewTab(link, newTab);
 }
 
 /** 拿掉連結，字留著。 */

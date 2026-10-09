@@ -54,7 +54,8 @@ export function FormatBar({
   /** 連結輸入框開著就不是 null。 */
   link: LinkEditorState | null;
   schemes: readonly string[];
-  onApplyLink: (href: string) => void;
+  /** `newTab`：連結編輯框的「在新分頁開啟」勾選（D-043）。 */
+  onApplyLink: (href: string, newTab: boolean) => void;
   onRemoveLink: () => void;
   onCloseLink: () => void;
 }): JSX.Element | null {
@@ -103,6 +104,7 @@ export function FormatBar({
           // 每次打開都是新的輸入框：換了目標連結，內容從那個連結的網址重新開始（審查 #6）。
           key={link.session}
           current={link.current}
+          newTab={link.newTab}
           schemes={schemes}
           onApply={onApplyLink}
           onRemove={onRemoveLink}
@@ -116,18 +118,22 @@ export function FormatBar({
 /** 發布台裡的連結輸入框（不用 window.prompt）。Enter 套用、Esc 關掉。 */
 function LinkEditor({
   current,
+  newTab: initialNewTab,
   schemes,
   onApply,
   onRemove,
   onClose,
 }: {
   current: string | null;
+  /** 新連結 false；改既有連結時是它目前的狀態。 */
+  newTab: boolean;
   schemes: readonly string[];
-  onApply: (href: string) => void;
+  onApply: (href: string, newTab: boolean) => void;
   onRemove: () => void;
   onClose: () => void;
 }): JSX.Element {
   const [value, setValue] = useState(current ?? '');
+  const [newTab, setNewTab] = useState(initialNewTab);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -142,7 +148,7 @@ function LinkEditor({
       inputRef.current?.focus();
       return;
     }
-    onApply(parsed.href);
+    onApply(parsed.href, newTab);
   };
 
   return (
@@ -181,6 +187,10 @@ function LinkEditor({
           setError(null);
         }}
       />
+      <label className="link-editor-newtab">
+        <input type="checkbox" checked={newTab} onChange={(event) => setNewTab(event.target.checked)} />
+        在新分頁開啟
+      </label>
       <button type="submit" className="btn btn-primary btn-tiny">
         {current === null ? '加上連結' : '更新'}
       </button>
