@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **102 檔 / 2258 測試**全綠（2026-10-12，P5-T047 分支；main 是 101／2229）
+- `npm run verify`：typecheck 通過；Vitest **103 檔 / 2283 測試**全綠（2026-10-12，P8-T006 分支；main 是 102／2258）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-[P8-T006](tasks/P8-T006-background-app.md) Galley.app 背景執行、不開終端機（D-046），分支 `feat/P8-T006-background-app`
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,8 +20,8 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P8-T006](tasks/P8-T006-background-app.md)（含 P8-T005） | 主目錄重跑 `scripts/make-app.sh`，Dock 上的 Galley 拿掉再拖一次 → 發布台關著時點圖示：沒有終端機、瀏覽器自動開、沒有 502、Dock 有亮點 → 關掉分頁再點圖示：瀏覽器再開 → ⌘Q：亮點消失、重新整理連不上 → 先雙擊 `start.command` 再點圖示：只開瀏覽器、結束 app 不會關掉終端機裡的服務 |
 | [P5-T047](tasks/P5-T047-word-count.md) | 開一篇真實草稿 → 編輯區右下「N 字」合理 → 打字模式打幾個字數字即時變 → 發布面板「正文 N 字」相同 |
-| [P8-T005](tasks/P8-T005-launcher-app.md) | 關掉發布台 → 雙擊 `start.command` → 瀏覽器打開時稿件列表沒有 502；主目錄跑 `scripts/make-app.sh` → `~/Applications/Galley.app` 有 G 圖示 → 拖到 Dock → 沒開時點它開終端機並啟動、已開時點它只開瀏覽器、剛點完 20 秒內再點不會多開 |
 | [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
 | [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |
 | [P8-T004](tasks/P8-T004-data-dir-hardening.md) | 啟動發布台：沒有誤警告、舊稿件與圖片照常（2026-10-05 使用者確認正常；搬家來的舊標記讀取時視為已建過 DB，不需補記） |
