@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
 import { api } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
@@ -20,6 +20,8 @@ import {
   type SyncOutcome,
 } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
+import { countBodyWords } from '../../contract/word-count.js';
+import { WORD_COUNT_HINT, wordCountNumber } from '../lib/word-count.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
 import { ErrorNote, Spinner, guardEdit, useAction } from './panels/shared.js';
@@ -75,6 +77,9 @@ export function PublishSheet({
   // 作者是發布選項（P5-T024）：null＝用這個站的預設作者（後端決定），改了只影響這一篇。
   const [authorId, setAuthorId] = useState<number | null>(null);
   const authors = useAuthors();
+  // 正文字數（P5-T047）：跟校樣底部同一個規則、同一份正文（存好的那一版）。只顯示，不擋發布。
+  const publishHtml = job.currentRevision?.publishHtml;
+  const wordCount = useMemo(() => countBodyWords(publishHtml), [publishHtml]);
   const prepare = useAction();
   const go = useAction();
 
@@ -220,6 +225,9 @@ export function PublishSheet({
           </span>
         </div>
         <p className="field-hint">類型在建稿時就決定了，發布時不用再選。</p>
+        <p className="p-words" title={WORD_COUNT_HINT}>
+          正文 <span className="mono">{wordCountNumber(wordCount)}</span> 字
+        </p>
         <PublishSlug
           job={job}
           refresh={refresh}

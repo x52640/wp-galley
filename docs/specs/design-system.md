@@ -100,6 +100,11 @@ CSS 變數），改分類色時兩邊要一起改。校稿四種是淡底＋實�
   外層用 CSSOM 把文件 `html` 設 `overflow: hidden`、body 設 `display: flow-root`（包住 alignleft／alignright 浮動圖）、高度量到 body 下外距與 html 下內距為止，
   內容比 iframe 高（scrollHeight 大於 clientHeight）時用 scrollHeight，不裁內容；打字時瀏覽器把文件捲下去的，量測時捲回頂端。
   新稿件「直接進打字模式」只對建立後第一次打開生效：離開那一篇（回總覽、上一頁、換篇）或載入失敗就作廢。
+- **字數**（D-045，P5-T047）：校樣下緣固定一條細列（`.proof-foot`，上方一條 `--shell-line`、不跟著文章捲），靠右寫「N 字」：
+  次要文字色、`.76rem`，數字用等寬字、千分位；滑過去講規則（「只算正文：中文一字算 1、英文與數字一個詞算 1；標題、圖說、標點不算」）。
+  看稿算存好的那一版；打字模式算正在編輯的內容，打字中即時跟著變（節流 300ms，第一下與最後一下一定算到）。
+  發布面板「發到哪裡」框底下同樣一行灰字「正文 N 字」（`.p-words`），跟校樣底部同一個數字。只顯示，不擋任何事。
+  規則在 `src/contract/word-count.ts`（有測試）。
 - **格式工具列**（D-028，P5-T028）：編輯中校樣工具列下面多一排按鈕，分四組——連結、粗體、斜體｜H2、H3、內文｜
   項目清單、編號清單、引用｜分隔線。**出現哪些照該篇模板的 `allowedTags`**（`JobDetail.template.allowedTags`，
   規則在 `src/ui/lib/rich-format.ts`，有測試），不是寫死。按鈕反映游標所在的格式（`aria-pressed`，強調色淡底）；
