@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。
+[P8-T006](tasks/P8-T006-background-app.md) Galley.app 背景執行、不開終端機（D-046），分支 `feat/P8-T006-background-app`
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
