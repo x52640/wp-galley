@@ -33,3 +33,6 @@ know_how.md
 
 # --- git worktree 的資料目錄（P8-T003：worktree 不共用全機的資料目錄）---
 .galley-data/
+
+# --- scripts/make-app.sh 產生的啟動 app（P8-T005）：寫死本機路徑，不進 Git ---
+Galley.app/
