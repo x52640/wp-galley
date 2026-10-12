@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。
+[P8-T005](tasks/P8-T005-launcher-app.md) 啟動不再 502、包成 Galley.app（D-044），分支 `feat/P8-T005-launcher-app`
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
