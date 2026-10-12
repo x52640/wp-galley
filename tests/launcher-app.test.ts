@@ -7,17 +7,16 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  utimesSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 /**
- * 啟動腳本與 Galley.app（D-044，P8-T005）。
+ * 啟動腳本與 Galley.app（D-044 P8-T005；D-046 P8-T006 改成常開、在背景跑服務）。
  *
  * 不跑 start.command、不打開產出的 app（會真的啟動服務、撞到使用者正在跑的 3000／5173）。
+ * 背景服務腳本本身用假服務實跑，見 `galley-service.test.ts`。
  * 只檢查腳本內容、`--print-script` 印出的 AppleScript，以及在 macOS 上把 app 產到暫存目錄看結構。
  * 一律用 execFileSync 帶參數陣列，不經過 shell。
  */
@@ -25,6 +24,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const repo = join(__dirname, '..');
 const startCommand = join(repo, 'scripts', 'start.command');
 const makeApp = join(repo, 'scripts', 'make-app.sh');
+const serviceScript = join(repo, 'scripts', 'galley-service.sh');
 const iconPng = join(repo, 'scripts', 'app', 'icon.png');
 const isMac = process.platform === 'darwin';
 
@@ -42,6 +42,7 @@ function fakeRepo(): { root: string; repoDir: string } {
   mkdirSync(join(repoDir, 'scripts', 'app'), { recursive: true });
   cpSync(makeApp, join(repoDir, 'scripts', 'make-app.sh'));
   cpSync(startCommand, join(repoDir, 'scripts', 'start.command'));
+  cpSync(serviceScript, join(repoDir, 'scripts', 'galley-service.sh'));
   cpSync(iconPng, join(repoDir, 'scripts', 'app', 'icon.png'));
   return { root, repoDir };
 }
@@ -56,7 +57,7 @@ describe('start.command', () => {
   const source = readFileSync(startCommand, 'utf8');
 
   it('bash 語法正確（bash -n 只檢查第一個檔，所以一個一個跑）', () => {
-    for (const file of [startCommand, makeApp]) execFileSync('bash', ['-n', file]);
+    for (const file of [startCommand, makeApp, serviceScript]) execFileSync('bash', ['-n', file]);
   });
 
   it('開瀏覽器前同時等前端 5173 和後端 /api/health（只等 Vite 會 502）', () => {
@@ -92,22 +93,57 @@ describe('make-app.sh --print-script', () => {
     expect(script).toContain(`set repoPath to "${escaped}"`);
   });
 
-  it('已在跑只開瀏覽器，沒在跑才 open start.command，路徑一律 quoted form', () => {
+  it('常開 applet：on run 起服務（或接手）、on reopen 開瀏覽器或重起、on quit 先 stop 再 continue quit', () => {
     const { repoDir } = fakeRepo();
     const script = printScript(repoDir);
-    expect(script).toContain('open location uiURL');
-    expect(script).toContain('repoPath & "/scripts/start.command"');
-    expect(script).toContain('do shell script "open " & quoted form of startCommand');
-    expect(script).toContain('http://127.0.0.1:3000/api/health');
-    // 剛開過 start.command（20 秒內）就不再開第二個；開之前先寫時間戳
-    expect(script).toContain('galley-launch.stamp');
-    expect(script).toContain('if launchedRecently(stampPath, 20) then');
-    const stampWrite = script.indexOf('do shell script "date +%s > " & quoted form of stampPath');
-    const openStart = script.indexOf('do shell script "open " & quoted form of startCommand');
-    expect(stampWrite).toBeGreaterThan(-1);
-    expect(openStart).toBeGreaterThan(stampWrite);
+    const handler = (name: string): string => {
+      const start = script.indexOf(`\non ${name}`);
+      const end = script.indexOf(`\nend ${name}`, start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      return script.slice(start, end);
+    };
+    expect(handler('serviceScript')).toContain('return repoPath & "/scripts/galley-service.sh"');
+    expect(handler('uiURL')).toContain('"http://127.0.0.1:5173"');
+
+    // 啟動：先問 status；別人開的（start.command）只開瀏覽器、不接手、自己結束；其餘交給 launchService
+    const run = handler('run');
+    expect(run).toContain('do shell script quoted form of svc & " status"');
+    expect(run).toMatch(/if serviceState is "other" then[\s\S]*?open location uiURL\(\)[\s\S]*?quit[\s\S]*?end if/);
+    expect(run.indexOf('launchService(svc, serviceState)')).toBeGreaterThan(run.indexOf('" status"'));
+
+    // 起服務（或接手）：start 成功才開瀏覽器；起不來對話框帶錯誤訊息（含記錄檔位置），app 結束
+    const launch = handler('launchService');
+    const start = launch.indexOf('do shell script quoted form of svc & " start"');
+    expect(start).toBeGreaterThan(-1);
+    expect(launch).toContain('if serviceState is not "ours" then display notification');
+    expect(launch.lastIndexOf('open location uiURL()')).toBeGreaterThan(start);
+    expect(launch).toMatch(/on error errMsg[\s\S]*display dialog "發布台沒有起來：" & return & return & errMsg[\s\S]*quit/);
+
+    // 點 Dock：先問 status；我們的服務死了（stopped）就照開啟流程重起，否則只開瀏覽器
+    const reopen = handler('reopen');
+    expect(reopen).toContain('do shell script quoted form of svc & " status"');
+    expect(reopen).toMatch(/if serviceState is "stopped" then\s+launchService\(svc, serviceState\)\s+else\s+open location uiURL\(\)\s+end if/);
+
+    // with timeout 對 do shell script 沒有作用，不要放（會讓人以為有逾時保護）
+    expect(script).not.toContain('with timeout');
+
+    // 結束：stop 包在 try 裡（失敗也要能結束，登出才不會卡住），之後才 continue quit
+    const quit = handler('quit');
+    const stop = quit.indexOf('do shell script quoted form of serviceScript() & " stop"');
+    expect(stop).toBeGreaterThan(-1);
+    expect(quit.indexOf('continue quit')).toBeGreaterThan(stop);
+    expect(quit.indexOf('try')).toBeLessThan(stop);
+    expect(quit.indexOf('end try')).toBeLessThan(quit.indexOf('continue quit'));
+
+    // P8-T005 的開終端機與連點時間戳都不要了
+    expect(script).not.toContain('start.command"');
+    expect(script).not.toContain('galley-launch.stamp');
+    expect(script).not.toContain('launchedRecently');
     // 不用 property（applet 執行時會寫回腳本檔、弄壞簽章）
     expect(script).not.toMatch(/^\s*property\s/m);
+    // 執行時一律 quoted form，不自己拼引號
+    expect(script).not.toMatch(/do shell script "[^"]*' /);
   });
 
   it.skipIf(!isMac)('AppleScript 讀回來的路徑跟原本一模一樣（macOS）', () => {
@@ -123,33 +159,8 @@ describe('make-app.sh --print-script', () => {
   });
 });
 
-describe('Galley.app 的「剛開過」判斷（launchedRecently）', () => {
-  it.skipIf(!isMac)('時間戳 20 秒內算剛開過、更舊或不存在都不算（macOS）', () => {
-    const { root, repoDir } = fakeRepo();
-    const script = printScript(repoDir);
-    const handler = script.slice(
-      script.indexOf('on launchedRecently('),
-      script.indexOf('end launchedRecently') + 'end launchedRecently'.length,
-    );
-    const stamp = join(root, 'stamp dir', 'galley-launch.stamp');
-    mkdirSync(join(root, 'stamp dir'));
-    const check = (): string => {
-      const file = join(root, 'check.applescript');
-      writeFileSync(file, `${handler}\nreturn launchedRecently(${JSON.stringify(stamp)}, 20)\n`);
-      return execFileSync('osascript', [file], { encoding: 'utf8' }).trim();
-    };
-
-    expect(check()).toBe('false'); // 沒有時間戳
-    writeFileSync(stamp, 'x');
-    expect(check()).toBe('true'); // 剛寫
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(stamp, old, old);
-    expect(check()).toBe('false'); // 一分鐘前
-  });
-});
-
 describe('make-app.sh 產生 app（macOS，只產到暫存目錄）', () => {
-  it.skipIf(!isMac)('app 結構、自己的圖示、簽章完整、腳本指向 repo', () => {
+  it.skipIf(!isMac)('app 結構、常開、自己的圖示、簽章完整、腳本指向 repo', () => {
     const { root, repoDir } = fakeRepo();
     const outDir = join(root, 'out dir');
     execFileSync('bash', [join(repoDir, 'scripts', 'make-app.sh'), outDir], { stdio: 'pipe' });
@@ -168,6 +179,8 @@ describe('make-app.sh 產生 app（macOS，只產到暫存目錄）', () => {
     expect(plist.CFBundleIconFile).toBe('applet');
     expect(plist.CFBundleIconName).toBeUndefined();
     expect(plist.CFBundleName).toBe('Galley');
+    // osacompile -s：常開的 applet，⌘Q 之前一直在 Dock 上
+    expect(plist.OSAAppletStayOpen).toBe(true);
 
     execFileSync('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'pipe' });
 
@@ -176,6 +189,8 @@ describe('make-app.sh 產生 app（macOS，只產到暫存目錄）', () => {
     });
     const escaped = repoDir.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     expect(decompiled).toContain(`set repoPath to "${escaped}"`);
+    for (const name of ['run', 'reopen', 'quit']) expect(decompiled).toMatch(new RegExp(`^on ${name}\\b`, 'm'));
+    expect(decompiled).toContain('continue quit');
 
     // 圖示確實是 scripts/app/icon.png 轉出來的：icns 裡有 1024 的 ic10
     const icns = readFileSync(join(resources, 'applet.icns'));

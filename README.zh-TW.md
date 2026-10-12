@@ -74,20 +74,29 @@ macOS 是 `~/Library/Application Support/Galley/`，Linux 是 `$XDG_DATA_HOME/ga
 **從舊版升級**：以前資料放在程式資料夾裡。第一次啟動新版會自動把它們**複製**到資料目錄（舊的不刪），
 並在終端機列出舊資料的位置；確認舊稿件、舊圖都在之後再自己刪。舊的 `.env` 裡有密碼，記得一起刪。
 
-### macOS：雙擊啟動、放進 Dock
+### macOS：放進 Dock，像一般 app 一樣開關
 
-開發中的人可以在 Finder 雙擊 `scripts/start.command`：它會開一個終端機視窗跑 `npm run dev`，
-等前端和後端都起來才打開瀏覽器。**那個終端機視窗就是發布台本身**，關掉視窗就是關掉發布台。
-
-想在 Dock 上點一下就開，跑一次：
+跑一次：
 
 ```bash
 scripts/make-app.sh            # 產生 ~/Applications/Galley.app；要放別處就加資料夾參數
 ```
 
-再把 `Galley.app` 拖到 Dock。點它時，發布台已經在跑就只開瀏覽器，沒在跑就替你打開 `start.command`。
-app 裡記的是產生當下的程式資料夾位置，**資料夾搬家或改名之後要重跑一次** `scripts/make-app.sh`。
-想換圖示，用自己的 1024×1024 PNG 蓋掉 `scripts/app/icon.png` 再重跑。
+再把 `Galley.app` 拖到 Dock。之後：
+
+- **打開**：點 Galley 圖示，發布台在背景啟動（不開終端機），前端和後端都好了才自動打開瀏覽器。
+  Dock 上圖示下方有亮點，就表示發布台開著。
+- **找回瀏覽器分頁**：分頁關掉了，再點一次 Dock 上的圖示就會重開。
+- **關掉**：⌘Q、Dock 圖示按右鍵「結束」，或登出／關機，發布台會跟著關掉（記憶體也放掉）。
+- 起不來時會跳出對話框，講原因和記錄檔位置。記錄檔在資料目錄的 `logs/galley.log`
+  （macOS 是 `~/Library/Application Support/Galley/logs/galley.log`；上一次的留成 `galley.log.1`）。
+
+想看即時訊息（例如除錯），改用 Finder 雙擊 `scripts/start.command`：它會開一個終端機視窗跑 `npm run dev`，
+等前端和後端都起來才打開瀏覽器。**那個終端機視窗就是發布台本身**，關掉視窗就是關掉發布台。
+這時再點 Galley 圖示只會打開瀏覽器，不會接手、也不會關掉終端機裡的那一個。
+
+app 裡記的是產生當下的程式資料夾位置，**資料夾搬家或改名之後要重跑一次** `scripts/make-app.sh`
+（Dock 上的舊圖示拿掉、再拖一次新的）。想換圖示，用自己的 1024×1024 PNG 蓋掉 `scripts/app/icon.png` 再重跑。
 
 ## 設定精靈
 

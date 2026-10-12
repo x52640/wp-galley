@@ -1,16 +1,16 @@
 #!/bin/bash
 #
-# 產生 Galley.app：放在 Dock 上、點一下就能開發布台的小 app（D-044，P8-T005）。
+# 產生 Galley.app：放在 Dock 上、點一下就能開發布台的小 app（D-044 P8-T005；D-046 P8-T006 改成背景執行）。
 #
 #   scripts/make-app.sh              產生到 ~/Applications/Galley.app
 #   scripts/make-app.sh <資料夾>      產生到 <資料夾>/Galley.app
 #   scripts/make-app.sh --print-script   只印出 app 裡的 AppleScript（測試用），不產生 app
 #
-# app 點下去：
-#   - 發布台已經在跑（5173 或 3000 有回應）→ 只開瀏覽器到 http://127.0.0.1:5173
-#   - 沒在跑 → 用 open 打開這個 repo 的 scripts/start.command（跟雙擊一樣，開一個終端機視窗，
-#     那個視窗就是服務本體），並在暫存目錄寫 galley-launch.stamp
-#   - 沒在跑但 20 秒內才開過 start.command（還在起來）→ 只跳通知，不再開第二個
+# Galley.app 是常開的 applet（osacompile -s），不開終端機：
+#   - 打開：沒在跑 → 用 scripts/galley-service.sh 在背景起服務，前後端都通了才開瀏覽器；
+#           之前由 Galley 起、Galley 當掉留下的 → 接手；由 start.command（終端機）開的 → 只開瀏覽器、不接手，Galley 自己結束
+#   - 點 Dock 圖示：開瀏覽器
+#   - ⌘Q／Dock 右鍵結束／登出：關掉 Galley 起的（或接手的）服務，兩個埠都放掉才結束
 #
 # repo 的絕對路徑在產生 app 時寫死進去。repo 搬家或改名之後，重跑一次這個腳本即可。
 # 只用 macOS 內建工具（osacompile、sips、iconutil、PlistBuddy、codesign），不下載任何東西。
@@ -20,7 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-START_COMMAND="$REPO_DIR/scripts/start.command"
+SERVICE_SCRIPT="$REPO_DIR/scripts/galley-service.sh"
 ICON_PNG="$SCRIPT_DIR/app/icon.png"
 APP_NAME="Galley"
 
@@ -45,59 +45,87 @@ esac
 print_script() {
   cat <<APPLESCRIPT
 -- Galley.app：由 scripts/make-app.sh 產生，不要手改；repo 搬家請重跑該腳本。
+-- 常開的 applet（osacompile -s）：Dock 上有亮點＝發布台開著；⌘Q、Dock 右鍵結束、登出都會把背景服務關掉。
+-- 服務的起停都交給 scripts/galley-service.sh（不開終端機，輸出寫到資料目錄的 logs/galley.log）。
 -- 不用 property：applet 執行後會把 property 寫回腳本檔，弄壞簽章。
 
 on run
-	set repoPath to $(applescript_string "$REPO_DIR")
-	set uiURL to "http://127.0.0.1:5173"
-	set healthURL to "http://127.0.0.1:3000/api/health"
-	if serviceIsUp(uiURL, healthURL) then
-		open location uiURL
-		return
-	end if
-	set startCommand to repoPath & "/scripts/start.command"
+	set svc to serviceScript()
 	try
-		do shell script "test -x " & quoted form of startCommand
+		do shell script "test -x " & quoted form of svc
 	on error
-		display dialog "找不到啟動腳本：" & return & startCommand & return & return & "repo 搬家或改名了嗎？請在新位置重跑 scripts/make-app.sh。" buttons {"好"} default button 1 with title "Galley" with icon caution
+		display dialog "找不到服務腳本：" & return & svc & return & return & "repo 搬家或改名了嗎？請在新位置重跑 scripts/make-app.sh。" buttons {"好"} default button 1 with title "Galley" with icon caution
+		quit
 		return
 	end try
-	-- 剛點過、服務還在起來（埠還沒開）時再點一次：不要再開第二個 start.command（會撞埠），提示稍候就好。
-	set stampPath to (POSIX path of (path to temporary items)) & "galley-launch.stamp"
-	if launchedRecently(stampPath, 20) then
-		display notification "發布台正在啟動，好了會自動打開瀏覽器。" with title "Galley"
+	set serviceState to do shell script quoted form of svc & " status"
+	if serviceState is "other" then
+		-- start.command（終端機）開的：只開瀏覽器，不接手，Galley 也不留著（結束 Galley 不會關它）。
+		display notification "發布台已經在跑（多半是從終端機 start.command 開的）：Galley 只幫你打開瀏覽器，不會關它；要關請到那個終端機視窗。" with title "Galley"
+		open location uiURL()
+		quit
 		return
 	end if
-	do shell script "date +%s > " & quoted form of stampPath
-	-- 跟在 Finder 雙擊一樣：開終端機視窗跑服務，start.command 會等前後端都起來再開瀏覽器。
-	do shell script "open " & quoted form of startCommand
+	launchService(svc, serviceState)
 end run
 
--- 前端或後端任何一個有回應就當成已經在跑（可能還在啟動中），只開瀏覽器，
--- 不再開第二個 start.command（埠被占住只會在新視窗報錯）。
--- 連不上（沒在跑）時 curl 會立刻失敗，不會等滿逾時。
-on serviceIsUp(uiURL, healthURL)
+-- 點 Dock 圖示：Galley 起的服務還在（或是別人開的）→ 再開一次瀏覽器（分頁關掉了也找得回來）；
+-- 服務自己掛掉了（stopped，Dock 亮點還在）→ 照開啟時的流程重起。
+on reopen
+	set svc to serviceScript()
+	set serviceState to "ours"
 	try
-		do shell script "curl -s -o /dev/null --max-time 3 " & quoted form of uiURL
-		return true
+		set serviceState to do shell script quoted form of svc & " status"
 	end try
-	try
-		do shell script "curl -s -o /dev/null --max-time 10 " & quoted form of healthURL
-		return true
-	end try
-	return false
-end serviceIsUp
+	if serviceState is "stopped" then
+		launchService(svc, serviceState)
+	else
+		open location uiURL()
+	end if
+end reopen
 
--- 上次由這個 app 開 start.command 是不是在 withinSeconds 秒內（看時間戳檔的修改時間）。
-on launchedRecently(stampPath, withinSeconds)
+-- 起服務（沒在跑）或接手（之前由 Galley 起、Galley 當掉留下來的），等前後端都通才開瀏覽器。
+-- do shell script 會一直等到腳本結束（最多約兩分鐘多），不受 Apple event 的逾時影響，不必另外放寬。
+-- 這段期間 app 在等：⌘Q、登出要等它做完才處理（登出可能因此被擋下，見 known-issues）。
+-- 起不來：對話框講原因與記錄檔位置，Galley 結束（亮點消失＝沒有在跑）。
+on launchService(svc, serviceState)
+	if serviceState is not "ours" then display notification "正在背景啟動發布台，好了會自動打開瀏覽器。" with title "Galley"
 	try
-		set stampTime to (do shell script "stat -f %m " & quoted form of stampPath) as integer
-		set nowTime to (do shell script "date +%s") as integer
-		return (nowTime - stampTime) < withinSeconds
-	on error
+		do shell script quoted form of svc & " start"
+	on error errMsg
+		set choice to display dialog "發布台沒有起來：" & return & return & errMsg buttons {"打開記錄檔", "好"} default button 2 with title "Galley" with icon caution
+		if button returned of choice is "打開記錄檔" then
+			try
+				do shell script "open -a Console " & quoted form of (do shell script quoted form of svc & " logpath")
+			end try
+		end if
+		quit
 		return false
 	end try
-end launchedRecently
+	open location uiURL()
+	return true
+end launchService
+
+-- ⌘Q、Dock 右鍵結束、登出／關機：先把 Galley 起的（或接手的）整棵服務程序樹關掉、埠放掉，才真的結束。
+-- stop 是同步的（do shell script 等它跑完），回來才 continue quit。
+-- 不是 Galley 起的（start.command）不會碰。關不乾淨也要能結束（不然登出會卡住），只跳通知。
+on quit
+	try
+		do shell script quoted form of serviceScript() & " stop"
+	on error errMsg
+		display notification errMsg with title "Galley"
+	end try
+	continue quit
+end quit
+
+on serviceScript()
+	set repoPath to $(applescript_string "$REPO_DIR")
+	return repoPath & "/scripts/galley-service.sh"
+end serviceScript
+
+on uiURL()
+	return "http://127.0.0.1:5173"
+end uiURL
 APPLESCRIPT
 }
 
@@ -108,10 +136,10 @@ fi
 
 [ "$(uname -s)" = "Darwin" ] || fail "只能在 macOS 上產生 app。"
 for tool in osacompile sips iconutil codesign /usr/libexec/PlistBuddy; do
-  command -v "$tool" >/dev/null 2>&1 || fail "找不到 macOS 內建工具 $tool。"
+  command -v "$tool" >/dev/null 2>&1 || fail "找不到 macOS 內建工具 ${tool}。"
 done
-[ -x "$START_COMMAND" ] || fail "找不到可執行的 $START_COMMAND（需要執行權限）。"
-[ -f "$ICON_PNG" ] || fail "找不到圖示來源 $ICON_PNG。"
+[ -x "$SERVICE_SCRIPT" ] || fail "找不到可執行的 ${SERVICE_SCRIPT}（需要執行權限）。"
+[ -f "$ICON_PNG" ] || fail "找不到圖示來源 ${ICON_PNG}。"
 
 DEST_DIR="${1:-$HOME/Applications}"
 mkdir -p "$DEST_DIR"
@@ -123,7 +151,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 # 1. AppleScript → app
 print_script >"$WORK_DIR/main.applescript"
-osacompile -o "$WORK_DIR/$APP_NAME.app" "$WORK_DIR/main.applescript"
+osacompile -s -o "$WORK_DIR/$APP_NAME.app" "$WORK_DIR/main.applescript"
 BUILT="$WORK_DIR/$APP_NAME.app"
 PLIST="$BUILT/Contents/Info.plist"
 
