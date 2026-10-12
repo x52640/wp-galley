@@ -74,6 +74,21 @@ macOS 是 `~/Library/Application Support/Galley/`，Linux 是 `$XDG_DATA_HOME/ga
 **從舊版升級**：以前資料放在程式資料夾裡。第一次啟動新版會自動把它們**複製**到資料目錄（舊的不刪），
 並在終端機列出舊資料的位置；確認舊稿件、舊圖都在之後再自己刪。舊的 `.env` 裡有密碼，記得一起刪。
 
+### macOS：雙擊啟動、放進 Dock
+
+開發中的人可以在 Finder 雙擊 `scripts/start.command`：它會開一個終端機視窗跑 `npm run dev`，
+等前端和後端都起來才打開瀏覽器。**那個終端機視窗就是發布台本身**，關掉視窗就是關掉發布台。
+
+想在 Dock 上點一下就開，跑一次：
+
+```bash
+scripts/make-app.sh            # 產生 ~/Applications/Galley.app；要放別處就加資料夾參數
+```
+
+再把 `Galley.app` 拖到 Dock。點它時，發布台已經在跑就只開瀏覽器，沒在跑就替你打開 `start.command`。
+app 裡記的是產生當下的程式資料夾位置，**資料夾搬家或改名之後要重跑一次** `scripts/make-app.sh`。
+想換圖示，用自己的 1024×1024 PNG 蓋掉 `scripts/app/icon.png` 再重跑。
+
 ## 設定精靈
 
 四步，每一步失敗都會講「卡在哪裡、下一步做什麼」：

@@ -99,6 +99,23 @@ version starts, it **copies** that data to the data directory (the old copy is l
 old files are. Once you've checked that your drafts and images are all there, delete the old files yourself.
 The old `.env` contains your password, so don't forget it.
 
+### macOS: double-click to start, or keep it in the Dock
+
+If you're developing, double-click `scripts/start.command` in Finder. It opens a Terminal window that runs
+`npm run dev` and opens your browser once both the UI and the backend are up. **That Terminal window is
+Galley itself**: closing it stops Galley.
+
+To start it from the Dock, run this once:
+
+```bash
+scripts/make-app.sh            # creates ~/Applications/Galley.app; pass a folder to put it elsewhere
+```
+
+Then drag `Galley.app` to the Dock. When you click it, it just opens the browser if Galley is already
+running, and otherwise opens `start.command` for you. The app remembers where the program folder was when you
+built it, so **run `scripts/make-app.sh` again after moving or renaming the folder**. To change the icon,
+replace `scripts/app/icon.png` with your own 1024×1024 PNG and run the script again.
+
 ## Setup wizard
 
 Four steps. When one fails, it tells you where it got stuck and what to do next.
