@@ -29,6 +29,9 @@
 .p-dest-main { display: flex; flex-direction: column; gap: .1rem; }
 .p-dest-main b { font-size: 1rem; }
 .p-dest-main span { font-size: .82rem; color: var(--shell-text-dim); }
+/* 正文字數（P5-T047）：只顯示，跟校樣底部同一個數字。 */
+.p-words { margin: 0; font-size: .82rem; color: var(--shell-text-dim); }
+.p-words .mono { color: var(--shell-text); }
 
 /* 網址（D-038，P5-T039）：跟作者同一種框；空的時候底下一行黃色提醒＋編輯列＋建議網址。 */
 .p-slug {

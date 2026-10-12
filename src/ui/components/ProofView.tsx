@@ -15,6 +15,8 @@ import { useProofFrame, useProofMeasure } from '../lib/use-proof-frame.js';
 import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
 import { MarkGutter } from './MarkPin.js';
 import { InsertSlots, useInsertSlots } from './InsertSlots.js';
+import { useWordCount } from '../lib/use-word-count.js';
+import { WORD_COUNT_HINT, formatWordCount, wordCountNumber } from '../lib/word-count.js';
 
 export type { ProofHighlight } from '../lib/proof-highlights.js';
 
@@ -76,6 +78,10 @@ export type { ProofHighlight } from '../lib/proof-highlights.js';
  * 同一顆膠囊多一顆「用此段配圖」（上層給 `selectionImage` 才有；只選到標題的不給）。按下打開一個小面板：
  * 選圖放在選取範圍的哪裡（用畫面上的正文定位）、選填一句希望，再送出。打字模式跟「查證這句」同一套：送出時先存再送
  * （`actWhileWriting`）。字數或狀態不對時照樣出現但反灰、講原因。面板與流程同樣在 `SelectionActions.tsx`（P5-T041）。
+ *
+ * **八、底部字數（P5-T047，D-045）。**
+ * 校樣下緣固定一條「N 字」，不跟著文章捲。看稿算存好的正文，打字模式算正在編輯的正文（節流重算）；
+ * 規則在 `contract/word-count.ts`，接 iframe 在 `lib/use-word-count.ts`。只顯示，不擋任何事。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
@@ -251,6 +257,14 @@ export function ProofView({
     scrollRef,
   });
 
+  // 底部字數（P5-T047）。排在所有既有 hook 之後，不動上面 effect 的順序。
+  const wordCount = useWordCount({
+    publishHtml: job.currentRevision?.publishHtml,
+    isEditing,
+    frameRef,
+    loadCount,
+  });
+
   return (
     <section className="proof" aria-label="校樣">
       <header className="proof-bar">
@@ -355,6 +369,14 @@ export function ProofView({
           </div>
         )}
       </div>
+
+      {hasRevision && (
+        <footer className="proof-foot" aria-live="off">
+          <span className="proof-wordcount" title={WORD_COUNT_HINT} aria-label={`正文 ${formatWordCount(wordCount)}`}>
+            <span className="mono">{wordCountNumber(wordCount)}</span> 字
+          </span>
+        </footer>
+      )}
     </section>
   );
 }
