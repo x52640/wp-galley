@@ -238,14 +238,39 @@ describe('Codex 第二輪：載入時整篇怎麼處理（planDraftLoad）', () 
     ...over,
   });
 
-  it('自動刪別人的只有一種：內容跟另一份或目前存好的完全相同（留新的那份）', () => {
+  it('Codex 第三輪：自動刪別人的只剩「跟目前存好的相同」；留底之間相同只在候選裡隱藏（留新的那份），不刪', () => {
     const older = backup({ id: 'o', savedAt: NOW - 10 });
     const newer = backup({ id: 'n', savedAt: NOW });
-    expect(planDraftLoad(ctx({ drafts: [newer, older] })).remove).toEqual([older]);
+    const dup = planDraftLoad(ctx({ drafts: [newer, older] }));
+    expect(dup.remove).toEqual([]);
+    expect(dup.pick?.draft.id).toBe('n');
+    // 新的那份被捨棄（標記）之後，舊的那份照常提示。
+    expect(planDraftLoad(ctx({ drafts: [newer, older], dismissed: [{ id: 'n', savedAt: NOW }] })).pick?.draft.id).toBe('o');
     const saved = backup({ id: 's', body: '<p>跟存好的一樣</p>' });
     const result = planDraftLoad(ctx({ drafts: [saved], differs: (d) => d.id !== 's' }));
     expect(result.remove).toEqual([saved]);
     expect(result.pick).toBeNull();
+  });
+
+  it('Codex 第三輪重現：A 留底 a；B 恢復 X、打一字又刪回 X（b 跟 a 相同、b.from=a）；A 重新整理恢復 b 沒打字；B 取消刪 b；A 再重新整理 → X 還在', () => {
+    const storage = memoryStorage();
+    const a = backup({ id: 'a', savedAt: NOW - 1000, body: '<p>X</p>' });
+    writeDraft(storage, a);
+    const b = backup({ id: 'b', savedAt: NOW, body: '<p>X</p>', from: restoredLineage(a) });
+    writeDraft(storage, b);
+    const load = (): ReturnType<typeof planDraftLoad> =>
+      planDraftLoad(ctx({ drafts: readDrafts(storage, 'job-a'), dismissed: readDismissed(storage, 'job-a') }));
+    // A 重新整理：只處理 b，a 不刪。
+    const first = load();
+    for (const stale of first.remove) removeDraftIfSame(storage, stale);
+    expect(first.pick?.draft.id).toBe('b');
+    expect(readDraft(storage, 'job-a', 'a')).toEqual(a);
+    // A 恢復 b 沒打字（不寫）；B 按取消：只刪自己的 b。
+    removeDraftIfSame(storage, b);
+    // A 再重新整理：X（a）還在、照常恢復。
+    const again = load();
+    expect(again.pick?.draft.id).toBe('a');
+    expect(readDraft(storage, 'job-a', 'a')?.body).toBe('<p>X</p>');
   });
 
   it('Codex 重現 2：B 恢復 X 改成 Y（沒存）、兩邊都當掉 → 重開只處理 Y，X 不刪；Y 被捨棄（消失）後 X 重新出現', () => {

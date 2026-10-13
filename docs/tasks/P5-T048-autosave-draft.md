@@ -77,9 +77,9 @@ agent、wordpress、factcheck、mcp 相關 spec。
 - [ ] CURRENT_TASK 已更新（主 session 收官時改）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #36 Codex 第二輪兩條 P1 修完（見「完成結果」最後一節）
-- 已通過驗證：`npm run verify` 105 檔／2355 測試全綠（worktree，2026-10-13，Codex 第二輪修正後）
-- 下一步：主 session push、Codex 第三輪；使用者手動驗證（見「手動驗證」）
+- 最後完成：PR #36 Codex 第三輪 P1 修完（見「完成結果」最後一節）
+- 已通過驗證：`npm run verify` 105 檔／2356 測試全綠（worktree，2026-10-13，Codex 第三輪修正後）
+- 下一步：主 session push；使用者手動驗證（見「手動驗證」）
 - Blocker：無
 
 ## 完成結果
@@ -146,7 +146,7 @@ agent、wordpress、factcheck、mcp 相關 spec。
 根因：第一輪用「來源寫下時間沒變」就推定可以刪來源。兩個 P1：B 恢復 A 的副本後捨棄會刪掉 A 的留底；B 恢復 X 改成 Y、兩邊當掉後重開會依 `from` 刪掉 X。改成：
 - **恢復不立刻建新鍵**：填回只 `takeRecords` 不寫（`afterFill`）；使用者真的打了字（MutationObserver，`session.typed`）才寫進自己的新鍵並記 `from`。連續重新整理不累積副本。
 - **拿掉讀取時刪來源**（`supersededDrafts` 刪掉），改成隱藏不刪（`visibleDrafts`）：有沒被捨棄的副本指著、寫下時間沒變的來源先不提示；副本消失後來源重新出現。
-- **讀取時唯一自動刪別人的**：內容完全相同——跟另一份留底（`contentKey`＝標題攤平空白＋照目前版本整理後的內文，留新的）或跟目前存好的（`differs` 為 false；`planDraftRestore` 改成先比內容再看基準）。整篇的處理收在純函式 `planDraftLoad`。過期照舊。
+- **讀取時唯一自動刪別人的**：內容完全相同——跟另一份留底（`contentKey`＝標題攤平空白＋照目前版本整理後的內文，留新的；**第三輪改成只隱藏不刪**）或跟目前存好的（`differs` 為 false；`planDraftRestore` 改成先比內容再看基準）。整篇的處理收在純函式 `planDraftLoad`。過期照舊。
 - **捨棄／取消**：只刪本 session 自己的鍵（`removeDraftIfSame`）；恢復了來源但還沒打字就捨棄→記「已捨棄」標記（`dismissOnDiscard`→`markDismissed`，鍵 `galley.draft-dismissed.v1.<uuid>/<id>/<savedAt>`），不刪來源；
   問恢復的提示按「捨棄」也只記標記。標記 30 天過期、或對不上任何留底時由 `pruneDrafts` 清。恢復後跟目前存好的一樣（`same`）只刪那一份，不動它的來源。
 - **存檔成功**（`finishSave`，送出之後沒再打字）：刪自己的鍵＋來源鏈裡寫下時間沒變的（`removeAncestors`）；恢復了沒打字就存、而且已經換篇時用 token 裡的 `from`。守門測試：`removeAncestors` 只出現在 `finishSave`。
@@ -156,4 +156,9 @@ agent、wordpress、factcheck、mcp 相關 spec。
 
 **Codex 第二輪後補裁定（2026-10-13）**：「讀取時唯一自動刪別人的是內容完全相同」嚴格成立——已發布、被取代的稿件也只隱藏不刪（`draftEligibility` 只剩 `restore`／`wait`），靠 30 天過期清。
 
-**主樹基準（本分支）**：`npm run verify` 105 檔／2355 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。
+**Codex 第三輪修正（PR #36，2026-10-13，先寫會紅的測試）**
+P1：A 留底 a；B 恢復 X、打一字又刪回 X → b 跟 a 內容相同、b.from=a；A 重新整理時去重**刪了 a**、恢復 b 但沒打字（不建新鍵）；B 取消刪 b；A 不打字再重新整理 → X 沒了。
+修：`planDraftLoad` 的去重改成只在提示候選裡隱藏舊的那份（先 `visibleDrafts` 再去重，留新的），不放進 `remove`。讀取時唯一自動刪的只剩「跟目前存好的版本內容相同」與 30 天過期；存檔成功刪來源鏈的規則照舊。
+測試：上面這條跨分頁重現（a 一直在、最後照常恢復 a）、相同內容的新的那份被捨棄後舊的重新出現；單一分頁「打字→重新整理→恢復→打字→重新整理→恢復→存檔」最後儲存區仍是空的（同一條測試照舊綠）。
+
+**主樹基準（本分支）**：`npm run verify` 105 檔／2356 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。

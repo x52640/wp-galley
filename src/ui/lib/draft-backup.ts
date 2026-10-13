@@ -370,9 +370,9 @@ export function pickDraftPlan(
 }
 
 /**
- * 打開一篇稿件（校樣確定是目前這一版）時整篇留底怎麼處理（Codex 第二輪）。讀取時**唯一**會自動刪別人的情況是內容完全相同：
- * 跟另一份留底相同（`contentKey` 一樣，留新的那份）、或跟目前存好的相同（`differs` 回 false）；另外只有過期（30 天）。
- * 其餘一律隱藏不刪（`visibleDrafts`），再從新的開始一次處理一份（`pickDraftPlan`）。
+ * 打開一篇稿件（校樣確定是目前這一版）時整篇留底怎麼處理（Codex 第二、三輪）。讀取時**唯一**會自動刪別人的：
+ * 跟目前存好的版本內容完全相同（`differs` 回 false），以及過期 30 天。其餘一律只隱藏不刪：已捨棄的、被副本指著的來源（`visibleDrafts`）、
+ * 跟另一份留底內容相同的舊的那份（`contentKey` 一樣）。再從新的開始一次處理一份（`pickDraftPlan`）。
  */
 export function planDraftLoad(input: {
   /** 這篇的所有留底，新的在前。 */
@@ -386,19 +386,16 @@ export function planDraftLoad(input: {
   /** 標題＋正規化後內文；一樣＝內容完全相同。 */
   readonly contentKey: (draft: DraftBackup) => string;
 }): { remove: DraftBackup[]; pick: { draft: DraftBackup; plan: DraftAction } | null } {
-  const remove: DraftBackup[] = [];
+  const { candidates } = visibleDrafts(input.drafts, input.dismissed);
+  // 留底之間內容相同：只在候選裡隱藏舊的那份（留新的），**不刪**（Codex 第三輪：刪了之後新的那份被別的分頁取消，字就沒了）。
   const seen = new Set<string>();
-  const unique: DraftBackup[] = [];
-  for (const draft of input.drafts) {
+  const unique = candidates.filter((draft) => {
     const key = input.contentKey(draft);
-    if (seen.has(key)) remove.push(draft);
-    else {
-      seen.add(key);
-      unique.push(draft);
-    }
-  }
-  const { candidates } = visibleDrafts(unique, input.dismissed);
-  const { drop, pick } = pickDraftPlan(candidates, (draft) =>
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const { drop, pick } = pickDraftPlan(unique, (draft) =>
     planDraftRestore({
       draft,
       now: input.now,
@@ -408,7 +405,7 @@ export function planDraftLoad(input: {
       differs: () => input.differs(draft),
     }),
   );
-  return { remove: [...remove, ...drop], pick };
+  return { remove: drop, pick };
 }
 
 /**

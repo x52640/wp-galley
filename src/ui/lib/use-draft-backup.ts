@@ -43,7 +43,7 @@ import { draftContentKey, draftDiffersFromShown } from './draft-backup-dom.js';
  *   恢復了來源但還沒打字就捨棄，不刪來源，記一個「已捨棄」標記（Codex 第二輪）。存檔成功（`beginSave`／`finishSave`）且
  *   送出之後沒再打字：刪自己的鍵，連來源鏈裡寫下時間沒變的一起刪（那份內容已經改好存進去了）。
  * - **恢復**：iframe 確定載入的是目前這一版、不在打字模式時才看（`draftCheckReady`）。整篇怎麼處理在 `planDraftLoad`：
- *   讀取時唯一自動刪別人的情況是內容完全相同（跟另一份、或跟目前存好的）；其餘隱藏不刪（已捨棄、被副本遮住的來源），
+ *   讀取時唯一自動刪別人的情況是跟目前存好的內容完全相同（與過期）；其餘隱藏不刪（已捨棄、被副本遮住的來源、跟另一份相同的舊的那份），
  *   新的先一次一份：基準相同→請工作區進打字模式、填回；基準不同→只問。打字中這次已經打了字，就不准再「恢復」另一份。
  *
  * 排在 ProofView 所有既有 hook 之後：不動原本 effect 的順序。這裡的 effect 照下面的順序跑：
@@ -307,7 +307,7 @@ export function useDraftBackup({
       // 讀不到校樣就每份都當成不同（不刪）。
       contentKey: (backup) => (doc === null ? `${backup.id}` : draftContentKey({ doc, draft: backup, allow: allowRef.current })),
     });
-    // 只刪內容完全相同（或過期 30 天）的；還是要確認儲存區那份沒被改寫過。
+    // 只刪跟目前存好的內容完全相同（或過期 30 天）的；還是要確認儲存區那份沒被改寫過。
     for (const stale of remove) removeDraftIfSame(storage, stale);
     if (pick === null) {
       setOffer(null);
