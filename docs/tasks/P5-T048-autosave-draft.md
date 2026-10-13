@@ -37,7 +37,7 @@ D-047。使用者 2026-10-13：在打字模式寫了一篇新文章（稿件「A
     - 留底跟目前內容相同（而且基準＝目前版本）→ 默默刪掉。基準不同時一律只問，不默默刪（2026-10-13 審查後主 session 裁定）。
   - 填回內文前照貼上的同一套 allowlist 整理（`lib/rich-*.ts`），不直接塞 innerHTML。
   - localStorage 不能用（無痕、被擋、滿了）→ 不壞、不吵；提示列輕輕講一次「這個視窗沒辦法自動留底，記得常按儲存」。
-  - 已發布、被取代的稿件打開時刪留底；發布中、已取消（可恢復，D-031）、失敗（可重試）先不動（2026-10-13 審查後主 session 裁定，原本寫「只留未取消／未發布中」）；超過 30 天的留底在載入時清掉，避免無限累積。
+  - 稿件現在不能改（發布中、已取消〔可恢復，D-031〕、失敗〔可重試〕、已發布、被取代）時留底一律先不動、只隱藏不刪（2026-10-13 主 session 兩次裁定：先是審查 4，Codex 第二輪後改成已發布、被取代也不刪；原本寫「只留未取消／未發布中」）；超過 30 天的留底在載入時清掉，避免無限累積。
   - 換篇（同一分頁切到別篇）時本篇的留底照留，切回來照上面規則恢復。
 - **擋觸發點**：改 `vite.config.ts`，讓休眠醒來（WebSocket 斷線再連上）**不會**整頁重新整理。先查 Vite 8 實際行為再選做法（例如 `server.hmr` 設定、或自訂 client 行為），在 Task 完成結果寫清楚：選了什麼、HMR 還在不在、改了 UI 檔案要不要手動重新整理。用 scratchpad 起一個獨立埠的 Vite 實測「斷線→恢復不重新整理」，不准碰 5173。
 - 測試：純函式（何時寫、何時刪、恢復判斷、過期清理、儲存區失敗）＋ hook／元件層的恢復流程；`?fixtures=1` 截圖兩種提示列。
@@ -88,12 +88,12 @@ agent、wordpress、factcheck、mcp 相關 spec。
   `visibilitychange`→hidden、`pagehide`、離開打字模式但沒作廢（換篇、回總覽、版本被換掉）立刻寫；打字中先存一版（基準換了）用新基準再寫一次。
 - 刪：存檔成功離開打字模式（ProofView 送出時 `beginSave` 記下內容；Workspace 在 `createRevision` 成功後、`refresh` **之前**呼叫 `onSaved(hash)` → `finishSave`）、
   取消、沒改就離開（`useProofEditing` 的 `onDiscardDraft`，在還原正文之前同步作廢）。存檔失敗不刪。一律只刪「儲存區那份還是自己最後寫的」。
-- 恢復：iframe 確定載入的是目前這一版、不在打字模式時（`draftCheckReady`＋`pickDraftPlan`＋`planDraftRestore`）：過期／已發布／被取代→刪；
+- 恢復：iframe 確定載入的是目前這一版、不在打字模式時（`draftCheckReady`＋`pickDraftPlan`＋`planDraftRestore`）：過期→刪；
   發布中／已取消／失敗→不動；基準≠目前版本→只問；基準＝目前版本：照「儲存」同一套整理比相同→默默刪，不同且能進打字模式→
   請工作區 `startEdit(null)`，進去、`syncEditing` 記下原文之後填回（`restoreDraft`），內容寫進那次打字自己的鍵（Codex 第一輪 2 起不接手別人的鍵）；否則提示列問恢復／捨棄。
 - 填回前整理：**沒照 Task 寫的「貼上那一套」**，改用存檔那一套（`cleanRichEdit`，跟目前版本一樣的區塊原樣保留）再拿掉 `on*` 屬性與 `javascript:` 網址（`safeRestoredEdit`）。
   原因：貼上模式會丟掉圖片、figure 與 `wp-block-*` class，恢復一篇有圖的文章會把圖弄不見。都經外層 `DOMParser`（惰性文件），不直接塞原始 HTML。
-- 稿件狀態：已發布、被取代打開時刪；發布中、已取消、失敗先不動（審查 4，主 session 裁定改 Task）。
+- 稿件狀態：能改的才恢復；發布中、已取消、失敗、已發布、被取代一律先不動、不刪（審查 4＋Codex 第二輪後裁定）。
 - 提示列（`EditToolbar` 的 `DraftNotice`，`.proof-status-warn`，在格式工具列下、丟格式警告旁）：已恢復＋捨棄、之後又改過＋恢復／捨棄、
   基準相同但不能進打字模式（AI 在跑、待同步）＋恢復反灰、儲存區不能用（每頁只講一次）。打字模式中問恢復的提示照樣留著，恢復會直接填回目前的編輯區。
 
@@ -146,12 +146,14 @@ agent、wordpress、factcheck、mcp 相關 spec。
 根因：第一輪用「來源寫下時間沒變」就推定可以刪來源。兩個 P1：B 恢復 A 的副本後捨棄會刪掉 A 的留底；B 恢復 X 改成 Y、兩邊當掉後重開會依 `from` 刪掉 X。改成：
 - **恢復不立刻建新鍵**：填回只 `takeRecords` 不寫（`afterFill`）；使用者真的打了字（MutationObserver，`session.typed`）才寫進自己的新鍵並記 `from`。連續重新整理不累積副本。
 - **拿掉讀取時刪來源**（`supersededDrafts` 刪掉），改成隱藏不刪（`visibleDrafts`）：有沒被捨棄的副本指著、寫下時間沒變的來源先不提示；副本消失後來源重新出現。
-- **讀取時唯一自動刪別人的**：內容完全相同——跟另一份留底（`contentKey`＝標題攤平空白＋照目前版本整理後的內文，留新的）或跟目前存好的（`differs` 為 false；`planDraftRestore` 改成先比內容再看基準）。整篇的處理收在純函式 `planDraftLoad`。過期、已發布／被取代照舊（第 4 條裁定）。
+- **讀取時唯一自動刪別人的**：內容完全相同——跟另一份留底（`contentKey`＝標題攤平空白＋照目前版本整理後的內文，留新的）或跟目前存好的（`differs` 為 false；`planDraftRestore` 改成先比內容再看基準）。整篇的處理收在純函式 `planDraftLoad`。過期照舊。
 - **捨棄／取消**：只刪本 session 自己的鍵（`removeDraftIfSame`）；恢復了來源但還沒打字就捨棄→記「已捨棄」標記（`dismissOnDiscard`→`markDismissed`，鍵 `galley.draft-dismissed.v1.<uuid>/<id>/<savedAt>`），不刪來源；
   問恢復的提示按「捨棄」也只記標記。標記 30 天過期、或對不上任何留底時由 `pruneDrafts` 清。恢復後跟目前存好的一樣（`same`）只刪那一份，不動它的來源。
 - **存檔成功**（`finishSave`，送出之後沒再打字）：刪自己的鍵＋來源鏈裡寫下時間沒變的（`removeAncestors`）；恢復了沒打字就存、而且已經換篇時用 token 裡的 `from`。守門測試：`removeAncestors` 只出現在 `finishSave`。
 - 測試：Codex 兩條重現、單一分頁「打字→重新整理→恢復→打字→重新整理→恢復→存檔」（中途只有 auto、沒有「之後又改過」，最後儲存區空）、恢復後沒打字連續重新整理不累積（`tests/draft-backup.test.ts`，用 `planDraftLoad` 照 hook 的順序走）。
 - `?fixtures=1` 實測：打字→重新整理 3 次不打字，儲存區一直只有 1 份；打字→重新整理→再打字→重新整理：恢復的是兩段都在的那份、沒有「之後又改過」，儲存→儲存區空；
   塞一份基準不同的留底→問→捨棄→留底還在、多一個已捨棄標記，重新整理不再問。截圖 `shots/draft-chain-restored.png`。
+
+**Codex 第二輪後補裁定（2026-10-13）**：「讀取時唯一自動刪別人的是內容完全相同」嚴格成立——已發布、被取代的稿件也只隱藏不刪（`draftEligibility` 只剩 `restore`／`wait`），靠 30 天過期清。
 
 **主樹基準（本分支）**：`npm run verify` 105 檔／2355 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。

@@ -286,12 +286,14 @@ function isExpired(draft: DraftBackup, now: number): boolean {
 }
 
 /**
- * 這個狀態的稿件留不留底（審查 4）：能改的恢復；已發布、被取代刪掉（再也不能改）；
- * 發布中、已取消（可以恢復，D-031）、失敗（可以重試）先不動，等能改了再問，沒等到就靠 30 天過期清。
+ * 這個狀態的稿件留不留底（審查 4；Codex 第二輪後主 session 裁定）：能改的恢復；其他一律先不動、**不刪**——
+ * 發布中、已取消（可以恢復，D-031）、失敗（可以重試）等能改了再問；已發布、被取代再也不能改，只隱藏。都靠 30 天過期清
+ * （讀取時唯一自動刪別人的是內容完全相同）。
  */
-export function draftEligibility(state: JobState): 'restore' | 'wait' | 'drop' {
-  if (state === 'PUBLISHED' || state === 'SUPERSEDED') return 'drop';
-  if (state === 'PUBLISHING' || state === 'CANCELLED' || state === 'FAILED') return 'wait';
+export function draftEligibility(state: JobState): 'restore' | 'wait' {
+  if (state === 'PUBLISHING' || state === 'CANCELLED' || state === 'FAILED' || state === 'PUBLISHED' || state === 'SUPERSEDED') {
+    return 'wait';
+  }
   return 'restore';
 }
 
@@ -320,7 +322,7 @@ export type DraftAction = Extract<DraftPlan, { kind: 'auto' } | { kind: 'offer' 
 
 /**
  * 一份留底要怎麼辦：
- * - 過期、稿件再也不能改：刪掉。發布中、已取消、失敗：先不動。
+ * - 過期：刪掉。稿件現在不能改（發布中、已取消、失敗、已發布、被取代）：先不動，不刪。
  * - 跟畫面上這一版照「儲存」同一套整理比（`differs`）完全相同：默默刪（不少任何字）。
  * - 基準 hash 不是目前版本（之後有別的存檔、AI 套用、換模板）：只問「恢復」「捨棄」，不自動蓋掉（審查 1）。
  * - 基準是目前版本：現在可以進打字模式→直接進打字模式填回（`auto`）；AI 在跑之類不能進→先問。
@@ -337,9 +339,7 @@ export function planDraftRestore(input: {
   const { draft } = input;
   if (draft === null) return { kind: 'none' };
   if (isExpired(draft, input.now)) return { kind: 'drop' };
-  const eligible = draftEligibility(input.state);
-  if (eligible === 'drop') return { kind: 'drop' };
-  if (eligible === 'wait') return { kind: 'none' };
+  if (draftEligibility(input.state) === 'wait') return { kind: 'none' };
   // 內容跟目前存好的完全相同（照「儲存」同一套整理比）：刪了不少任何字（Codex 第二輪：讀取時唯一可以自動刪的情況之一）。
   // 比對只在 iframe 確定載入目前這一版時才做（`draftCheckReady`，審查 1）。
   if (!input.differs()) return { kind: 'drop' };
@@ -371,7 +371,7 @@ export function pickDraftPlan(
 
 /**
  * 打開一篇稿件（校樣確定是目前這一版）時整篇留底怎麼處理（Codex 第二輪）。讀取時**唯一**會自動刪別人的情況是內容完全相同：
- * 跟另一份留底相同（`contentKey` 一樣，留新的那份）、或跟目前存好的相同（`differs` 回 false）；另外過期與已發布／被取代照舊。
+ * 跟另一份留底相同（`contentKey` 一樣，留新的那份）、或跟目前存好的相同（`differs` 回 false）；另外只有過期（30 天）。
  * 其餘一律隱藏不刪（`visibleDrafts`），再從新的開始一次處理一份（`pickDraftPlan`）。
  */
 export function planDraftLoad(input: {

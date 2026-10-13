@@ -366,12 +366,13 @@ describe('過期清理：超過 30 天的留底載入時清掉', () => {
 });
 
 describe('審查 4：哪些稿件留底', () => {
-  it('能改的狀態恢復；發布中、已取消（可恢復）、失敗（可重試）先不動；已發布、被取代刪掉', () => {
+  it('能改的狀態恢復；其他（發布中、已取消、失敗、已發布、被取代）一律先不動，不刪（靠 30 天過期清）', () => {
     for (const state of ['SOURCE', 'REVIEWED', 'MEDIA_READY', 'RENDERED', 'PREVIEWED', 'APPROVED'] as const) {
       expect(draftEligibility(state)).toBe('restore');
     }
-    for (const state of ['PUBLISHING', 'CANCELLED', 'FAILED'] as const) expect(draftEligibility(state)).toBe('wait');
-    for (const state of ['PUBLISHED', 'SUPERSEDED'] as const) expect(draftEligibility(state)).toBe('drop');
+    for (const state of ['PUBLISHING', 'CANCELLED', 'FAILED', 'PUBLISHED', 'SUPERSEDED'] as const) {
+      expect(draftEligibility(state)).toBe('wait');
+    }
   });
 });
 
@@ -440,10 +441,8 @@ describe('打開一篇稿件時一份留底要怎麼辦（planDraftRestore）', 
     expect(compared).toBe(false);
   });
 
-  it('已發布、被取代：刪；已取消、失敗、發布中：先不動', () => {
-    expect(planDraftRestore({ ...base, state: 'PUBLISHED', draft: backup(), differs })).toEqual({ kind: 'drop' });
-    expect(planDraftRestore({ ...base, state: 'SUPERSEDED', draft: backup(), differs })).toEqual({ kind: 'drop' });
-    for (const state of ['CANCELLED', 'FAILED', 'PUBLISHING'] as const) {
+  it('讀取時唯一自動刪別人的是內容完全相同：已發布、被取代也只隱藏不刪；已取消、失敗、發布中同樣先不動', () => {
+    for (const state of ['PUBLISHED', 'SUPERSEDED', 'CANCELLED', 'FAILED', 'PUBLISHING'] as const) {
       expect(planDraftRestore({ ...base, state, draft: backup(), differs })).toEqual({ kind: 'none' });
     }
   });

@@ -307,7 +307,7 @@ export function useDraftBackup({
       // 讀不到校樣就每份都當成不同（不刪）。
       contentKey: (backup) => (doc === null ? `${backup.id}` : draftContentKey({ doc, draft: backup, allow: allowRef.current })),
     });
-    // 只刪內容完全相同（或過期、稿件已發布／被取代）的；還是要確認儲存區那份沒被改寫過。
+    // 只刪內容完全相同（或過期 30 天）的；還是要確認儲存區那份沒被改寫過。
     for (const stale of remove) removeDraftIfSame(storage, stale);
     if (pick === null) {
       setOffer(null);
