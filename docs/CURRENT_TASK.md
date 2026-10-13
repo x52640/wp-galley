@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **103 檔 / 2283 測試**全綠（2026-10-12，P8-T006 分支；main 是 102／2258）
+- `npm run verify`：typecheck 通過；Vitest **103 檔 / 2283 測試**全綠（2026-10-12，main @ d6b6c5e）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。
+- [P5-T048](tasks/P5-T048-autosave-draft.md)：打字模式沒存的內容自動留底（D-047；2026-10-13 使用者休眠後整篇不見）
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,7 +20,6 @@
 
 | Task | 驗什麼 |
 | --- | --- |
-| [P8-T006](tasks/P8-T006-background-app.md)（含 P8-T005） | 主目錄重跑 `scripts/make-app.sh`，Dock 上的 Galley 拿掉再拖一次 → 發布台關著時點圖示：沒有終端機、瀏覽器自動開、沒有 502、Dock 有亮點 → 關掉分頁再點圖示：瀏覽器再開 → ⌘Q：亮點消失、重新整理連不上 → 先雙擊 `start.command` 再點圖示：只開瀏覽器、結束 app 不會關掉終端機裡的服務 |
 | [P5-T047](tasks/P5-T047-word-count.md) | 開一篇真實草稿 → 編輯區右下「N 字」合理 → 打字模式打幾個字數字即時變 → 發布面板「正文 N 字」相同 |
 | [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
 | [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |
@@ -45,6 +44,13 @@
 | [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
 
+## 上次停在哪（2026-10-12 收官）
+
+- 合併 #33（P8-T005 啟動 502＋Galley.app）、#34（P5-T047 字數）、#35（P8-T006 Galley.app 背景跑服務，D-046 修訂 D-044）；三個都 Codex 一輪無問題、各有獨立審查一輪。
+- P8-T006 使用者 2026-10-12 手動驗證通過；P5-T047 字數還沒驗（見上表）。
+- 使用者現在用 Dock 上的 Galley.app 開發布台（服務在背景、沒有終端機）；pull 前一樣先 `lsof -iTCP:3000` 看有沒有在跑。改了 `scripts/make-app.sh` 要在主目錄重跑才生效。
+- `npm run verify` 在 P8-T006 分支第一次跑有 1 條失敗、之後連 14 次全綠，推測跟當時 subagent 收尾的測試程序撞到；再遇到先看是不是 `tests/galley-service.test.ts`。
+
 ## 上次停在哪（2026-10-05 拆檔）
 
 - D-040 拆檔分三個 PR、都從 main 開：A＝P5-T041～P5-T043（ProofView 1560 → 360 行）、B＝P5-T044（MediaPanel 1010 → 222）、C＝P5-T045（Workspace 989 → 714）。每張 Task 實作 → verify → 獨立審查（皆無行為差異）→ Codex。
@@ -54,14 +60,6 @@
 - Vite 8 沒有 `--cacheDir` 參數：worktree 起 Vite 要另寫 config 指 cacheDir，否則快取寫進主目錄 `node_modules/.vite`（worktree 的 node_modules 是 symlink）。
 - 截圖排隊：同一時間只一個 ui-drive（9333 埠）；示範資料版本 hash 是亂數、計時器看時間、捲軸會淡出，比對前先連跑兩次找出本來就會變的。
 
-## 上次停在哪（2026-10-05 收官）
-
-- 合併 #23（P8-T003 資料目錄，真實資料 2026-10-04 已搬到 `~/Library/Application Support/Galley/`）、#24（P6-T006）、#25（P5-T039）、#26（P5-T038，Codex 七輪）、#27（P8-T004 補審修正，Codex 三輪）。
-- PR #28（P5-T040）：Codex 四輪，**第四輪的修正（refresh-scheduler、卸載時 sync 收尾）沒有再經過 Codex 審**（使用者指定第四輪為最後一輪）。
-- 新規矩（memory `publisher-github-pr-flow`）：每個 PR Codex 最多三輪，第三輪有問題修完直接推、不再審；**合併由使用者按**，主 session 不 `gh pr merge`。使用者目前無法手動測試。
-- 同時跑 ui-drive 截圖會撞 9333 埠，截圖要排隊。
-- 2026-10-02 留下的文件欠帳：P5-T037、P6-T005 的殘餘還沒併進 known-issues.md；功能地圖還沒列 `src/contract/review-locate.ts`。
-- 工作方式：subagent 實作 → 主 session 驗證 → 另派審查 → PR → Codex（`codex:codex-rescue`）→ 修正寫進 PR → 確認 PR head 同步才交使用者合併。並行用 git worktree（`../wp-galley-<Task>`、`node_modules` symlink）；`CURRENT_TASK`／功能地圖由主 session 統一更新。
 
 ## Ready
 

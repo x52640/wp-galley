@@ -79,6 +79,7 @@ stop 不殺 pid 檔以外的程序（pid 檔過期／被重用時不誤殺）；
 - Blocker：無
 
 ## 完成結果
+- 2026-10-12 使用者手動驗證通過（沒有終端機、瀏覽器自動開、Dock 亮點、再點開瀏覽器、⌘Q 關服務）。
 - `scripts/galley-service.sh start|stop|status|logpath`（新）：
   - **start**：已是我們起的（pid 檔對得上）→ 接手、等它好了回 `adopted`；埠 5173 或 3000 有人在用（curl 不是「連不上」）→ 不起、結束碼 3；
     否則找 node／npm、輪替 log、在 repo 裡背景跑 `npm run dev`，等前端有回應＋`/api/health` 2xx（跟 `start.command` 同樣的等法，上限 120 秒）回 `started`。
