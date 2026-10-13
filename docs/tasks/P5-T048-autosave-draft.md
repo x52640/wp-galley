@@ -77,9 +77,9 @@ agent、wordpress、factcheck、mcp 相關 spec。
 - [ ] CURRENT_TASK 已更新（主 session 收官時改）
 
 ## 中斷／接手紀錄
-- 最後完成：獨立審查 8 條全部修完（見「完成結果」最後一節），重跑 `?fixtures=1` 實測與 Vite 斷線實測
-- 已通過驗證：`npm run verify` 105 檔／2339 測試全綠（worktree，2026-10-13，審查修正後）
-- 下一步：主 session 複審 → commit → PR；使用者手動驗證（見「手動驗證」）
+- 最後完成：PR #36 Codex 第一輪兩條修完（見「完成結果」最後一節）
+- 已通過驗證：`npm run verify` 105 檔／2344 測試全綠（worktree，2026-10-13，Codex 第一輪修正後）
+- 下一步：主 session push、Codex 第二輪；使用者手動驗證（見「手動驗證」）
 - Blocker：無
 
 ## 完成結果
@@ -90,7 +90,7 @@ agent、wordpress、factcheck、mcp 相關 spec。
   取消、沒改就離開（`useProofEditing` 的 `onDiscardDraft`，在還原正文之前同步作廢）。存檔失敗不刪。一律只刪「儲存區那份還是自己最後寫的」。
 - 恢復：iframe 確定載入的是目前這一版、不在打字模式時（`draftCheckReady`＋`pickDraftPlan`＋`planDraftRestore`）：過期／已發布／被取代→刪；
   發布中／已取消／失敗→不動；基準≠目前版本→只問；基準＝目前版本：照「儲存」同一套整理比相同→默默刪，不同且能進打字模式→
-  請工作區 `startEdit(null)`，進去、`syncEditing` 記下原文之後填回（`restoreDraft`），那次打字接手這份的鍵；否則提示列問恢復／捨棄。
+  請工作區 `startEdit(null)`，進去、`syncEditing` 記下原文之後填回（`restoreDraft`），內容寫進那次打字自己的鍵（Codex 第一輪 2 起不接手別人的鍵）；否則提示列問恢復／捨棄。
 - 填回前整理：**沒照 Task 寫的「貼上那一套」**，改用存檔那一套（`cleanRichEdit`，跟目前版本一樣的區塊原樣保留）再拿掉 `on*` 屬性與 `javascript:` 網址（`safeRestoredEdit`）。
   原因：貼上模式會丟掉圖片、figure 與 `wp-block-*` class，恢復一篇有圖的文章會把圖弄不見。都經外層 `DOMParser`（惰性文件），不直接塞原始 HTML。
 - 稿件狀態：已發布、被取代打開時刪；發布中、已取消、失敗先不動（審查 4，主 session 裁定改 Task）。
@@ -134,4 +134,13 @@ agent、wordpress、factcheck、mcp 相關 spec。
 重新整理→新的那份自動恢復、舊的還在→儲存→提示舊的那份→恢復→填回並講「已經拿掉底線」、接手舊鍵；換篇立刻寫、取消清空、儲存區滿時提示，照舊。
 截圖另加 `shots/draft-restore-blocked.png`、`draft-restore-dropped.png`。
 
-**主樹基準（本分支）**：`npm run verify` 105 檔／2339 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。
+**Codex 第一輪修正（PR #36，2026-10-13，先寫會紅的測試）**
+1. 【高】打字中輪詢讀到別的分頁存的新版本，留底基準被改成新 hash → 之後被當成基準相同自動恢復、存檔蓋掉別人：拿掉「`knownHash` 變了就換基準」的 effect。
+   基準只在本次編輯自己的存檔成功回呼裡換——先存再做走 `rebase(token, hash)`、離開打字模式的存檔走 `finishSave`（ProofView 兩種存檔都帶 `onSaved`，`beginSave` 記下是哪一次打字）。
+   外部版本變動保留原基準，之後走「之後又改過」只提示。守門測試：hook 裡沒有依賴 `draft?.baseHash` 的 effect、`session.base =` 只出現在 `rebase`／`finishSave`。
+2. 【高】B 分頁自動恢復時接手 A 的鍵、兩邊輪流蓋同一份：恢復改成把內容寫進本分頁這次打字自己的新鍵，`from` 記下來源鏈（`restoredLineage`：來源的 id＋讀到時的寫下時間＋來源自己的來源）；hook 裡不再改 `session.id`。
+   原來那份什麼時候清：本分頁存檔成功（沒再打字）、捨棄／取消、恢復時發現一樣——`removeAncestors` 只刪寫下時間沒變的；
+   以及之後讀留底時，被別份複製過、之後沒人再寫的（`supersededDrafts`）——它的內容都在複製的那份裡，所以刪了不掉字；別的分頁還在寫的寫下時間會變，不會被當成被取代。
+   實測（`?fixtures=1`）：打字不存→連續重新整理 3 次，儲存區最多 2 份（新複製的＋上一份，再下一次載入就清掉上一份），不會越積越多；儲存→全部清空。
+
+**主樹基準（本分支）**：`npm run verify` 105 檔／2344 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。

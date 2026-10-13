@@ -31,6 +31,9 @@ import {
   restoreDroppedNote,
   safeRestoredEdit,
   sameDraft,
+  supersededDrafts,
+  removeAncestors,
+  restoredLineage,
   writeDraft,
 } from '../src/ui/lib/draft-backup.js';
 import { cleanRichEdit, richUnits, serializeRichEdit, type RichNode } from '../src/contract/rich-text.js';
@@ -79,7 +82,7 @@ function brokenStorage(): DraftStorage {
 const NOW = new Date(2026, 9, 13, 21, 8, 0).getTime();
 
 function backup(over: Partial<DraftBackup> = {}): DraftBackup {
-  return { v: 2, uuid: 'job-a', id: 's1', title: '標題', body: '<p>沒存的字</p>', savedAt: NOW - 60_000, baseHash: 'h1', ...over };
+  return { v: 2, uuid: 'job-a', id: 's1', title: '標題', body: '<p>沒存的字</p>', savedAt: NOW - 60_000, baseHash: 'h1', from: [], ...over };
 }
 
 describe('寫進儲存區、讀回來、刪掉', () => {
@@ -130,11 +133,52 @@ describe('寫進儲存區、讀回來、刪掉', () => {
     expect(parseDraft(JSON.stringify(backup()), 'job-b', 's1')).toBeNull();
     expect(parseDraft(JSON.stringify(backup()), 'job-a', 's2')).toBeNull();
     expect(parseDraft(JSON.stringify(backup({ title: null })), 'job-a', 's1')).toEqual(backup({ title: null }));
+    // 來源（從哪幾份恢復來的）：沒有就是空的；形狀不對不認。
+    const { from: _from, ...noFrom } = backup();
+    expect(parseDraft(JSON.stringify(noFrom), 'job-a', 's1')).toEqual(backup());
+    expect(parseDraft(JSON.stringify(backup({ from: [{ id: 'x', savedAt: 1 }] })), 'job-a', 's1')?.from).toEqual([{ id: 'x', savedAt: 1 }]);
+    expect(parseDraft(JSON.stringify({ ...backup(), from: [{ id: 3 }] }), 'job-a', 's1')).toBeNull();
   });
 
   it('節流在 0.5～1 秒之間', () => {
     expect(DRAFT_WRITE_WAIT_MS).toBeGreaterThanOrEqual(500);
     expect(DRAFT_WRITE_WAIT_MS).toBeLessThanOrEqual(1000);
+  });
+});
+
+describe('Codex 第一輪 2：恢復時複製到自己的新鍵，不接手別人的鍵', () => {
+  const orig = backup({ id: 'orig', savedAt: NOW - 5000 });
+
+  it('恢復來的那份記下來源鏈（來源自己的來源也算）', () => {
+    expect(restoredLineage(orig)).toEqual([{ id: 'orig', savedAt: NOW - 5000 }]);
+    const copy = backup({ id: 'copy', savedAt: NOW, from: restoredLineage(orig) });
+    expect(restoredLineage(copy)).toEqual([
+      { id: 'copy', savedAt: NOW },
+      { id: 'orig', savedAt: NOW - 5000 },
+    ]);
+  });
+
+  it('來源在被複製之後沒人再寫過：它的內容都在新的那份裡，算被取代；被寫過（別的分頁還在打）就不算', () => {
+    const copy = backup({ id: 'copy', savedAt: NOW, from: restoredLineage(orig) });
+    expect(supersededDrafts([copy, orig]).map((d) => d.id)).toEqual(['orig']);
+    const stillWriting = { ...orig, savedAt: NOW + 10, body: '<p>A 分頁又打的</p>' };
+    expect(supersededDrafts([copy, stillWriting])).toEqual([]);
+    expect(supersededDrafts([orig])).toEqual([]);
+  });
+
+  it('存檔或捨棄時刪來源鏈：只刪寫下時間沒變的那幾份', () => {
+    const storage = memoryStorage();
+    writeDraft(storage, orig);
+    writeDraft(storage, backup({ id: 'older', savedAt: NOW - 9000 }));
+    const moved = backup({ id: 'moved', savedAt: NOW - 8000 });
+    writeDraft(storage, { ...moved, savedAt: NOW + 1, body: '<p>別的分頁後來寫的</p>' });
+    removeAncestors(storage, 'job-a', [
+      { id: 'orig', savedAt: NOW - 5000 },
+      { id: 'older', savedAt: NOW - 9000 },
+      { id: 'moved', savedAt: NOW - 8000 },
+      { id: 'gone', savedAt: 1 },
+    ]);
+    expect(readDrafts(storage, 'job-a').map((d) => d.id)).toEqual(['moved']);
   });
 });
 
@@ -434,6 +478,26 @@ describe('接法（use-draft-backup／use-proof-editing／use-proof-frame／Proo
     const load = frame.slice(frame.indexOf('const handleLoad'), frame.indexOf('setLoadCount((count)'));
     expect(load).toContain('setLoadedKey(shownKeyRef.current)');
     expect(view).toContain('loadedKey: frame.loadedKey');
+  });
+
+  it('Codex 第一輪 1：基準只在本次編輯自己的存檔成功回呼裡換，外部版本變動（輪詢讀到別的分頁存的）不換', () => {
+    expect(hook).not.toMatch(/\[draft\?\.baseHash\]/);
+    const assigns = [...hook.matchAll(/session\.base = /g)].map((m) => m.index!);
+    const finish = hook.indexOf('const finishSave');
+    const rebase = hook.indexOf('const rebase');
+    expect(rebase).toBeGreaterThan(0);
+    expect(assigns.length).toBeGreaterThan(0);
+    // 所有改基準的地方都在 rebase／finishSave 裡（兩個放在檔案最後面，前面的 effect 都不准改）。
+    expect(assigns.every((at) => at > Math.min(finish, rebase))).toBe(true);
+    // 先存再做（stay）也帶 onSaved，交給 rebase。
+    const wrap = view.slice(view.indexOf('onSaveEdit:'), view.indexOf('onDiscardDraft:'));
+    expect(wrap).toContain('rebase(');
+  });
+
+  it('Codex 第一輪 2：恢復不接手別人的鍵', () => {
+    expect(hook).not.toMatch(/session\.id = /);
+    expect(hook).toContain('restoredLineage(');
+    expect(hook).toContain('supersededDrafts(');
   });
 
   it('審查 3：刪留底一律經過「還是自己寫的那份」的確認', () => {

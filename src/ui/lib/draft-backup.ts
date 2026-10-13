@@ -35,6 +35,16 @@ export interface DraftBackup {
   readonly savedAt: number;
   /** 這次打字的基準 contentHash（打字中先存過就是最後存成功的那一版）。 */
   readonly baseHash: string | null;
+  /**
+   * 這份是從哪幾份留底恢復來的（來源鏈，近的在前；Codex 第一輪 2）：恢復時內容複製到自己的新鍵，不接手別人的鍵。
+   * 來源在被複製之後沒人再寫過（寫下時間沒變）＝它的內容都在這份裡，可以清掉（`supersededDrafts`、`removeAncestors`）。
+   */
+  readonly from: readonly DraftOrigin[];
+}
+
+export interface DraftOrigin {
+  readonly id: string;
+  readonly savedAt: number;
 }
 
 export const DRAFT_KEY_PREFIX = 'galley.draft.v2.';
@@ -82,7 +92,37 @@ export function parseDraft(raw: string | null, uuid: string, id: string): DraftB
   if (typeof o.savedAt !== 'number' || !Number.isFinite(o.savedAt)) return null;
   if (o.title !== null && typeof o.title !== 'string') return null;
   if (o.baseHash !== null && typeof o.baseHash !== 'string') return null;
-  return { v: 2, uuid, id, title: o.title, body: o.body, savedAt: o.savedAt, baseHash: o.baseHash };
+  const from = o.from === undefined ? [] : o.from;
+  if (!Array.isArray(from) || !from.every(isOrigin)) return null;
+  return { v: 2, uuid, id, title: o.title, body: o.body, savedAt: o.savedAt, baseHash: o.baseHash, from: from.map((f) => ({ id: f.id, savedAt: f.savedAt })) };
+}
+
+function isOrigin(value: unknown): value is DraftOrigin {
+  if (typeof value !== 'object' || value === null) return false;
+  const o = value as Record<string, unknown>;
+  return typeof o.id === 'string' && typeof o.savedAt === 'number' && Number.isFinite(o.savedAt);
+}
+
+/** 恢復 `source` 時新的那份要記的來源鏈：它自己（寫下時間是讀到那一刻的）＋它的來源。 */
+export function restoredLineage(source: DraftBackup): DraftOrigin[] {
+  return [{ id: source.id, savedAt: source.savedAt }, ...source.from];
+}
+
+/**
+ * 被取代的留底：別份的來源鏈裡記著它、而且寫下時間沒變（被複製之後沒人再寫過，內容都在那份裡）。
+ * 寫下時間變了＝別的分頁還在寫它，不算被取代。
+ */
+export function supersededDrafts(drafts: readonly DraftBackup[]): DraftBackup[] {
+  const copied = new Set(drafts.flatMap((d) => d.from.map((f) => `${f.id}\u0000${f.savedAt}`)));
+  return drafts.filter((d) => copied.has(`${d.id}\u0000${d.savedAt}`));
+}
+
+/** 刪掉來源鏈裡寫下時間沒變的那幾份（存檔成功、捨棄時）；被寫過的留著。 */
+export function removeAncestors(storage: DraftStorage | null, uuid: string, from: readonly DraftOrigin[]): void {
+  for (const origin of from) {
+    const stored = readDraft(storage, uuid, origin.id);
+    if (stored !== null && stored.savedAt === origin.savedAt) removeDraft(storage, uuid, origin.id);
+  }
 }
 
 export function readDraft(storage: DraftStorage | null, uuid: string, id: string): DraftBackup | null {

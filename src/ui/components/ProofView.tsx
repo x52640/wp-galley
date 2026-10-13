@@ -213,15 +213,16 @@ export function ProofView({
       onSaveEdit === undefined
         ? undefined
         : (save) => {
-            // 先存再做（stay）留在打字模式，留底照寫（基準換成新的那一版）。
-            if (save.stay === true) return onSaveEdit(save);
-            // 存好要離開打字模式的：記下送出那一刻的內容，存好之後沒再打字才刪（P5-T048 審查 5）。
             const draftState = draftRef.current;
             const token = draftState?.beginSave() ?? null;
             return onSaveEdit({
               ...save,
               onSaved: (savedHash) => {
-                if (token !== null) draftState?.finishSave(token, savedHash);
+                if (token === null) return;
+                // 先存再做（stay）留在打字模式：留底照寫，基準換成這次自己存好的那一版（只在這裡換，Codex 第一輪 1）。
+                if (save.stay === true) draftState?.rebase(token, savedHash);
+                // 存好要離開打字模式的：送出之後沒再打字才刪（審查 5）。
+                else draftState?.finishSave(token, savedHash);
               },
             });
           },
