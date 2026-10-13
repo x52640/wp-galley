@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **103 檔 / 2283 測試**全綠（2026-10-12，main @ d6b6c5e）
+- `npm run verify`：typecheck 通過；Vitest **105 檔 / 2339 測試**全綠（2026-10-13，P5-T048 分支；main 是 103／2283）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-- [P5-T048](tasks/P5-T048-autosave-draft.md)：打字模式沒存的內容自動留底（D-047；2026-10-13 使用者休眠後整篇不見）
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,6 +20,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T048](tasks/P5-T048-autosave-draft.md) | 打字模式寫幾段不按儲存 → 重新整理 → 同一篇自動回到打字模式、內容都在、提示「已恢復…」→ 儲存 → 再重新整理不再提示；另寫幾段 → 闔螢幕休眠幾分鐘再打開 → 頁面沒有自己重新整理 |
 | [P5-T047](tasks/P5-T047-word-count.md) | 開一篇真實草稿 → 編輯區右下「N 字」合理 → 打字模式打幾個字數字即時變 → 發布面板「正文 N 字」相同 |
 | [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
 | [P5-T041](tasks/P5-T041-proofview-selection.md)～[P5-T045](tasks/P5-T045-split-workspace.md) | D-040 拆檔（只拆不改行為，`?fixtures=1` 截圖已比對）：真實資料開一篇草稿，改原文打字、格式工具列、儲存；選字查證這句、用此段配圖；右欄配圖卡片生圖、用這張；換篇、停止、恢復已取消，看起來都跟以前一樣 |

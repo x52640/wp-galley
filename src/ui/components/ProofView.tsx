@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import type { LoadedJob } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { shortHash } from '../lib/format.js';
@@ -12,7 +12,8 @@ import {
 } from './SelectionActions.js';
 import { useProofEditing } from '../lib/use-proof-editing.js';
 import { useProofFrame, useProofMeasure } from '../lib/use-proof-frame.js';
-import { DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
+import { DraftNotice, DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
+import { useDraftBackup, type DraftBackupState, type ProofDraftInput } from '../lib/use-draft-backup.js';
 import { MarkGutter } from './MarkPin.js';
 import { InsertSlots, useInsertSlots } from './InsertSlots.js';
 import { useWordCount } from '../lib/use-word-count.js';
@@ -82,6 +83,11 @@ export type { ProofHighlight } from '../lib/proof-highlights.js';
  * **八、底部字數（P5-T047，D-045）。**
  * 校樣下緣固定一條「N 字」，不跟著文章捲。看稿算存好的正文，打字模式算正在編輯的正文（節流重算）；
  * 規則在 `contract/word-count.ts`，接 iframe 在 `lib/use-word-count.ts`。只顯示，不擋任何事。
+ *
+ * **九、沒存的內容自動留底（P5-T048，D-047）。**
+ * 打字模式邊打邊把標題與正文留一份在瀏覽器儲存區；重新整理、當掉、休眠醒來後打開同一篇就恢復並講出來。
+ * 寫、刪、恢復的流程在 `lib/use-draft-backup.ts`（排在所有既有 hook 之後），規則在 `lib/draft-backup.ts`；
+ * 填回編輯區在打字模式的 hook（`restoreDraft`）。存檔成功要在工作區重讀**之前**刪掉留底：這裡把 `onSaved` 交給上層。
  */
 
 /** 要進入編輯時帶的資訊。`nonce` 讓「同一段再點一次」也會重新定位游標。 */
@@ -116,6 +122,7 @@ export function ProofView({
   insertImage = null,
   selectionCheck = null,
   selectionImage = null,
+  draft = null,
 }: {
   job: LoadedJob;
   /** `edit`＝標出建議與校對符號；`final`＝跟網站上一樣，什麼都不標。 */
@@ -150,9 +157,10 @@ export function ProofView({
   editing?: ProofEditRequest | null;
   /**
    * 存檔：送出改過的正文 HTML，回傳存完之後那一版的 content hash。成功後由上層結束編輯；
-   * 失敗就丟錯，留在編輯中。
+   * 失敗就丟錯，留在編輯中。`onSaved`（存好要離開打字模式時才有）：存成功、重讀之前帶著存好的 hash 呼叫，
+   * 留底在這時處理（沒再打字就刪，P5-T048）。
    */
-  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string; stay?: boolean }) => Promise<string>;
+  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string; stay?: boolean; onSaved?: (savedHash: string) => void }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
   /** 進入編輯時要找的字與段落都標不出來（游標掉在文章開頭）：要在頂端講的話（P5-T037）。 */
@@ -174,6 +182,8 @@ export function ProofView({
    * `currentHash`：畫面知道的目前版本（打字中最後存的那一版，否則工作區的版本）；不是選項來源那一版就關掉面板請重選。
    */
   selectionImage?: SelectionImageInput | null;
+  /** 沒存的內容自動留底（P5-T048）：存檔基準、能不能進打字模式、怎麼進。null＝不留底。 */
+  draft?: ProofDraftInput | null;
 }): JSX.Element {
   const [pinned, setPinned] = useState<string | null>(null);
   const [showMarks, setShowMarks] = useState(true);
@@ -188,6 +198,8 @@ export function ProofView({
   // 打字模式（P5-T042 抽出）：編輯狀態、原文快照、存檔、hold、錯誤、格式工具列。
   // 必須呼叫在這個位置：裡面唯一的 effect（離開打字模式清掉 hold）抽出前就排在這裡；
   // 進入／離開編輯的 effect 仍在下面原位，只呼叫它給的函式。
+  // 留底（P5-T048）的 hook 排在最後才建立；這裡的回呼只在事件裡呼叫（render 之後），那時已經有值。
+  const draftRef = useRef<DraftBackupState | null>(null);
   const edit = useProofEditing({
     job,
     editing,
@@ -197,9 +209,25 @@ export function ProofView({
     scrollRef,
     measure,
     measureToken,
-    onSaveEdit,
+    onSaveEdit:
+      onSaveEdit === undefined
+        ? undefined
+        : (save) => {
+            // 先存再做（stay）留在打字模式，留底照寫（基準換成新的那一版）。
+            if (save.stay === true) return onSaveEdit(save);
+            // 存好要離開打字模式的：記下送出那一刻的內容，存好之後沒再打字才刪（P5-T048 審查 5）。
+            const draftState = draftRef.current;
+            const token = draftState?.beginSave() ?? null;
+            return onSaveEdit({
+              ...save,
+              onSaved: (savedHash) => {
+                if (token !== null) draftState?.finishSave(token, savedHash);
+              },
+            });
+          },
     onEndEdit,
     onEditTargetMissing,
+    onDiscardDraft: () => draftRef.current?.discardSession(),
   });
   const { isEditing, hold, shown, saving } = edit;
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
@@ -265,6 +293,24 @@ export function ProofView({
     loadCount,
   });
 
+  // 沒存的內容自動留底（P5-T048）。排在所有既有 hook 之後，不動上面 effect 的順序。
+  const draftBackup = useDraftBackup({
+    job,
+    isEditing,
+    hold,
+    frameRef,
+    loadCount,
+    loadedKey: frame.loadedKey,
+    revisionKey,
+    hasRevision,
+    allow: edit.allow,
+    draft,
+    restoreDraft: edit.restoreDraft,
+    cancelEdit: edit.cancelEdit,
+    onEndEdit,
+  });
+  draftRef.current = draftBackup;
+
   return (
     <section className="proof" aria-label="校樣">
       <header className="proof-bar">
@@ -298,6 +344,7 @@ export function ProofView({
       </header>
       {isEditing && <EditToolbar edit={edit} />}
       <DropWarning edit={edit} />
+      <DraftNotice draft={draftBackup} saving={saving} />
       {edit.saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 沒存成功：{edit.saveError}

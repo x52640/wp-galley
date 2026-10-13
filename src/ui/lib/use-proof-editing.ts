@@ -12,6 +12,7 @@ import {
 import {
   applyLink,
   cleanEditedBody,
+  cleanRestoredBody,
   currentLink,
   removeLink,
   replaceBodyKeepingCaret,
@@ -38,7 +39,7 @@ import {
 } from './check-while-writing.js';
 import { stillOnJob } from './selection-image-view.js';
 import { missingTargetNotice } from './edit-target.js';
-import { disableWriting, editTarget, enableWriting, showEditTarget, unwrapHighlightMarks } from './proof-edit-dom.js';
+import { disableWriting, editTarget, enableWriting, markBlank, showEditTarget, unwrapHighlightMarks } from './proof-edit-dom.js';
 import { decideEditSave, replaceWithSavedBody } from './proof-editing.js';
 
 /**
@@ -76,6 +77,9 @@ export interface ProofEditing {
   autoSaved: boolean;
   /** 存檔時發現有模板不支援、會被拿掉的格式：先講出來，使用者按「照樣存」才存。 */
   dropWarning: string[] | null;
+  /** 填回留底時整理拿掉的格式（P5-T048 審查 6）：講一聲，按「知道了」收起。 */
+  restoreDropped: string[] | null;
+  dismissRestoreDropped: () => void;
   // --- 格式（P5-T028） ---
   allow: RichAllow;
   allowRef: MutableRefObject<RichAllow>;
@@ -103,6 +107,12 @@ export interface ProofEditing {
   dismissDrop: () => void;
   /** 丟格式警告的「照樣存」。 */
   confirmDrop: () => void;
+  /**
+   * 把留底（D-047，P5-T048）填回編輯區：照存檔同一套規則整理後換掉正文與標題，游標放在最後。
+   * 跟進入編輯時的原文比，按儲存也不會建新版本的（一樣）回 `same`、不動畫面；還沒進編輯或校樣還沒好回 `not-ready`。
+   * 原文快照不動：「取消」照舊回到存好的那一版。
+   */
+  restoreDraft: (draft: { title: string | null; body: string }) => 'restored' | 'same' | 'not-ready';
 }
 
 export function useProofEditing({
@@ -117,6 +127,7 @@ export function useProofEditing({
   onSaveEdit,
   onEndEdit,
   onEditTargetMissing,
+  onDiscardDraft,
 }: {
   job: LoadedJob;
   editing: ProofEditTarget | null;
@@ -130,6 +141,8 @@ export function useProofEditing({
   onSaveEdit: ((save: { editedBody?: string; editedTitle?: string; stay?: boolean }) => Promise<string>) | undefined;
   onEndEdit: ((notice?: string) => void) | undefined;
   onEditTargetMissing: ((notice: string) => void) | undefined;
+  /** 這次打字的留底作廢（取消、沒改就離開；D-047）。 */
+  onDiscardDraft?: () => void;
 }): ProofEditing {
   /** 目前是哪一篇：存檔後的接續動作回來時不是發起那一篇就什麼都不做（Workspace 換篇沿用這個元件，第二輪審查）。 */
   const jobUuidRef = useRef(job.uuid);
@@ -173,6 +186,7 @@ export function useProofEditing({
   const linkSessions = useRef(0);
   /** 存檔時發現有模板不支援、會被拿掉的格式：先講出來，使用者按「照樣存」才存。 */
   const [dropWarning, setDropWarning] = useState<string[] | null>(null);
+  const [restoreDropped, setRestoreDropped] = useState<string[] | null>(null);
 
   /** 打字中按「查證這句」先存的那幾版（D-036）：iframe 維持原本載著的那一版，不重載（見 ProofView 檔頭「六」）。 */
   const [hold, setHold] = useState<ProofHold | null>(null);
@@ -186,6 +200,7 @@ export function useProofEditing({
       setHold(null);
       setAutoSaved(false);
       setActError(null);
+      setRestoreDropped(null);
     }
   }, [isEditing]);
   const shown = shownFrame({ editing: isEditing, hold, revisionKey, renderEpoch });
@@ -344,6 +359,8 @@ export function useProofEditing({
   };
 
   const cancelEdit = (): void => {
+    // 留底先作廢（同步做）：下面還原正文的那一下不能再被寫成留底。
+    onDiscardDraft?.();
     const body = editBody();
     if (body && originalBody.current !== null) body.innerHTML = originalBody.current;
     restoreTitle();
@@ -389,6 +406,8 @@ export function useProofEditing({
       titleMaxLength: job.template.titleMaxLength,
     });
     if (decision.kind === 'unchanged') {
+      // 沒改就離開：留底也不用了（還原畫面之前先作廢）。
+      onDiscardDraft?.();
       // 沒有實質改動（例如只多按了 Enter）：不送出，但畫面要還原成進入編輯時的正文再重量，
       // 不然校樣多一個空區塊，「在這裡插圖」的索引會跟後端差一格（審查 #1）。
       if (original !== null) body.innerHTML = original;
@@ -539,6 +558,48 @@ export function useProofEditing({
     else void saveEdit(true);
   };
 
+  const restoreDraft = (draft: { title: string | null; body: string }): 'restored' | 'same' | 'not-ready' => {
+    const frame = frameRef.current;
+    const doc = frame?.contentDocument;
+    const body = editBody();
+    if (!frame || !doc || !body || !editingRef.current || originalBody.current === null) return 'not-ready';
+    const { html, dropped } = cleanRestoredBody(draft.body, allowRef.current, originalUnits.current);
+    const title = titleElement();
+    const decision = decideEditSave({
+      html,
+      dropped,
+      force: false,
+      originalClean: originalClean.current,
+      originalBody: originalBody.current,
+      titleText: title === null ? null : (draft.title ?? title.textContent ?? ''),
+      originalTitle: originalTitle.current,
+      savedTitle,
+      diary: isDiary,
+      titleMaxLength: job.template.titleMaxLength,
+    });
+    if (decision.kind === 'unchanged') return 'same';
+    body.innerHTML = isBlankBody(html) ? '<p><br></p>' : html;
+    if (title && draft.title !== null) title.textContent = draft.title;
+    markBlank(body);
+    setSaveError(null);
+    setDropWarning(null);
+    // 整理時拿掉了格式：不准默默拿掉，講一聲（審查 6）。
+    setRestoreDropped(dropped.length > 0 ? [...dropped] : null);
+    // 游標放在最後一段的結尾：接著寫。
+    frame.contentWindow?.focus();
+    body.focus();
+    const last = body.lastElementChild ?? body;
+    const range = doc.createRange();
+    range.selectNodeContents(last);
+    range.collapse(false);
+    const selection = doc.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    refreshFormat();
+    measure(measureToken.current);
+    return 'restored';
+  };
+
   return {
     isEditing,
     editingRef,
@@ -549,6 +610,8 @@ export function useProofEditing({
     actError,
     autoSaved,
     dropWarning,
+    restoreDropped,
+    dismissRestoreDropped: () => setRestoreDropped(null),
     allow,
     allowRef,
     commands,
@@ -568,5 +631,6 @@ export function useProofEditing({
     actWhileWriting,
     dismissDrop,
     confirmDrop,
+    restoreDraft,
   };
 }
