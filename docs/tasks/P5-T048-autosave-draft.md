@@ -77,9 +77,9 @@ agent、wordpress、factcheck、mcp 相關 spec。
 - [ ] CURRENT_TASK 已更新（主 session 收官時改）
 
 ## 中斷／接手紀錄
-- 最後完成：PR #36 Codex 第一輪兩條修完（見「完成結果」最後一節）
-- 已通過驗證：`npm run verify` 105 檔／2344 測試全綠（worktree，2026-10-13，Codex 第一輪修正後）
-- 下一步：主 session push、Codex 第二輪；使用者手動驗證（見「手動驗證」）
+- 最後完成：PR #36 Codex 第二輪兩條 P1 修完（見「完成結果」最後一節）
+- 已通過驗證：`npm run verify` 105 檔／2355 測試全綠（worktree，2026-10-13，Codex 第二輪修正後）
+- 下一步：主 session push、Codex 第三輪；使用者手動驗證（見「手動驗證」）
 - Blocker：無
 
 ## 完成結果
@@ -140,7 +140,18 @@ agent、wordpress、factcheck、mcp 相關 spec。
    外部版本變動保留原基準，之後走「之後又改過」只提示。守門測試：hook 裡沒有依賴 `draft?.baseHash` 的 effect、`session.base =` 只出現在 `rebase`／`finishSave`。
 2. 【高】B 分頁自動恢復時接手 A 的鍵、兩邊輪流蓋同一份：恢復改成把內容寫進本分頁這次打字自己的新鍵，`from` 記下來源鏈（`restoredLineage`：來源的 id＋讀到時的寫下時間＋來源自己的來源）；hook 裡不再改 `session.id`。
    原來那份什麼時候清：本分頁存檔成功（沒再打字）、捨棄／取消、恢復時發現一樣——`removeAncestors` 只刪寫下時間沒變的；
-   以及之後讀留底時，被別份複製過、之後沒人再寫的（`supersededDrafts`）——它的內容都在複製的那份裡，所以刪了不掉字；別的分頁還在寫的寫下時間會變，不會被當成被取代。
-   實測（`?fixtures=1`）：打字不存→連續重新整理 3 次，儲存區最多 2 份（新複製的＋上一份，再下一次載入就清掉上一份），不會越積越多；儲存→全部清空。
+   以及之後讀留底時，被別份複製過、之後沒人再寫的（`supersededDrafts`）。**這條在第二輪被推翻**（見下一節）。
 
-**主樹基準（本分支）**：`npm run verify` 105 檔／2344 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。
+**Codex 第二輪修正（PR #36，2026-10-13，主 session 給的設計，先寫會紅的測試）**
+根因：第一輪用「來源寫下時間沒變」就推定可以刪來源。兩個 P1：B 恢復 A 的副本後捨棄會刪掉 A 的留底；B 恢復 X 改成 Y、兩邊當掉後重開會依 `from` 刪掉 X。改成：
+- **恢復不立刻建新鍵**：填回只 `takeRecords` 不寫（`afterFill`）；使用者真的打了字（MutationObserver，`session.typed`）才寫進自己的新鍵並記 `from`。連續重新整理不累積副本。
+- **拿掉讀取時刪來源**（`supersededDrafts` 刪掉），改成隱藏不刪（`visibleDrafts`）：有沒被捨棄的副本指著、寫下時間沒變的來源先不提示；副本消失後來源重新出現。
+- **讀取時唯一自動刪別人的**：內容完全相同——跟另一份留底（`contentKey`＝標題攤平空白＋照目前版本整理後的內文，留新的）或跟目前存好的（`differs` 為 false；`planDraftRestore` 改成先比內容再看基準）。整篇的處理收在純函式 `planDraftLoad`。過期、已發布／被取代照舊（第 4 條裁定）。
+- **捨棄／取消**：只刪本 session 自己的鍵（`removeDraftIfSame`）；恢復了來源但還沒打字就捨棄→記「已捨棄」標記（`dismissOnDiscard`→`markDismissed`，鍵 `galley.draft-dismissed.v1.<uuid>/<id>/<savedAt>`），不刪來源；
+  問恢復的提示按「捨棄」也只記標記。標記 30 天過期、或對不上任何留底時由 `pruneDrafts` 清。恢復後跟目前存好的一樣（`same`）只刪那一份，不動它的來源。
+- **存檔成功**（`finishSave`，送出之後沒再打字）：刪自己的鍵＋來源鏈裡寫下時間沒變的（`removeAncestors`）；恢復了沒打字就存、而且已經換篇時用 token 裡的 `from`。守門測試：`removeAncestors` 只出現在 `finishSave`。
+- 測試：Codex 兩條重現、單一分頁「打字→重新整理→恢復→打字→重新整理→恢復→存檔」（中途只有 auto、沒有「之後又改過」，最後儲存區空）、恢復後沒打字連續重新整理不累積（`tests/draft-backup.test.ts`，用 `planDraftLoad` 照 hook 的順序走）。
+- `?fixtures=1` 實測：打字→重新整理 3 次不打字，儲存區一直只有 1 份；打字→重新整理→再打字→重新整理：恢復的是兩段都在的那份、沒有「之後又改過」，儲存→儲存區空；
+  塞一份基準不同的留底→問→捨棄→留底還在、多一個已捨棄標記，重新整理不再問。截圖 `shots/draft-chain-restored.png`。
+
+**主樹基準（本分支）**：`npm run verify` 105 檔／2355 測試（main @ d6b6c5e 是 103／2283；新增 `tests/draft-backup.test.ts`、`tests/vite-no-reload.test.ts`）。

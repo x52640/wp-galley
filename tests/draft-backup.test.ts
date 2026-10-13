@@ -31,7 +31,12 @@ import {
   restoreDroppedNote,
   safeRestoredEdit,
   sameDraft,
-  supersededDrafts,
+  DISMISS_KEY_PREFIX,
+  dismissOnDiscard,
+  markDismissed,
+  planDraftLoad,
+  readDismissed,
+  visibleDrafts,
   removeAncestors,
   restoredLineage,
   writeDraft,
@@ -146,7 +151,7 @@ describe('寫進儲存區、讀回來、刪掉', () => {
   });
 });
 
-describe('Codex 第一輪 2：恢復時複製到自己的新鍵，不接手別人的鍵', () => {
+describe('Codex 第一輪 2：恢復的那份打了字才寫進自己的新鍵，不接手別人的鍵', () => {
   const orig = backup({ id: 'orig', savedAt: NOW - 5000 });
 
   it('恢復來的那份記下來源鏈（來源自己的來源也算）', () => {
@@ -158,15 +163,7 @@ describe('Codex 第一輪 2：恢復時複製到自己的新鍵，不接手別�
     ]);
   });
 
-  it('來源在被複製之後沒人再寫過：它的內容都在新的那份裡，算被取代；被寫過（別的分頁還在打）就不算', () => {
-    const copy = backup({ id: 'copy', savedAt: NOW, from: restoredLineage(orig) });
-    expect(supersededDrafts([copy, orig]).map((d) => d.id)).toEqual(['orig']);
-    const stillWriting = { ...orig, savedAt: NOW + 10, body: '<p>A 分頁又打的</p>' };
-    expect(supersededDrafts([copy, stillWriting])).toEqual([]);
-    expect(supersededDrafts([orig])).toEqual([]);
-  });
-
-  it('存檔或捨棄時刪來源鏈：只刪寫下時間沒變的那幾份', () => {
+  it('存檔成功時刪來源鏈：只刪寫下時間沒變的那幾份', () => {
     const storage = memoryStorage();
     writeDraft(storage, orig);
     writeDraft(storage, backup({ id: 'older', savedAt: NOW - 9000 }));
@@ -179,6 +176,130 @@ describe('Codex 第一輪 2：恢復時複製到自己的新鍵，不接手別�
       { id: 'gone', savedAt: 1 },
     ]);
     expect(readDrafts(storage, 'job-a').map((d) => d.id)).toEqual(['moved']);
+  });
+});
+
+describe('Codex 第二輪：讀留底時隱藏不刪；已捨棄標記', () => {
+  const x = backup({ id: 'x', savedAt: NOW - 5000, body: '<p>A 打的 X</p>' });
+  const y = backup({ id: 'y', savedAt: NOW, body: '<p>B 改成的 Y</p>', from: restoredLineage(x) });
+
+  it('有副本指著、寫下時間沒變的來源：先不提示（只處理副本），但不刪', () => {
+    expect(visibleDrafts([y, x], [])).toEqual({ candidates: [y], hidden: [x] });
+  });
+
+  it('來源之後又被寫過（別的分頁還在打）：照常提示', () => {
+    const xAgain = { ...x, savedAt: NOW + 10 };
+    expect(visibleDrafts([xAgain, y], []).candidates.map((d) => d.id)).toEqual(['x', 'y']);
+  });
+
+  it('已捨棄標記：那個寫下時間的那份不提示；之後又被寫（寫下時間變了）照常提示；被捨棄的副本不再遮住它的來源', () => {
+    expect(visibleDrafts([x], [{ id: 'x', savedAt: x.savedAt }]).candidates).toEqual([]);
+    expect(visibleDrafts([{ ...x, savedAt: NOW + 1 }], [{ id: 'x', savedAt: x.savedAt }]).candidates).toHaveLength(1);
+    expect(visibleDrafts([y, x], [{ id: 'y', savedAt: y.savedAt }]).candidates).toEqual([x]);
+  });
+
+  it('標記存在儲存區、按篇讀回；跟留底的鍵分開', () => {
+    const storage = memoryStorage();
+    markDismissed(storage, 'job-a', { id: 'x', savedAt: 5 }, NOW);
+    markDismissed(storage, 'job-b', { id: 'z', savedAt: 6 }, NOW);
+    expect(readDismissed(storage, 'job-a')).toEqual([{ id: 'x', savedAt: 5 }]);
+    expect([...storage.map.keys()].every((k) => k.startsWith(DISMISS_KEY_PREFIX))).toBe(true);
+    expect(DISMISS_KEY_PREFIX.startsWith(DRAFT_KEY_PREFIX)).toBe(false);
+    expect(readDrafts(storage, 'job-a')).toEqual([]);
+  });
+
+  it('過期清理連標記一起：30 天前記的、或那份留底已經不在的標記清掉', () => {
+    const storage = memoryStorage();
+    writeDraft(storage, x);
+    markDismissed(storage, 'job-a', { id: 'x', savedAt: x.savedAt }, NOW);
+    markDismissed(storage, 'job-a', { id: 'gone', savedAt: 1 }, NOW);
+    markDismissed(storage, 'job-a', { id: 'x2', savedAt: 2 }, NOW - DRAFT_MAX_AGE_MS - 1);
+    pruneDrafts(storage, NOW);
+    expect(readDismissed(storage, 'job-a')).toEqual([{ id: 'x', savedAt: x.savedAt }]);
+  });
+
+  it('捨棄／取消：只有「恢復了來源但還沒打字」才記標記（記直接來源），打過字或沒恢復都不記', () => {
+    expect(dismissOnDiscard({ wrote: false, from: restoredLineage(y) })).toEqual({ id: 'y', savedAt: y.savedAt });
+    expect(dismissOnDiscard({ wrote: true, from: restoredLineage(y) })).toBeNull();
+    expect(dismissOnDiscard({ wrote: false, from: [] })).toBeNull();
+  });
+});
+
+describe('Codex 第二輪：載入時整篇怎麼處理（planDraftLoad）', () => {
+  const ctx = (over: Partial<Parameters<typeof planDraftLoad>[0]> = {}): Parameters<typeof planDraftLoad>[0] => ({
+    drafts: [],
+    dismissed: [],
+    now: NOW,
+    state: 'PREVIEWED',
+    currentHash: 'h1',
+    canEdit: true,
+    differs: () => true,
+    contentKey: (d) => d.body,
+    ...over,
+  });
+
+  it('自動刪別人的只有一種：內容跟另一份或目前存好的完全相同（留新的那份）', () => {
+    const older = backup({ id: 'o', savedAt: NOW - 10 });
+    const newer = backup({ id: 'n', savedAt: NOW });
+    expect(planDraftLoad(ctx({ drafts: [newer, older] })).remove).toEqual([older]);
+    const saved = backup({ id: 's', body: '<p>跟存好的一樣</p>' });
+    const result = planDraftLoad(ctx({ drafts: [saved], differs: (d) => d.id !== 's' }));
+    expect(result.remove).toEqual([saved]);
+    expect(result.pick).toBeNull();
+  });
+
+  it('Codex 重現 2：B 恢復 X 改成 Y（沒存）、兩邊都當掉 → 重開只處理 Y，X 不刪；Y 被捨棄（消失）後 X 重新出現', () => {
+    const x = backup({ id: 'x', savedAt: NOW - 5000, body: '<p>X</p>' });
+    const y = backup({ id: 'y', savedAt: NOW, body: '<p>Y</p>', from: restoredLineage(x) });
+    const first = planDraftLoad(ctx({ drafts: [y, x] }));
+    expect(first.remove).toEqual([]);
+    expect(first.pick?.draft.id).toBe('y');
+    const later = planDraftLoad(ctx({ drafts: [x] }));
+    expect(later.pick?.draft.id).toBe('x');
+  });
+
+  it('Codex 重現 1：A 在打（鍵 a）、B 恢復了沒打字就捨棄 → a 還在、只在 B 記標記；A 再打（寫下時間變了）又會提示', () => {
+    const storage = memoryStorage();
+    const a = backup({ id: 'a', savedAt: NOW - 1000 });
+    writeDraft(storage, a);
+    const dismiss = dismissOnDiscard({ wrote: false, from: restoredLineage(a) });
+    markDismissed(storage, 'job-a', dismiss!, NOW);
+    expect(readDraft(storage, 'job-a', 'a')).toEqual(a);
+    expect(planDraftLoad(ctx({ drafts: readDrafts(storage, 'job-a'), dismissed: readDismissed(storage, 'job-a') })).pick).toBeNull();
+    writeDraft(storage, { ...a, savedAt: NOW + 5, body: '<p>A 又打的</p>' });
+    expect(planDraftLoad(ctx({ drafts: readDrafts(storage, 'job-a'), dismissed: readDismissed(storage, 'job-a') })).pick?.draft.id).toBe('a');
+  });
+
+  it('單一分頁：打字→重新整理→恢復→打字→重新整理→恢復→存檔：中途沒有「之後又改過」，最後儲存區乾淨', () => {
+    const storage = memoryStorage();
+    const load = (): ReturnType<typeof planDraftLoad> =>
+      planDraftLoad(ctx({ drafts: readDrafts(storage, 'job-a'), dismissed: readDismissed(storage, 'job-a') }));
+    // 第一次打字（session s1）。
+    const s1 = backup({ id: 's1', savedAt: NOW, body: '<p>一</p>' });
+    writeDraft(storage, s1);
+    // 重新整理：自動恢復 s1；填回不寫。接著打字 → 寫進 s2（記來源）。
+    const p1 = load();
+    expect(p1.pick?.plan).toEqual({ kind: 'auto' });
+    const s2 = backup({ id: 's2', savedAt: NOW + 1, body: '<p>一二</p>', from: restoredLineage(p1.pick!.draft) });
+    writeDraft(storage, s2);
+    // 重新整理：s1 被 s2 遮住（不提示「之後又改過」），自動恢復 s2。
+    const p2 = load();
+    expect(p2.remove).toEqual([]);
+    expect(p2.pick).toEqual({ draft: s2, plan: { kind: 'auto' } });
+    // 恢復 s2 之後沒打字就存檔：刪來源鏈（寫下時間沒變的）。
+    removeAncestors(storage, 'job-a', restoredLineage(p2.pick!.draft));
+    expect(storage.map.size).toBe(0);
+  });
+
+  it('恢復後沒打字就連續重新整理：一份都不多', () => {
+    const storage = memoryStorage();
+    writeDraft(storage, backup({ id: 's1' }));
+    for (let i = 0; i < 3; i += 1) {
+      const plan = planDraftLoad(ctx({ drafts: readDrafts(storage, 'job-a') }));
+      expect(plan.pick?.draft.id).toBe('s1');
+      // 填回不寫任何東西（hook 的 afterFill 只丟掉變動紀錄，守門測試在下面「接法」）。
+    }
+    expect(storage.map.size).toBe(1);
   });
 });
 
@@ -292,19 +413,9 @@ describe('打開一篇稿件時一份留底要怎麼辦（planDraftRestore）', 
     expect(planDraftRestore({ ...base, currentHash: undefined, draft: backup(), differs })).toEqual({ kind: 'offer', changedSince: true });
   });
 
-  it('審查 1：基準不同時就算比對說一樣也不默默刪（而且根本不比）', () => {
-    let compared = false;
-    const plan = planDraftRestore({
-      ...base,
-      currentHash: 'h2',
-      draft: backup(),
-      differs: () => {
-        compared = true;
-        return false;
-      },
-    });
-    expect(plan).toEqual({ kind: 'offer', changedSince: true });
-    expect(compared).toBe(false);
+  it('Codex 第二輪：內容跟目前存好的完全相同才自動刪（基準不同也一樣，刪了不少任何字）', () => {
+    expect(planDraftRestore({ ...base, currentHash: 'h2', draft: backup(), differs: same })).toEqual({ kind: 'drop' });
+    expect(planDraftRestore({ ...base, currentHash: 'h2', draft: backup(), differs })).toEqual({ kind: 'offer', changedSince: true });
   });
 
   it('基準相同但現在不能進打字模式（AI 在跑）：先問', () => {
@@ -497,7 +608,27 @@ describe('接法（use-draft-backup／use-proof-editing／use-proof-frame／Proo
   it('Codex 第一輪 2：恢復不接手別人的鍵', () => {
     expect(hook).not.toMatch(/session\.id = /);
     expect(hook).toContain('restoredLineage(');
-    expect(hook).toContain('supersededDrafts(');
+    expect(hook).not.toContain('supersededDrafts');
+    // 填回之後不寫：使用者打了字才寫（連續重新整理不累積副本）。
+    const fill = hook.slice(hook.indexOf('afterFill: () => {'), hook.indexOf('const throttle = createThrottle'));
+    expect(fill).toContain('takeRecords()');
+    expect(fill).not.toContain('write()');
+  });
+
+  it('Codex 第二輪：捨棄／取消只刪自己的鍵，不刪來源（沒打字就記已捨棄標記）；問恢復的「捨棄」也只記標記', () => {
+    const discardSession = hook.slice(hook.indexOf('const discardSession'), hook.indexOf('const beginSave'));
+    expect(discardSession).not.toContain('removeAncestors');
+    expect(discardSession).toContain('dismissOnDiscard(');
+    const discard = hook.slice(hook.indexOf('const discard = '), hook.indexOf('const notice'));
+    expect(discard).not.toMatch(/removeDraft|removeAncestors/);
+    expect(discard).toContain('markDismissed(');
+    expect(hook).toContain('planDraftLoad(');
+    // 刪來源鏈只在存檔成功（finishSave）。
+    const finish = hook.indexOf('const finishSave');
+    const after = hook.indexOf('const rebase');
+    const uses = [...hook.matchAll(/removeAncestors\(/g)].map((m) => m.index!);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.every((at) => at > finish && at < after)).toBe(true);
   });
 
   it('審查 3：刪留底一律經過「還是自己寫的那份」的確認', () => {

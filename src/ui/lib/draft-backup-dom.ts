@@ -39,3 +39,20 @@ export function draftDiffersFromShown(input: {
   });
   return decision.kind !== 'unchanged';
 }
+
+/**
+ * 留底的「內容」（Codex 第二輪）：標題（空白攤平）＋照目前這一版整理後的內文。兩份一樣＝內容完全相同，刪掉舊的不少任何字。
+ * 整理用同一份目前版本的區塊，所以只差在編輯器雜訊（屬性、空白排版）的兩份會得到一樣的結果。
+ */
+export function draftContentKey(input: {
+  readonly doc: Document;
+  readonly draft: Pick<DraftBackup, 'title' | 'body'>;
+  readonly allow: RichAllow;
+}): string {
+  const body = input.doc.querySelector('.preview-body');
+  const shown = body === null ? null : (body.cloneNode(true) as Element);
+  if (shown !== null) unwrapHighlightMarks(shown);
+  const units = shown === null ? null : snapshotBody(shown);
+  const title = (input.draft.title ?? '').replace(/\s+/g, ' ').trim();
+  return `${title}\u0000${cleanRestoredBody(input.draft.body, input.allow, units).html}`;
+}

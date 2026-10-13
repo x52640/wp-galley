@@ -11,8 +11,6 @@ import {
   DRAFT_WRITE_WAIT_MS,
   draftCheckReady,
   newDraftId,
-  pickDraftPlan,
-  planDraftRestore,
   pruneDrafts,
   readDraft,
   readDrafts,
@@ -20,30 +18,33 @@ import {
   removeDraftIfSame,
   restoreAllowed,
   restoredLineage,
-  supersededDrafts,
+  dismissOnDiscard,
+  markDismissed,
+  planDraftLoad,
+  readDismissed,
   writeDraft,
   type DraftBackup,
   type DraftNotice,
   type DraftOrigin,
   type DraftStorage,
 } from './draft-backup.js';
-import { draftDiffersFromShown } from './draft-backup-dom.js';
+import { draftContentKey, draftDiffersFromShown } from './draft-backup-dom.js';
 
 /**
  * 打字模式沒存的內容自動留底（D-047，P5-T048）：接 iframe 與 React。規則在 `draft-backup.ts`。
  * 原則：任何順序都不能讓使用者打的字不見。
  *
- * - **寫**：每一次進打字模式是一個 session、自己一個鍵。恢復一份留底時**不接手別人的鍵**，內容複製到自己的鍵、
- *   記下來源鏈（Codex 第一輪 2：兩個分頁接手同一個鍵會輪流蓋掉對方）。聽正文與標題的任何變動
+ * - **寫**：每一次進打字模式是一個 session、自己一個鍵，**使用者真的打了字才寫**（填回造成的變動不算）。恢復一份留底時
+ *   不接手別人的鍵：打了字才寫進自己的新鍵，並記下來源鏈 `from`（Codex 第一、二輪）。聽正文與標題的任何變動
  *   （MutationObserver），節流寫進瀏覽器儲存區；分頁被藏起來（`visibilitychange`→hidden）、關掉（`pagehide`）、
  *   離開打字模式但沒作廢（換篇、回總覽、版本被換掉）時立刻寫。基準是這次打字開始時的版本，**只有本次編輯自己的存檔成功回呼**
- *   （`rebase`、`finishSave`）才換；輪詢讀到別處存的新版本不換（Codex 第一輪 1：換了會被當成基準相同而自動恢復、蓋掉別人存的）。
- * - **刪**：只刪儲存區裡**還是自己最後寫的那份**（別的分頁可能寫過）；存檔成功、捨棄時連來源鏈裡寫下時間沒變的一起刪。
- *   讀留底時，被別份複製過、之後沒人再寫的（`supersededDrafts`）也清掉，所以恢復、重新整理幾次都不會越積越多。取消、沒改就離開（`discardSession`）；
- *   存檔成功（`beginSave`／`finishSave`，工作區在重讀之前通知）——送出之後又打了字就不刪，改用存好的那一版當基準留著。
- * - **恢復**：iframe 確定載入的是目前這一版、不在打字模式時才看（`draftCheckReady`）。同一篇可能有好幾份，新的先處理
- *   （`pickDraftPlan`）：基準相同且內容不同→請工作區進打字模式、填回；基準不同→只問，不默默刪。
- *   打字中這次已經打了字，就不准再「恢復」另一份（`restoreAllowed`）。
+ *   （`rebase`、`finishSave`）才換；輪詢讀到別處存的新版本不換（Codex 第一輪 1）。
+ * - **刪**：只刪儲存區裡**還是自己最後寫的那份**（別的分頁可能寫過）。取消、捨棄（`discardSession`）只刪自己的鍵；
+ *   恢復了來源但還沒打字就捨棄，不刪來源，記一個「已捨棄」標記（Codex 第二輪）。存檔成功（`beginSave`／`finishSave`）且
+ *   送出之後沒再打字：刪自己的鍵，連來源鏈裡寫下時間沒變的一起刪（那份內容已經改好存進去了）。
+ * - **恢復**：iframe 確定載入的是目前這一版、不在打字模式時才看（`draftCheckReady`）。整篇怎麼處理在 `planDraftLoad`：
+ *   讀取時唯一自動刪別人的情況是內容完全相同（跟另一份、或跟目前存好的）；其餘隱藏不刪（已捨棄、被副本遮住的來源），
+ *   新的先一次一份：基準相同→請工作區進打字模式、填回；基準不同→只問。打字中這次已經打了字，就不准再「恢復」另一份。
  *
  * 排在 ProofView 所有既有 hook 之後：不動原本 effect 的順序。這裡的 effect 照下面的順序跑：
  * 寫（先接上觀察）→ 基準換了 → 讀 → 填回 → 離開打字模式收提示。
@@ -66,6 +67,8 @@ export interface DraftSaveToken {
   readonly uuid: string;
   readonly id: string;
   readonly sent: { readonly title: string | null; readonly body: string };
+  /** 這次打字的來源鏈（送出那一刻的）。 */
+  readonly from: readonly DraftOrigin[];
 }
 
 export interface DraftBackupState {
@@ -95,6 +98,8 @@ interface WriteSession {
   base: string | null;
   /** 這次打字是從哪幾份留底恢復來的（沒恢復是空的）。 */
   from: DraftOrigin[];
+  /** 使用者這次真的打過字（填回不算）。 */
+  typed: boolean;
   suppressed: boolean;
   dirty: boolean;
   lastWritten: DraftBackup | null;
@@ -199,6 +204,7 @@ export function useDraftBackup({
       // 基準：進打字模式那一刻的版本。之後只有本次編輯自己的存檔成功才換（rebase／finishSave）。
       base: baseHashRef.current ?? null,
       from: [],
+      typed: false,
       suppressed: false,
       dirty: false,
       lastWritten: null,
@@ -220,9 +226,8 @@ export function useDraftBackup({
         else warnUnavailable();
       },
       afterFill: () => {
+        // 填回不算打字、也不寫：使用者打了字才寫進自己的新鍵（連續重新整理不累積副本，Codex 第二輪）。
         observer.takeRecords();
-        throttle.cancel();
-        session.write();
       },
     };
     const throttle = createThrottle(() => session.write(), DRAFT_WRITE_WAIT_MS);
@@ -231,6 +236,7 @@ export function useDraftBackup({
     const changed = (): void => {
       if (session.suppressed) return;
       session.dirty = true;
+      session.typed = true;
       setTyped(true);
       throttle.call();
     };
@@ -279,33 +285,30 @@ export function useDraftBackup({
     checked.current = key;
     const storage = store();
     const doc = frameRef.current?.contentDocument ?? null;
-    const now = Date.now();
-    const all = readDrafts(storage, current.uuid);
-    // 被別份複製過、之後沒人再寫的：內容都在那份裡，清掉（不然恢復一次多一份）。
-    const superseded = supersededDrafts(all);
-    for (const old of superseded) removeDraftIfSame(storage, old);
-    const live = all.filter((d) => !superseded.includes(d));
-    const { drop, pick } = pickDraftPlan(live, (backup) =>
-      planDraftRestore({
-        draft: backup,
-        now,
-        state: current.state,
-        currentHash: current.currentRevision?.contentHash,
-        canEdit: inputRef.current?.canEdit ?? false,
-        differs: () =>
-          doc === null
-            ? true
-            : draftDiffersFromShown({
-                doc,
-                draft: backup,
-                allow: allowRef.current,
-                savedTitle: readString(current.currentRevision?.templateData ?? null, 'title', current.title ?? ''),
-                diary: current.target.contentType === 'diary',
-                titleMaxLength: current.template.titleMaxLength,
-              }),
-      }),
-    );
-    for (const stale of drop) removeDraftIfSame(storage, stale);
+    const savedTitle = readString(current.currentRevision?.templateData ?? null, 'title', current.title ?? '');
+    const { remove, pick } = planDraftLoad({
+      drafts: readDrafts(storage, current.uuid),
+      dismissed: readDismissed(storage, current.uuid),
+      now: Date.now(),
+      state: current.state,
+      currentHash: current.currentRevision?.contentHash,
+      canEdit: inputRef.current?.canEdit ?? false,
+      differs: (backup) =>
+        doc === null
+          ? true
+          : draftDiffersFromShown({
+              doc,
+              draft: backup,
+              allow: allowRef.current,
+              savedTitle,
+              diary: current.target.contentType === 'diary',
+              titleMaxLength: current.template.titleMaxLength,
+            }),
+      // 讀不到校樣就每份都當成不同（不刪）。
+      contentKey: (backup) => (doc === null ? `${backup.id}` : draftContentKey({ doc, draft: backup, allow: allowRef.current })),
+    });
+    // 只刪內容完全相同（或過期、稿件已發布／被取代）的；還是要確認儲存區那份沒被改寫過。
+    for (const stale of remove) removeDraftIfSame(storage, stale);
     if (pick === null) {
       setOffer(null);
       return;
@@ -329,8 +332,8 @@ export function useDraftBackup({
     setPending(null);
     setOffer(null);
     if (result === 'same') {
+      // 跟目前存好的完全相同：只刪這一份（不少任何字）；它的來源不一定相同，不動。
       removeDraftIfSame(store(), pending.backup);
-      removeAncestors(store(), pending.backup.uuid, pending.backup.from);
       if (pending.entered) {
         discardSession();
         callbacks.current.onEndEdit?.(pending.auto ? undefined : DRAFT_SAME_NOTE);
@@ -339,8 +342,8 @@ export function useDraftBackup({
       }
       return;
     }
-    // 不接手那份的鍵（別的分頁可能還在寫它）：內容寫進這次打字自己的鍵，記下來源鏈。
-    // 原來那份在這次存檔成功或捨棄時、或下次讀留底發現它被取代時才清（都要寫下時間沒變）。
+    // 不接手那份的鍵（別的分頁可能還在寫它）：記下來源鏈，使用者打了字才寫進這次打字自己的鍵。
+    // 原來那份只在這次存檔成功、送出之後沒再打字時刪（寫下時間要沒變）；捨棄不刪。
     const session = sessionRef.current;
     if (session !== null && session.uuid === pending.backup.uuid) {
       session.from = restoredLineage(pending.backup);
@@ -363,15 +366,17 @@ export function useDraftBackup({
     if (session === null) return;
     session.suppressed = true;
     session.throttle?.cancel();
-    // 只刪自己最後寫的那份（別的分頁寫過就留著）；恢復來的來源一起捨棄（寫下時間沒變的）。
+    // 只刪自己最後寫的那份（別的分頁寫過就留著）；不刪來源（Codex 第二輪）。
     if (session.lastWritten !== null) removeDraftIfSame(store(), session.lastWritten);
-    removeAncestors(store(), session.uuid, session.from);
+    // 恢復了來源但還沒打字就捨棄：記「已捨棄」標記，那份（這個寫下時間的）之後不再提示。
+    const dismissed = dismissOnDiscard({ wrote: session.typed, from: session.from });
+    if (dismissed !== null) markDismissed(store(), session.uuid, dismissed, Date.now());
   };
 
   const beginSave = (): DraftSaveToken | null => {
     const session = sessionRef.current;
     if (session === null) return null;
-    return { uuid: session.uuid, id: session.id, sent: session.read() };
+    return { uuid: session.uuid, id: session.id, sent: session.read(), from: [...session.from] };
   };
 
   const finishSave = (token: DraftSaveToken, savedHash: string): void => {
@@ -393,7 +398,11 @@ export function useDraftBackup({
     }
     // 已經換篇（session 收掉時已經把最後的字寫進去了）：照儲存區那份比。
     const stored = readDraft(storage, token.uuid, token.id);
-    if (stored === null) return;
+    if (stored === null) {
+      // 這次沒寫過（恢復了沒打字就存）：存進去的就是來源的內容，來源鏈照規則刪。
+      removeAncestors(storage, token.uuid, token.from);
+      return;
+    }
     if (afterSaveDraft({ sent: token.sent, now: { title: stored.title, body: stored.body } }) === 'remove') {
       removeDraftIfSame(storage, stored);
       removeAncestors(storage, stored.uuid, stored.from);
@@ -440,9 +449,8 @@ export function useDraftBackup({
       return;
     }
     if (offer === null) return;
-    // 儲存區裡還是問的那一份才刪（之後被寫過就留著）。
-    removeDraftIfSame(store(), offer.backup);
-    removeAncestors(store(), offer.backup.uuid, offer.backup.from);
+    // 不刪（可能是別的分頁正在寫的）：記「已捨棄」標記，這個寫下時間的那份不再提示；之後被再寫過照常提示。
+    markDismissed(store(), offer.backup.uuid, { id: offer.backup.id, savedAt: offer.backup.savedAt }, Date.now());
     setOffer(null);
     setRecheck((n) => n + 1);
   };

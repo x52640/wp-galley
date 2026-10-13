@@ -36,8 +36,8 @@ export interface DraftBackup {
   /** 這次打字的基準 contentHash（打字中先存過就是最後存成功的那一版）。 */
   readonly baseHash: string | null;
   /**
-   * 這份是從哪幾份留底恢復來的（來源鏈，近的在前；Codex 第一輪 2）：恢復時內容複製到自己的新鍵，不接手別人的鍵。
-   * 來源在被複製之後沒人再寫過（寫下時間沒變）＝它的內容都在這份裡，可以清掉（`supersededDrafts`、`removeAncestors`）。
+   * 這份是從哪幾份留底恢復來的（來源鏈，近的在前；Codex 第一輪 2）：恢復之後使用者打了字，才寫進自己的新鍵，不接手別人的鍵。
+   * 讀留底時，來源有副本指著、寫下時間沒變就先不提示（`visibleDrafts`，隱藏不刪）；副本消失後來源重新出現。
    */
   readonly from: readonly DraftOrigin[];
 }
@@ -48,6 +48,8 @@ export interface DraftOrigin {
 }
 
 export const DRAFT_KEY_PREFIX = 'galley.draft.v2.';
+/** 「已捨棄」標記（Codex 第二輪）：`<uuid>/<id>/<savedAt>` → `{ at }`。跟留底的鍵分開，30 天過期一起清。 */
+export const DISMISS_KEY_PREFIX = 'galley.draft-dismissed.v1.';
 /** 打字中最多每隔這麼久寫一次（第一下立刻寫）。 */
 export const DRAFT_WRITE_WAIT_MS = 800;
 /** 超過這麼久的留底在載入時清掉。 */
@@ -108,16 +110,7 @@ export function restoredLineage(source: DraftBackup): DraftOrigin[] {
   return [{ id: source.id, savedAt: source.savedAt }, ...source.from];
 }
 
-/**
- * 被取代的留底：別份的來源鏈裡記著它、而且寫下時間沒變（被複製之後沒人再寫過，內容都在那份裡）。
- * 寫下時間變了＝別的分頁還在寫它，不算被取代。
- */
-export function supersededDrafts(drafts: readonly DraftBackup[]): DraftBackup[] {
-  const copied = new Set(drafts.flatMap((d) => d.from.map((f) => `${f.id}\u0000${f.savedAt}`)));
-  return drafts.filter((d) => copied.has(`${d.id}\u0000${d.savedAt}`));
-}
-
-/** 刪掉來源鏈裡寫下時間沒變的那幾份（存檔成功、捨棄時）；被寫過的留著。 */
+/** 刪掉來源鏈裡寫下時間沒變的那幾份（只在存檔成功、送出之後沒再打字時：那份內容已經改好存進去了）；被寫過的留著。 */
 export function removeAncestors(storage: DraftStorage | null, uuid: string, from: readonly DraftOrigin[]): void {
   for (const origin of from) {
     const stored = readDraft(storage, uuid, origin.id);
@@ -186,23 +179,106 @@ export function removeDraftIfSame(storage: DraftStorage | null, expected: DraftB
   return true;
 }
 
-/** 清掉超過 30 天與壞掉的留底（只看本功能的鍵）。回傳清掉幾份。 */
+function dismissKey(uuid: string, origin: DraftOrigin): string {
+  return `${DISMISS_KEY_PREFIX}${uuid}/${origin.id}/${origin.savedAt}`;
+}
+
+function parseDismissKey(key: string): { uuid: string; origin: DraftOrigin } | null {
+  if (!key.startsWith(DISMISS_KEY_PREFIX)) return null;
+  const parts = key.slice(DISMISS_KEY_PREFIX.length).split('/');
+  if (parts.length !== 3 || !parts[0] || !parts[1]) return null;
+  const savedAt = Number(parts[2]);
+  if (!Number.isFinite(savedAt)) return null;
+  return { uuid: parts[0], origin: { id: parts[1], savedAt } };
+}
+
+/** 記下「這份（這個寫下時間的）已經捨棄」：之後不再提示；被再寫過（寫下時間變了）照常提示。不刪留底本身。 */
+export function markDismissed(storage: DraftStorage | null, uuid: string, origin: DraftOrigin, now: number): void {
+  if (storage === null) return;
+  try {
+    storage.setItem(dismissKey(uuid, origin), JSON.stringify({ at: now }));
+  } catch {
+    /* 記不住：下次照樣會問，不掉字。 */
+  }
+}
+
+export function readDismissed(storage: DraftStorage | null, uuid: string): DraftOrigin[] {
+  if (storage === null) return [];
+  try {
+    const out: DraftOrigin[] = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      const parsed = key === null ? null : parseDismissKey(key);
+      if (parsed !== null && parsed.uuid === uuid) out.push(parsed.origin);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 捨棄／取消一次打字時要記的標記（Codex 第二輪）：只有「恢復了來源但還沒打字」才記，記直接來源那一份。
+ * 打過字的只刪自己的鍵；來源之後重新出現在提示裡（不掉字）。
+ */
+export function dismissOnDiscard(session: { readonly wrote: boolean; readonly from: readonly DraftOrigin[] }): DraftOrigin | null {
+  return !session.wrote && session.from.length > 0 ? session.from[0]! : null;
+}
+
+/** 清掉超過 30 天與壞掉的留底（只看本功能的鍵），以及 30 天前記的、或對不上任何留底的「已捨棄」標記。回傳清掉幾個鍵。 */
 export function pruneDrafts(storage: DraftStorage | null, now: number): number {
   if (storage === null) return 0;
   try {
     const stale: string[] = [];
+    const alive = new Set<string>();
+    const markers: { key: string; uuid: string; origin: DraftOrigin }[] = [];
     for (let i = 0; i < storage.length; i += 1) {
       const key = storage.key(i);
-      if (key === null || !key.startsWith(DRAFT_KEY_PREFIX)) continue;
+      if (key === null) continue;
+      if (key.startsWith(DISMISS_KEY_PREFIX)) {
+        const parsed = parseDismissKey(key);
+        if (parsed === null) stale.push(key);
+        else markers.push({ key, ...parsed });
+        continue;
+      }
+      if (!key.startsWith(DRAFT_KEY_PREFIX)) continue;
       const parsed = parseDraftKey(key);
       const draft = parsed === null ? null : parseDraft(storage.getItem(key), parsed.uuid, parsed.id);
       if (draft === null || isExpired(draft, now)) stale.push(key);
+      else alive.add(`${draft.uuid}/${draft.id}/${draft.savedAt}`);
+    }
+    for (const marker of markers) {
+      let at = Number.NaN;
+      try {
+        at = (JSON.parse(storage.getItem(marker.key) ?? 'null') as { at?: unknown } | null)?.at as number;
+      } catch {
+        /* 壞掉的標記清掉。 */
+      }
+      const expired = typeof at !== 'number' || !Number.isFinite(at) || now - at > DRAFT_MAX_AGE_MS;
+      if (expired || !alive.has(`${marker.uuid}/${marker.origin.id}/${marker.origin.savedAt}`)) stale.push(marker.key);
     }
     for (const key of stale) storage.removeItem(key);
     return stale.length;
   } catch {
     return 0;
   }
+}
+
+/**
+ * 讀留底時哪些要提示（Codex 第二輪：隱藏不刪）：
+ * - 有「已捨棄」標記、寫下時間對得上的：不提示。
+ * - 有（沒被捨棄的）副本指著、寫下時間沒變的來源：不提示，只處理副本；副本被存檔成功或捨棄而消失後，來源重新出現。
+ */
+export function visibleDrafts(
+  drafts: readonly DraftBackup[],
+  dismissed: readonly DraftOrigin[],
+): { candidates: DraftBackup[]; hidden: DraftBackup[] } {
+  const tag = (o: DraftOrigin): string => `${o.id}\u0000${o.savedAt}`;
+  const gone = new Set(dismissed.map(tag));
+  const shown = drafts.filter((d) => !gone.has(tag(d)));
+  const pointed = new Set(shown.flatMap((d) => d.from.map(tag)));
+  const candidates = shown.filter((d) => !pointed.has(tag(d)));
+  return { candidates, hidden: drafts.filter((d) => !candidates.includes(d)) };
 }
 
 function isExpired(draft: DraftBackup, now: number): boolean {
@@ -245,9 +321,9 @@ export type DraftAction = Extract<DraftPlan, { kind: 'auto' } | { kind: 'offer' 
 /**
  * 一份留底要怎麼辦：
  * - 過期、稿件再也不能改：刪掉。發布中、已取消、失敗：先不動。
- * - 基準 hash 不是目前版本（之後有別的存檔、AI 套用、換模板）：**一律只問**「恢復」「捨棄」，不默默刪、不自動蓋掉（審查 1）。
- * - 基準是目前版本：跟畫面上這一版照「儲存」同一套整理比（`differs`），一樣就默默刪；
- *   不一樣、現在可以進打字模式→直接進打字模式填回（`auto`）；AI 在跑之類不能進→先問。
+ * - 跟畫面上這一版照「儲存」同一套整理比（`differs`）完全相同：默默刪（不少任何字）。
+ * - 基準 hash 不是目前版本（之後有別的存檔、AI 套用、換模板）：只問「恢復」「捨棄」，不自動蓋掉（審查 1）。
+ * - 基準是目前版本：現在可以進打字模式→直接進打字模式填回（`auto`）；AI 在跑之類不能進→先問。
  * `differs` 要動到校樣文件，只在需要時才呼叫。
  */
 export function planDraftRestore(input: {
@@ -264,9 +340,11 @@ export function planDraftRestore(input: {
   const eligible = draftEligibility(input.state);
   if (eligible === 'drop') return { kind: 'drop' };
   if (eligible === 'wait') return { kind: 'none' };
+  // 內容跟目前存好的完全相同（照「儲存」同一套整理比）：刪了不少任何字（Codex 第二輪：讀取時唯一可以自動刪的情況之一）。
+  // 比對只在 iframe 確定載入目前這一版時才做（`draftCheckReady`，審查 1）。
+  if (!input.differs()) return { kind: 'drop' };
   const sameBase = input.currentHash !== undefined && draft.baseHash === input.currentHash;
   if (!sameBase) return { kind: 'offer', changedSince: true };
-  if (!input.differs()) return { kind: 'drop' };
   return input.canEdit ? { kind: 'auto' } : { kind: 'offer', changedSince: false };
 }
 
@@ -289,6 +367,48 @@ export function pickDraftPlan(
     return { drop, pick: { draft, plan: decided } };
   }
   return { drop, pick: null };
+}
+
+/**
+ * 打開一篇稿件（校樣確定是目前這一版）時整篇留底怎麼處理（Codex 第二輪）。讀取時**唯一**會自動刪別人的情況是內容完全相同：
+ * 跟另一份留底相同（`contentKey` 一樣，留新的那份）、或跟目前存好的相同（`differs` 回 false）；另外過期與已發布／被取代照舊。
+ * 其餘一律隱藏不刪（`visibleDrafts`），再從新的開始一次處理一份（`pickDraftPlan`）。
+ */
+export function planDraftLoad(input: {
+  /** 這篇的所有留底，新的在前。 */
+  readonly drafts: readonly DraftBackup[];
+  readonly dismissed: readonly DraftOrigin[];
+  readonly now: number;
+  readonly state: JobState;
+  readonly currentHash: string | undefined;
+  readonly canEdit: boolean;
+  readonly differs: (draft: DraftBackup) => boolean;
+  /** 標題＋正規化後內文；一樣＝內容完全相同。 */
+  readonly contentKey: (draft: DraftBackup) => string;
+}): { remove: DraftBackup[]; pick: { draft: DraftBackup; plan: DraftAction } | null } {
+  const remove: DraftBackup[] = [];
+  const seen = new Set<string>();
+  const unique: DraftBackup[] = [];
+  for (const draft of input.drafts) {
+    const key = input.contentKey(draft);
+    if (seen.has(key)) remove.push(draft);
+    else {
+      seen.add(key);
+      unique.push(draft);
+    }
+  }
+  const { candidates } = visibleDrafts(unique, input.dismissed);
+  const { drop, pick } = pickDraftPlan(candidates, (draft) =>
+    planDraftRestore({
+      draft,
+      now: input.now,
+      state: input.state,
+      currentHash: input.currentHash,
+      canEdit: input.canEdit,
+      differs: () => input.differs(draft),
+    }),
+  );
+  return { remove: [...remove, ...drop], pick };
 }
 
 /**
