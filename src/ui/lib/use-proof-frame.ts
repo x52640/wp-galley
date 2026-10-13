@@ -115,6 +115,8 @@ export interface ProofFrameState {
   bodyMissing: boolean;
   /** iframe 載入完幾次；標記與進出編輯靠它在重載後重跑。 */
   loadCount: number;
+  /** iframe 最後一次載入時載的是哪一版（`shown.key`；還沒載入過是 null）。 */
+  loadedKey: string | null;
   /** 清單點過來、量得到的那一段（畫框用）。 */
   focused: BlockBox | undefined;
   handleLoad: () => void;
@@ -172,6 +174,13 @@ export function useProofFrame({
   const activeHighlightRef = useRef(activeHighlight);
   activeHighlightRef.current = activeHighlight;
   const [loadCount, setLoadCount] = useState(0);
+  /**
+   * iframe 最後一次載入的是哪一版（P5-T048 審查 1）：載入那一刻的 `shown.key`。版本換了、新的還沒載好之前，
+   * 文件裡還是上一份（例如打字到一半被換掉時使用者剛打的字），留底不能拿它比。
+   */
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const shownKeyRef = useRef(shown.key);
+  shownKeyRef.current = shown.key;
   const fixtures = isFixtureMode();
   /** 示範資料上一次拿到的校樣原始碼。 */
   const lastSrcDoc = useRef<string | null>(null);
@@ -266,6 +275,7 @@ export function useProofFrame({
     // 預覽回錯誤時 iframe 裡會是一段 JSON，不是校樣。要說出來，不要靜靜地空著。
     setBodyMissing(doc.querySelector('.preview-body') === null);
     onPreviewedRef.current?.();
+    setLoadedKey(shownKeyRef.current);
     setLoadCount((count) => count + 1);
     // 點文章裡的標記＝在右欄亮起那一項。處理函式屬於外層，iframe 自己不跑 script。
     doc.addEventListener('click', (event) => {
@@ -350,5 +360,5 @@ export function useProofFrame({
     });
   }, [activeHighlight, mode, loadCount]);
 
-  return { fixtures, srcDoc, loading, error, bodyMissing, loadCount, focused, handleLoad };
+  return { fixtures, srcDoc, loading, error, bodyMissing, loadCount, loadedKey, focused, handleLoad };
 }

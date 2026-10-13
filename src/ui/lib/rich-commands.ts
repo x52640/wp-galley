@@ -10,6 +10,7 @@ import {
 import { NEW_TAB_REL, NEW_TAB_TARGET, withNewTab } from '../../contract/link-target.js';
 import { countNonSpace, locateTextOffset } from './check-while-writing.js';
 import { emphasisFromComputed, type ComputedEmphasis, type FormatCommand, type FormatState } from './rich-format.js';
+import { safeRestoredEdit } from './draft-backup.js';
 
 /**
  * 直接在文章上改的格式指令：對校樣 iframe 的文件下指令（P5-T028）。
@@ -111,6 +112,22 @@ export function cleanEditedBody(body: Element, allow: RichAllow, original: reado
     allowedTags: allow.tags,
     allowedSchemes: allow.schemes,
   });
+  return { html: serializeRichEdit(result), dropped: result.dropped };
+}
+
+/**
+ * 留底的內文（D-047，P5-T048）→ 要填回編輯區的 HTML。外層視窗的 DOMParser 解析（惰性文件，script 不跑、圖片不載入），
+ * 照存檔同一套規則整理（`cleanRichEdit`，跟 `original` 一樣的區塊原樣保留），改過的區塊再拿掉事件屬性與
+ * `javascript:` 網址（`safeRestoredEdit`）。`dropped`：整理時拿掉的格式。
+ */
+export function cleanRestoredBody(html: string, allow: RichAllow, original: readonly RichUnit[] | null): { html: string; dropped: string[] } {
+  const parsed = new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html');
+  const result = safeRestoredEdit(
+    cleanRichEdit(domToRich(parsed.body.childNodes as unknown as ArrayLike<DomLike>), original, {
+      allowedTags: allow.tags,
+      allowedSchemes: allow.schemes,
+    }),
+  );
   return { html: serializeRichEdit(result), dropped: result.dropped };
 }
 

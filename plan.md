@@ -112,6 +112,7 @@ Codex／Claude Code／Antigravity 校稿、建議配圖，自己逐項決定、�
 - **D-044** 2026-10-12 Remus｜修訂 D-035「不做外殼 App」：做一個只負責啟動的 `Galley.app`（可放 Dock、有圖示），已在跑就只開瀏覽器、沒跑才開終端機跑 `start.command`；不常駐、不包 Node；`start.command` 改成等後端 `/api/health` 也通了才開瀏覽器（修啟動 502）｜→ [P8-T005](docs/tasks/P8-T005-launcher-app.md)
 - **D-045** 2026-10-12 Remus｜字數統計：中文（含日韓）一字算 1、英文數字一個詞算 1，標點空白不算；只算內文（含小標、清單、引用），不算標題、圖說、alt；打字時即時顯示在編輯區底部，發布面板也顯示；只顯示不擋發布｜→ [P5-T047](docs/tasks/P5-T047-word-count.md)
 - **D-046** 2026-10-12 Remus｜修訂 D-044：Galley.app 改成服務在背景跑、不開終端機；app 開著＝服務開著（Dock 有亮點），⌘Q／右鍵結束＝關服務，再點圖示＝開瀏覽器；訊息寫記錄檔，啟動失敗跳通知。不做閒置自動關閉；`start.command` 保留給想看即時訊息時用｜→ [P8-T006](docs/tasks/P8-T006-background-app.md)
+- **D-047** 2026-10-13 Remus｜打字模式沒存的標題與內文要自動留一份在這台電腦（瀏覽器儲存區，邊打邊存），頁面重新整理、當掉、休眠醒來後打開同一篇就恢復並明講；不自動寫成新版本、不送 WordPress；Vite 斷線重連不准自己重新整理頁面｜→ [P5-T048](docs/tasks/P5-T048-autosave-draft.md)
 
 ## 待裁定
 

@@ -503,6 +503,12 @@ export function Workspace({
             onPreviewed={onPreviewed}
             onPreviewHash={onPreviewHash}
             editing={editing}
+            draft={{
+              baseHash: knownHash,
+              canEdit: !editBlocked && !isFinished(job.state),
+              blockedNote: editBlockedNote,
+              onStartEdit: () => startEdit(null),
+            }}
             onEndEdit={endEdit}
             onEditTargetMissing={setEditNotice}
             selectionCheck={
@@ -582,7 +588,7 @@ export function Workspace({
                   )
                 : null
             }
-            onSaveEdit={async ({ editedBody, editedTitle, stay }) => {
+            onSaveEdit={async ({ editedBody, editedTitle, stay, onSaved }) => {
               // 存好之後換到別篇（Workspace 重用）：不碰存檔基準、編輯狀態、refresh（第二輪審查）。
               const origin = job.uuid;
               // 打字中自動存過的：基準用最後一次存成功的 hash（存好之後的重讀可能失敗，工作區快照還是舊的，Codex P1）。
@@ -592,6 +598,8 @@ export function Workspace({
                 job.uuid,
                 manualRevisionInput({ editedBody, editedTitle, from: editing, base }),
               );
+              // 存好了：留底（P5-T048）在重讀之前刪掉，不然重讀換版本、校樣重載時會被當成還沒存的內容。換篇了也照刪。
+              onSaved?.(saved.contentHash);
               if (!isOnJob(origin)) return saved.contentHash;
               if (stay) {
                 rememberSaved(saved.contentHash);
