@@ -12,6 +12,7 @@ import {
   type ListItem,
 } from './block-types.js';
 import { escapeTextNode, INLINE_TAGS } from '../core/html-blocks.js';
+import { textAlignOf, type TextAlign } from '../contract/text-align.js';
 
 /**
  * sanitize 過的 HTML → 區塊 IR。
@@ -67,6 +68,14 @@ function fontSizeFromClasses(element: Element): string | undefined {
     if (match && isSafeSlug(match[1]!)) return match[1]!;
   }
   return undefined;
+}
+
+/**
+ * 從 `has-text-align-center` 這種 class 讀出對齊（D-049）。跟字級一樣來自內容，只收三個值
+ * （`contract/text-align.ts`），其他值當作沒有——不會進區塊註解的 JSON。
+ */
+function textAlignFromClasses(element: Element): TextAlign | null {
+  return textAlignOf(getAttribute(element, 'class'));
 }
 
 /** 把元素的子節點序列化回行內 HTML。內容已 sanitize 過，直接沿用。 */
@@ -259,10 +268,12 @@ function parseElement(element: Element, defaults: BlockDefaults, depth: number):
     case 'p': {
       const html = innerHtml(element);
       if (html.length === 0) return null; // 空段落是排版殘骸，不要發出去
+      const textAlign = textAlignFromClasses(element);
       return {
         type: 'paragraph',
         html,
         fontSize: fontSizeFromClasses(element) ?? defaults.paragraphFontSize,
+        ...(textAlign === null ? {} : { textAlign }),
       };
     }
     case 'h1':
@@ -274,11 +285,13 @@ function parseElement(element: Element, defaults: BlockDefaults, depth: number):
       // h1 留給文章標題，正文的 h1 一律降成 h2。
       const raw = Number(element.tagName.slice(1));
       const level = (raw === 1 ? 2 : raw) as 2 | 3 | 4 | 5 | 6;
+      const textAlign = textAlignFromClasses(element);
       return {
         type: 'heading',
         level,
         html: innerHtml(element),
         fontSize: fontSizeFromClasses(element) ?? defaults.headingFontSize,
+        ...(textAlign === null ? {} : { textAlign }),
       };
     }
     case 'ul':

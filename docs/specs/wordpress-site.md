@@ -27,6 +27,56 @@
   `/wp/v2/taxonomies` 的 `rest_base` 比對 target 的分類法 REST 名稱，對不上就直接講要設什麼。
 - 「改成公開可能寄出電子報、自動分享」這條對任何站都成立（見文末），不只作者站台。
 
+## 段落與小標的對齊（D-049，P5-T050）
+
+程式：`src/contract/text-align.ts`（規則與預覽 CSS）、`src/wordpress/block-parse.ts`／`block-serialize.ts`、`src/templates/sanitize.ts`。
+只有段落與小標（`p`、`h2`、`h3`），只有靠左／置中／靠右；不做兩端對齊，清單、引用、圖片不做。
+
+**區塊格式（WordPress 7.0 起，站台是 7.1.3，使用者 2026-10-21 確認）**：段落與標題都不再有自己的對齊屬性，改用
+`supports.typography.textAlign`，值存在 `style.typography.textAlign`；正文 HTML 只多一個 class
+`has-text-align-{left|center|right}`，**沒有 inline style**。我們的輸出（逐字比對在 `tests/text-align.test.ts`）：
+
+```
+<!-- wp:paragraph {"fontSize":"medium","style":{"typography":{"textAlign":"center"}}} -->
+<p class="has-text-align-center has-medium-font-size">…</p>
+<!-- /wp:paragraph -->
+
+<!-- wp:heading {"level":3,"fontSize":"medium","style":{"typography":{"textAlign":"right"}}} -->
+<h3 class="wp-block-heading has-text-align-right has-medium-font-size">…</h3>
+<!-- /wp:heading -->
+```
+
+- class 順序：（標題的 `wp-block-heading`）→ 對齊 → 字級。屬性 JSON 順序：（`level`）→ `fontSize` → `style`。
+  編輯器驗證只比 HTML，class 也不看順序，但我們照核心實際輸出寫。
+- 靠左＝工具列拿掉設定、不輸出任何東西；讀回的 `has-text-align-left`（後台設的）照樣保留，輸出 `"textAlign":"left"`。
+- **讀回**：正文是 HTML（不讀區塊註解），所以只看 class。7.0 以前的舊寫法（段落 `{"align":"center"}`、標題
+  `{"textAlign":"right"}`）HTML 一樣是 `has-text-align-*`，讀回後改寫成新格式、對齊不掉；核心的 deprecated
+  本來就會把舊寫法遷移成新格式（不跳「區塊內容無效」）。
+- ⚠️ **新格式只有 7.0 以上認得**：站台若是 6.9 以下，`style.typography.textAlign` 不是段落的屬性，編輯器重算出來的 HTML
+  沒有對齊 class，會判定內容無效。站台版本 7.1.3 由使用者 2026-10-21 從後台確認；6.9 以下要改回舊寫法（段落 `align`、標題 `textAlign` 屬性，7.x 的 deprecated 仍收得下）。
+
+**按 Enter（照古騰堡，P5-T050 跟進）**：古騰堡在支援 `splitting` 的區塊（段落、標題）按 Enter 時呼叫 `__unstableSplitSelection`：
+游標在段尾（含空段）→ 後面插 `createBlock(預設區塊)`，**沒有任何屬性**的段落（小標尾端也是開一般段落），游標移過去；
+在有字的段首 → 前面插一個沒屬性的空段落、游標留在原段；在段中 → 拆兩半，兩半都帶原屬性（對齊保留；小標的後半轉成段落，
+`heading/transforms.js` 轉段落時照帶 `style.typography.textAlign`）。發布台打字模式照做（`src/ui/lib/align-enter.ts`，只處理有對齊的段落／小標；「段首／段尾」照畫面上看得到的內容判斷：軟換行、`&nbsp;`、全形空白算，佔位換行與會被摺掉的一般空白不算）。
+差異：**小標段中**按 Enter 由瀏覽器拆，後半仍是小標（沒對齊的小標本來就這樣）。出處：
+https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/store/actions.js （`__unstableSplitSelection`）、
+https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/components/writing-flow/use-input.js （Enter → split）、
+https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-library/src/heading/transforms.js 。
+
+**查證出處**（2026-10-21，WordPress 7.1.3；wordpress-develop `package.json` 的 `gutenberg.sha` 是 `dd294ab86ceaf9f3d7d42a09b78f399238ce8826`）：
+
+| 查什麼 | 出處 |
+| --- | --- |
+| 段落／標題沒有 `align`／`textAlign` 屬性、`supports.typography.textAlign: true` | https://github.com/WordPress/wordpress-develop/blob/7.1.3/src/wp-includes/blocks/paragraph/block.json 、 https://github.com/WordPress/wordpress-develop/blob/7.1.3/src/wp-includes/blocks/heading/block.json （6.9.0 還是段落 `align`、標題 `textAlign` 屬性，7.0.0 起改） |
+| save 不自己加對齊 class（段落只看 `style.typography.textAlign` 決定首字放大） | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-library/src/paragraph/save.js 、 https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-library/src/heading/save.js |
+| 對齊 class 由 block support 加、放在最前面（`clsx('has-text-align-…', props.className)`），只收 left／center／right | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/hooks/text-align.js （`addAssignedTextAlign`） |
+| 存檔 props 的 hook 順序（textAlign 在 fontSize 前）、`wp-block-heading` 最後加到最前面 | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/hooks/index.js 、 `hooks/generated-class-name.js`、`hooks/utils.js`（`createBlockSaveFilter` 優先序 0） |
+| 沒有 inline style（style-engine 的 typography 沒有 textAlign） | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/style-engine/src/styles/typography/index.ts |
+| 舊寫法的遷移 | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-library/src/paragraph/deprecated.js （`migrateTextAlign`：`align` → `style.typography.textAlign`）、 `heading/deprecated.js`＋`utils/migrate-text-align.js` |
+| 核心測試的實際輸出 | `test/integration/fixtures/blocks/core__paragraph__align-right.serialized.html`（`{"style":{"typography":{"textAlign":"right"}}}`＋`<p class="has-text-align-right">`）、`core__heading_align-textalign.serialized.html`（`wp-block-heading has-text-align-center alignwide`）、`core__media-text__media-right-custom-width__deprecated.serialized.html`（`{"…","fontSize":"large","style":{…}}`＋`has-text-align-right has-large-font-size`） |
+| 前台 CSS（校樣照抄） | https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-library/src/common.scss （`:root .has-text-align-center{text-align:center}` 等）；伺服器端 `wp-includes/block-supports/typography.php` 也加同一個 class |
+
 ## 更新既有文章（P5-T022，審查 #1、#13）
 
 程式：`src/wordpress/posts.ts`（`updateDraft`）、`src/core/service/publish.ts`（`runPublish`）。目前只有 target 設了
@@ -343,6 +393,8 @@ Application Password 實測）。
    而 `figure` 又在「認得的標籤」集合裡 → **整個表格被靜默丟掉**。
 2. 巢狀清單被當成 `<li>` 的純 HTML 內容輸出，沒有產生巢狀的 `wp:list` 區塊，
    Gutenberg 會認不出那是可編輯的清單。
+
+段落與小標的對齊（`has-text-align-*`、`style.typography.textAlign`）見上方「段落與小標的對齊」。
 
 **核心的區塊屬性順序不固定**（`#1379` 是 `{"id",…,"align"}`，`#870` 是
 `{"align","id",…}`），因為驗證比對的是 HTML 不是屬性 JSON。我們固定順序是安全的。

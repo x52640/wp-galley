@@ -3,6 +3,7 @@ import { api, describeError, isFixtureMode } from '../service/client.js';
 import type { LoadedJob } from '../service/types.js';
 import { attachEditInterceptors, markBlank } from './proof-edit-dom.js';
 import { attachFigureKeys } from './figure-caret.js';
+import { attachAlignEnter } from './align-enter.js';
 import { blockSnippet, contentHeight, type BlockBox } from './proof-frame.js';
 import { applyHighlights, clickedMarkKey, highlightKey, type ProofHighlight } from './proof-highlights.js';
 import type { ProofEditing } from './use-proof-editing.js';
@@ -313,6 +314,16 @@ export function useProofFrame({
         const body = doc.querySelector<HTMLElement>('.preview-body');
         if (body) markBlank(body);
         measure(measureToken.current);
+      },
+    });
+    // 對齊過的段落／小標段尾按 Enter：新段落不帶對齊（P5-T050，照古騰堡）。掛在圖片後面，圖片擋掉的 Enter 不再管。規則在 lib/align-enter.ts。
+    attachAlignEnter(doc, {
+      isEditing: () => editingRef.current,
+      changed: () => {
+        const body = doc.querySelector<HTMLElement>('.preview-body');
+        if (body) markBlank(body);
+        measure(measureToken.current);
+        refreshFormat();
       },
     });
     doc.addEventListener('selectionchange', () => {

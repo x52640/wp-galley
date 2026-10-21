@@ -14,8 +14,10 @@
  *     段落／清單項目／引用段落。
  *   - 模板沒允許的格式（底線、刪除線…）拿掉、字留著，並回報拿掉了什麼（`dropped`），讓畫面講出來。
  *
- * 規則的測試在 `tests/rich-text.test.ts`。本檔不得 import 任何東西（`tests/contract.test.ts`）。
+ * 規則的測試在 `tests/rich-text.test.ts`。本檔只 import 同資料夾的契約（`tests/contract.test.ts`）。
  */
+
+import { normalizeTextAlignClass } from './text-align.js';
 
 export interface RichText {
   readonly type: 'text';
@@ -319,9 +321,23 @@ function headingTag(ctx: Context, level: number): string | null {
   return order.find((tag) => isAllowed(ctx, tag)) ?? null;
 }
 
-function keepAttrs(ctx: Context, attrs: readonly RichAttr[]): RichAttr[] {
+/**
+ * `edit` 模式留下的屬性。`tag` 是**輸出**的標籤（h4 → h3 之後的那個）：對齊 class 只有段落與小標留得住、只收三個值
+ * （`text-align.ts`，D-049）；其他 class 原樣（sanitize 才是關卡）。
+ */
+function keepAttrs(ctx: Context, attrs: readonly RichAttr[], tag: string): RichAttr[] {
   if (ctx.options.mode === 'paste') return [];
-  return attrs.filter((attr) => !isEditorAttribute(attr.name));
+  const out: RichAttr[] = [];
+  for (const attr of attrs) {
+    if (isEditorAttribute(attr.name)) continue;
+    if (attr.name.toLowerCase() !== 'class') {
+      out.push(attr);
+      continue;
+    }
+    const value = normalizeTextAlignClass(tag, attr.value);
+    if (value !== null) out.push(value === attr.value ? attr : { name: attr.name, value });
+  }
+  return out;
 }
 
 function containsTag(nodes: readonly RichNode[], tag: string): boolean {
@@ -491,7 +507,7 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
     if (children.length === 0) return [];
     // 粗體包著區塊（`<b><p>…</p><p>…</p></b>`）：粗體套進每個區塊，不包住區塊。
     if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, true, italic);
-    const attrs = keepAttrs(ctx, node.attrs);
+    const attrs = keepAttrs(ctx, node.attrs, 'strong');
     return wrapStyled(ctx, wrapExcept(children, NO_BOLD, (inner) => [element('strong', attrs, inner)]), false, italic);
   }
   if (tag === 'i' || tag === 'em') {
@@ -502,7 +518,7 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
     }
     if (children.length === 0) return [];
     if (children.some((child) => isBlockish(child))) return wrapStyled(ctx, children, bold === true, true);
-    const attrs = keepAttrs(ctx, node.attrs);
+    const attrs = keepAttrs(ctx, node.attrs, 'em');
     return wrapStyled(ctx, wrapExcept(children, NO_ITALIC, (inner) => [element('em', attrs, inner)]), bold === true, false);
   }
 
@@ -514,7 +530,7 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
       return [element('div', [], children)];
     }
     // 標題本身就是粗的，樣式裡的粗體不另外包。
-    return [element(mapped, keepAttrs(ctx, node.attrs), children)];
+    return [element(mapped, keepAttrs(ctx, node.attrs, mapped), children)];
   }
 
   if (tag === 'a') {
@@ -530,7 +546,7 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
     const attrs =
       ctx.options.mode === 'paste'
         ? [{ name: 'href', value: accepted }]
-        : keepAttrs(ctx, node.attrs).map((attr) => (attr.name === 'href' ? { name: 'href', value: accepted } : attr));
+        : keepAttrs(ctx, node.attrs, 'a').map((attr) => (attr.name === 'href' ? { name: 'href', value: accepted } : attr));
     // 連結包著區塊（`<a>A<ul>…</ul></a>`、`<a><div>…</div>字</a>`）：連結拆到各段的字上，區塊邊界留著（審查 F2）。
     // 連結包著圖片區塊（`<a><figure><img></figure></a>`）：照古騰堡圖片連結的寫法把連結放進 figure 包住 img
     // （`<figure><a href><img></a></figure>`），連結不消失（第三輪審查 #4）。
@@ -562,7 +578,7 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
       if (tag !== 'li' && tag !== 'p' && tag !== 'figcaption') reportDropped(ctx, tag, children);
       return [element('div', [], children)];
     }
-    return [element(tag, keepAttrs(ctx, node.attrs), wrapStyled(ctx, children, bold === true, italic))];
+    return [element(tag, keepAttrs(ctx, node.attrs, tag), wrapStyled(ctx, children, bold === true, italic))];
   }
 
   if (tag === 'br' || tag === 'hr' || tag === 'img') {
@@ -570,19 +586,19 @@ function cleanNodeInner(ctx: Context, node: RichNode): RichNode[] {
       reportDropped(ctx, tag, []);
       return tag === 'br' ? [text(' ')] : [];
     }
-    return [element(tag, keepAttrs(ctx, node.attrs), [])];
+    return [element(tag, keepAttrs(ctx, node.attrs, tag), [])];
   }
 
   if (BLOCK_CONTAINERS.has(tag)) {
     reportDropped(ctx, tag, children);
     // div 只有行內內容時會變成段落；它身上的 class 留給那個段落（編輯器只會給 div 加樣式，那已經拿掉了）。
-    const attrs = tag === 'div' ? keepAttrs(ctx, node.attrs) : [];
+    const attrs = tag === 'div' ? keepAttrs(ctx, node.attrs, 'div') : [];
     return [element('div', attrs, wrapStyled(ctx, children, bold === true, italic))];
   }
 
   // 沒給 allowedTags（後端）：認不得的標籤留給 sanitize 決定，這裡不擋；包著區塊的話拆到各段上。
   if (ctx.allowed === null && !STYLE_WRAPPERS.has(tag)) {
-    const attrs = keepAttrs(ctx, node.attrs);
+    const attrs = keepAttrs(ctx, node.attrs, tag);
     return wrapStyled(ctx, distribute(children, (run) => [element(tag, attrs, run)]), bold === true, italic);
   }
   // 其他（span、font、mark、u…）：拆掉包裝，字留著。樣式裡的粗斜體轉成 strong／em（明講「不粗／不斜」的由 cleanNode 留標記）。

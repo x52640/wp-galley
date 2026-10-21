@@ -241,7 +241,8 @@ export function useDraftBackup({
       throttle.call();
     };
     const observer = new MutationObserver(changed);
-    const watch = { subtree: true, childList: true, characterData: true };
+    // class 也要看：段落／小標的對齊（D-049）是直接改 class，不經過打字。
+    const watch = { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] };
     observer.observe(body, watch);
     if (title) observer.observe(title, watch);
     const flush = (): void => {

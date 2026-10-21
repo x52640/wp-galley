@@ -2,6 +2,7 @@ import sanitizeHtml from 'sanitize-html';
 import type { TemplateManifest } from './types.js';
 import { safeHref } from '../contract/rich-text.js';
 import { normalizeLinkAttrs } from '../contract/link-target.js';
+import { normalizeTextAlignClass, TEXT_ALIGN_CLASSES, TEXT_ALIGN_TAGS } from '../contract/text-align.js';
 
 /**
  * 正文 HTML 清理。
@@ -33,6 +34,16 @@ function buildOptions(manifest: TemplateManifest, onRejectedLink: () => void = (
   for (const [tag, patterns] of Object.entries(manifest.allowedClasses)) {
     allowedClasses[tag] = patterns.map(toClassMatcher);
   }
+  // 段落與小標的對齊（D-049）：只收 `has-text-align-left|center|right` 三個 class，規則在 contract/text-align.ts。
+  // 寫在程式裡、不寫進各模板 manifest：這是 WordPress 核心的寫法，不是某個站的慣例。模板本來就不收 class 的標籤不放行。
+  // inline style（`text-align:`）照舊不收：style 不在任何 allowedAttributes。
+  for (const tag of TEXT_ALIGN_TAGS) {
+    const classAllowed = (manifest.allowedAttributes[tag] ?? []).some((attr) => attr.toLowerCase() === 'class');
+    if (!classAllowed || !manifest.allowedTags.some((allowed) => allowed.toLowerCase() === tag)) continue;
+    // 沒有 allowedClasses 那一項＝sanitize-html 不限 class，這時不能加：一加反而變成只收對齊。
+    const existing = allowedClasses[tag];
+    if (existing !== undefined) allowedClasses[tag] = [...existing, ...TEXT_ALIGN_CLASSES];
+  }
 
   return {
     allowedTags: [...manifest.allowedTags],
@@ -48,6 +59,9 @@ function buildOptions(manifest: TemplateManifest, onRejectedLink: () => void = (
     transformTags: {
       // 瀏覽器編輯器與外來內容常用 b／i；模板認得的是 strong／em。拆掉的話粗體會靜靜消失（P5-T028）。
       ...renameTags(manifest),
+      // 一塊只留一個對齊 class（PR #38 Codex 第二輪）：`has-text-align-center has-text-align-right` 兩個都留的話，
+      // 預覽 CSS 照樣式順序顯示靠右、區塊轉換取第一個發成置中——核准的跟發布的不一樣。規則跟編輯整理同一份（contract/text-align.ts）。
+      ...Object.fromEntries(TEXT_ALIGN_TAGS.map((tag) => [tag, keepOneTextAlign])),
       // 連結網址跟編輯整理用同一個規則（contract/rich-text.ts 的 safeHref，審查 F5）：不收的整個連結拆掉、字留著，
       // 不留一個沒有 href 的空殼 <a>。站內路徑 `/about` 與錨點 `#x` 收，`../post` 之類的相對路徑不收。
       a: (tagName: string, attribs: sanitizeHtml.Attributes) => {
@@ -73,6 +87,15 @@ function renameTags(manifest: TemplateManifest): Record<string, string> {
     if (allowed.has(to) && !allowed.has(from)) renames[from] = to;
   }
   return renames;
+}
+
+function keepOneTextAlign(tagName: string, attribs: sanitizeHtml.Attributes): sanitizeHtml.Tag {
+  const cls = attribs['class'];
+  if (cls === undefined) return { tagName, attribs };
+  const next = normalizeTextAlignClass(tagName, cls);
+  if (next === cls) return { tagName, attribs };
+  const { class: _dropped, ...rest } = attribs;
+  return { tagName, attribs: next === null ? rest : { ...rest, class: next } };
 }
 
 /** 不在任何 allowlist 裡的標籤名：transformTags 換成它，sanitize 就會拆掉它、留下字。 */

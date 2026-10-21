@@ -16,8 +16,22 @@ import {
 const ALL = ['p', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'strong', 'em', 'blockquote', 'figure', 'figcaption', 'img', 'br', 'hr'];
 
 describe('按鈕依模板 allowedTags 決定', () => {
-  it('全部允許時十顆都在，順序固定', () => {
-    expect(availableCommands(ALL)).toEqual(['link', 'bold', 'italic', 'h2', 'h3', 'paragraph', 'ul', 'ol', 'quote', 'hr']);
+  it('全部允許時十三顆都在，順序固定（對齊三顆，P5-T050）', () => {
+    expect(availableCommands(ALL)).toEqual([
+      'link',
+      'bold',
+      'italic',
+      'h2',
+      'h3',
+      'paragraph',
+      'align-left',
+      'align-center',
+      'align-right',
+      'ul',
+      'ol',
+      'quote',
+      'hr',
+    ]);
   });
 
   it('沒有 h2／blockquote／hr 的模板就不出現那幾顆', () => {
@@ -27,12 +41,15 @@ describe('按鈕依模板 allowedTags 決定', () => {
       'italic',
       'h3',
       'paragraph',
+      'align-left',
+      'align-center',
+      'align-right',
       'ul',
     ]);
   });
 
   it('只有 li 沒有 ul 不算有項目清單', () => {
-    expect(availableCommands(['p', 'li', 'ol'])).toEqual(['paragraph', 'ol']);
+    expect(availableCommands(['p', 'li', 'ol'])).toEqual(['paragraph', 'align-left', 'align-center', 'align-right', 'ol']);
   });
 });
 
