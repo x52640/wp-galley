@@ -47,6 +47,7 @@ import {
   InsertSaveError,
   lockWriting,
   placedFigure,
+  placedOnBase,
   prefixNodes,
   runInsertWhileWriting,
   savedAfterIndex,
@@ -148,6 +149,8 @@ export interface InsertPlaceRequest {
   put: (afterBlockIndex: number) => Promise<PlacedRevision>;
   /** 放好之後（關面板、重讀）。 */
   done: () => void | Promise<void>;
+  /** 新版本核對過、合併回編輯區之後：存檔基準推進到它（Codex P1：對不上就不推進，下次存檔照舊基準、被後端擋）。 */
+  merged?: (contentHash: string) => void;
 }
 
 export interface PlacedRevision {
@@ -180,7 +183,9 @@ export function useProofEditing({
   /** 重量區塊與高度（身分不變）。 */
   measure: (token: number) => void;
   measureToken: MutableRefObject<number>;
-  onSaveEdit: ((save: { editedBody?: string; editedTitle?: string; stay?: boolean }) => Promise<string>) | undefined;
+  onSaveEdit:
+    | ((save: { editedBody?: string; editedTitle?: string; stay?: boolean; onSavedHtml?: (publishHtml: string) => void }) => Promise<string>)
+    | undefined;
   onEndEdit: ((notice?: string) => void) | undefined;
   onEditTargetMissing: ((notice: string) => void) | undefined;
   /** 這次打字的留底作廢（取消、沒改就離開；D-047）。 */
@@ -208,6 +213,11 @@ export function useProofEditing({
   const originalClean = useRef<string | null>(null);
   /** 進入編輯那一刻的頂層區塊：存檔時沒動過的區塊原樣保留，只整理改過的（P5-T028 審查）。 */
   const originalUnits = useRef<RichUnit[] | null>(null);
+  /**
+   * 編輯區對應的那一版「會發布的正文」（進入編輯時的版本，之後換成這次打字中自己存的、放好圖的那一版）：
+   * 打字中插圖時核對後端回的新版本是不是「這一版＋這張圖」（Codex P1）。
+   */
+  const basePublish = useRef<string | null>(null);
   /** 進入編輯那一刻的標題（P5-T029）：取消時還原、存檔時比對有沒有改。 */
   const originalTitle = useRef<string | null>(null);
   const savedTitle = readString(job.currentRevision?.templateData ?? null, 'title', job.title ?? '');
@@ -352,6 +362,7 @@ export function useProofEditing({
       originalBody.current = null;
       originalClean.current = null;
       originalUnits.current = null;
+      basePublish.current = null;
       setFormatState(null);
       setLinkEditor(null);
       setDropWarning(null);
@@ -367,6 +378,7 @@ export function useProofEditing({
       originalUnits.current = snapshotBody(body);
       originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
       originalTitle.current = title?.textContent ?? null;
+      basePublish.current = job.currentRevision?.publishHtml ?? null;
       // 空文章（新稿件剛建好）：放一個有高度的空段落，游標才有地方停（存檔時照樣整理掉）。
       if (isBlankBody(body.innerHTML)) body.innerHTML = '<p><br></p>';
     }
@@ -428,6 +440,10 @@ export function useProofEditing({
    * 打字模式按「查證這句」或「用此段配圖」時內容有會被拿掉的格式、正在問「照樣存」：存好之後要做的事。
    */
   const pendingCheck = useRef<((force: true) => Promise<void>) | null>(null);
+  /** 打字中自己存好一版：之後核對插圖新版本用它當基準。 */
+  const rememberBase = (publishHtml: string): void => {
+    basePublish.current = publishHtml;
+  };
   /** 插圖擋打字中（P5-T049）。ref 給事件處理用：擋打字期間恢復留底、連結、格式指令都不做（審查 1）。 */
   const [placing, setPlacing] = useState(false);
   const placingRef = useRef(false);
@@ -559,7 +575,7 @@ export function useProofEditing({
     setHold(started);
     let saved: string | null = null;
     await saveThenAct({
-      save: async () => (await onSaveEdit?.({ ...plan.save, stay: true })) ?? null,
+      save: async () => (await onSaveEdit?.({ ...plan.save, stay: true, onSavedHtml: rememberBase })) ?? null,
       onSaved: (savedHash) => {
         saved = savedHash;
         setSaving(false);
@@ -694,7 +710,7 @@ export function useProofEditing({
       save: async ({ save, html }) => {
         let savedHash: string | undefined;
         try {
-          savedHash = await onSaveEdit?.({ ...save, stay: true });
+          savedHash = await onSaveEdit?.({ ...save, stay: true, onSavedHtml: rememberBase });
         } catch (cause) {
           holdSettle(null);
           throw new Error(describeError(cause));
@@ -731,7 +747,10 @@ export function useProofEditing({
         holdSettle(placed.contentHash);
         // 照樣存換過畫面：編輯區的區塊就是存好那一版的區塊，位置用換算後的。
         const at = replaced ? afterIndex : domIndex;
-        const figure = placedFigure(htmlBlocks(placed.publishHtml), afterIndex, anchorText);
+        const placedBlocks = htmlBlocks(placed.publishHtml);
+        const known = basePublish.current === null ? null : htmlBlocks(basePublish.current);
+        // 整份核對：新版本＝我們知道的那一版＋這張圖（Codex P1）。別處改過就不合併。
+        const figure = placedOnBase(placedBlocks, known, afterIndex) ? placedFigure(placedBlocks, afterIndex, anchorText) : null;
         // 基準：存檔那一刻的內容＋插入的圖（不拿當下畫面）。
         const baseline = figure === null ? null : withFigure(doc, snapshot, at, figure);
         if (figure === null || baseline === null) return false;
@@ -740,22 +759,24 @@ export function useProofEditing({
         originalUnits.current = snapshotHtml(placed.publishHtml);
         originalClean.current = cleanEditedBody(baseline, allowRef.current, originalUnits.current).html;
         originalBody.current = baseline.innerHTML;
+        basePublish.current = placed.publishHtml;
         setAutoSaved(true);
         markBlank(body);
         measure(measureToken.current);
+        request.merged?.(placed.contentHash);
         onPlaced?.(placed.contentHash);
         return true;
       },
       reload: () => {
         // 畫面跟存檔那一刻不一樣（有還沒存的字）：不能重載，留在打字模式講清楚（審查 1）。
         if (body.innerHTML !== snapshot) {
-          setActError('圖已經放進正文，但編輯區對不上、沒顯示出來；你剛打的字還沒存。按「儲存」會照編輯區存（圖會被拿掉，可以再插一次）。');
+          setActError('圖已經放進正文，但編輯區對不上、沒顯示出來；你剛打的字還沒存。這篇可能在別處改過，按「儲存」會被擋下來，先把剛打的字複製起來再按取消重新進來。');
           return;
         }
         // 對不上就不硬合併：之前都存過、期間擋著打字，結束打字模式照後端的版本重載不會掉字。
         onDiscardDraft?.();
         originalBody.current = null;
-        onEndEditRef.current?.('圖已經放進正文；打的字都存好了，校樣照存好的版本重新載入，要再改請按「改原文」。');
+        onEndEditRef.current?.('圖已經放進正文；打的字都存好了。這篇可能在別處改過，校樣照最新的版本重新載入，要再改請按「改原文」。');
       },
       still: stillHere,
       done: request.done,

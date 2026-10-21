@@ -83,6 +83,21 @@ export function placedFigure(
 }
 
 /**
+ * 後端回的新版本必須是「我們知道的那一版＋這張圖」（Codex P1）：拿掉第 `afterIndex + 1` 塊之後，其餘每一塊跟基準逐塊相同（HTML 原樣比，格式改了也算）。
+ * 別的分頁在這段期間改過別段時，只比前一塊會合併成功、編輯區卻留著舊段落，下次存檔就默默蓋掉別處的修改——所以整份比。
+ * 基準不知道（null）一律當成對不上。後端 `placeMedia` 不收基準版本，擋不了，只能在這裡核對。
+ */
+export function placedOnBase(
+  placed: readonly { html: string }[],
+  base: readonly { html: string }[] | null,
+  afterIndex: number,
+): boolean {
+  if (base === null || placed.length !== base.length + 1) return false;
+  const rest = placed.filter((_, index) => index !== afterIndex + 1);
+  return rest.every((block, index) => block.html.trim() === base[index]!.html.trim());
+}
+
+/**
  * `placed`＝圖放好、留在打字模式；`confirm`＝正在問「照樣存」，還沒存也沒放；`reloaded`＝放好了但合併不回編輯區，結束打字模式重載；
  * `abandoned`＝中途換了篇或離開打字模式：不放（或放好了不合併），也不動畫面（審查 7）。
  */

@@ -54,6 +54,7 @@ export function InsertImagePanel({
   writer = null,
   currentHash,
   placeAsset,
+  onMerged,
 }: {
   job: LoadedJob;
   /** 插在第幾個頂層區塊之後；-1＝最前面。跟 `placeMedia` 同一套索引。 */
@@ -73,6 +74,8 @@ export function InsertImagePanel({
   currentHash?: string | undefined;
   /** 放圖（回新版本）；沒給就直接叫 `api.placeMedia`。打字模式要上層記下新版本當存檔基準。 */
   placeAsset?: (assetId: number, afterBlockIndex: number) => Promise<Revision>;
+  /** 打字模式：放好、核對過並合併回編輯區之後（存檔基準推進到它）。 */
+  onMerged?: (contentHash: string) => void;
 }): JSX.Element {
   const place = useAction();
   const pick = useAction();
@@ -92,7 +95,7 @@ export function InsertImagePanel({
       return;
     }
     setAwaitingConfirm(false);
-    const result = await writer.place((index) => putAsset(assetId, index), onPlaced);
+    const result = await writer.place((index) => putAsset(assetId, index), onPlaced, onMerged);
     if (result === 'confirm') {
       setAwaitingConfirm(true);
       // 剛上傳的圖要出現在上面的清單（回去改了之後還能再選）。

@@ -164,7 +164,12 @@ export function ProofView({
    * 失敗就丟錯，留在編輯中。`onSaved`（存好要離開打字模式時才有）：存成功、重讀之前帶著存好的 hash 呼叫，
    * 留底在這時處理（沒再打字就刪，P5-T048）。
    */
-  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string; stay?: boolean; onSaved?: (savedHash: string) => void }) => Promise<string>;
+  onSaveEdit?: (save: {
+    editedBody?: string;
+    editedTitle?: string;
+    stay?: boolean;
+    onSaved?: (savedHash: string, publishHtml: string) => void;
+  }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
   /** 進入編輯時要找的字與段落都標不出來（游標掉在文章開頭）：要在頂端講的話（P5-T037）。 */
@@ -219,9 +224,12 @@ export function ProofView({
         : (save) => {
             const draftState = draftRef.current;
             const token = draftState?.beginSave() ?? null;
+            const { onSavedHtml, ...rest } = save;
             return onSaveEdit({
-              ...save,
-              onSaved: (savedHash) => {
+              ...rest,
+              onSaved: (savedHash, publishHtml) => {
+                // 打字中插圖核對新版本的基準（Codex P1）。
+                onSavedHtml?.(publishHtml);
                 if (token === null) return;
                 // 先存再做（stay）留在打字模式：留底照寫，基準換成這次自己存好的那一版（只在這裡換，Codex 第一輪 1）。
                 if (save.stay === true) draftState?.rebase(token, savedHash);
@@ -299,7 +307,7 @@ export function ProofView({
   // 打字模式插圖（P5-T049）：面板拿到的放圖與「請 AI 配一張」先存再做。
   const insertWriter = isEditing
     ? (afterDomIndex: number): InsertWriter => ({
-        place: (put, done) => edit.placeWhileWriting({ afterDomIndex, put, done }),
+        place: (put, done, merged) => edit.placeWhileWriting({ afterDomIndex, put, done, ...(merged === undefined ? {} : { merged }) }),
         confirmPending: edit.dropWarning !== null,
         withSaved: async (act) => {
           // 索引在存之前、用同一份畫面換算（存檔整理會拿掉空段落等）。

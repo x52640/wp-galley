@@ -67,7 +67,8 @@ agent、wordpress、factcheck spec。
 - 已通過驗證：`npm run verify` 綠；`?fixtures=1` 截圖走過打字模式插圖（打一段不存 → 插 → 圖出現、字在、留在打字模式 → 再打 → 儲存）、
   打字模式「請 AI 配一張」（先存、卡片位置對、留在打字模式）、最後一張圖後按 →→／↓ 再 Enter 或直接打字（新段落是乾淨 `<p>`、存後靠左）
 - 獨立審查一輪（2026-10-21）七條已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2395 測試綠，`?fixtures=1` 截圖走過空段落下插圖、圖片下一段段首 Backspace、圖片上貼上
-- 下一步：PR、Codex 審查；合併後移到 CURRENT_TASK 待驗證表、status 改 done
+- PR #37 Codex 第一輪 P1（別處改過別段時只比前一塊會誤合併、之後存檔蓋掉別處修改）已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2401 測試綠，`?fixtures=1` 重跑有改先存、沒改直接放、空段落下插三條都照常合併
+- 下一步：Codex 下一輪；合併後移到 CURRENT_TASK 待驗證表、status 改 done
 - Blocker：無
 
 ## 完成結果
@@ -90,3 +91,8 @@ agent、wordpress、factcheck spec。
   5. 圖片按鍵與貼上處理在正文擋打字（`contenteditable` 不是 true）時不動 DOM。
   6. 面板的「校樣上方在問照樣存」提示只在真的還在問時顯示（`InsertWriter.confirmPending`；按儲存離開或回去改就收）。
   7. 放圖中途換篇或離開打字模式回 `abandoned`，不呼叫 `done`（不關新那篇的面板、不重讀）、不放開別篇的編輯區。
+- Codex 第一輪 P1：合併前整份核對後端回的新版本＝「編輯區對應的那一版＋這張圖」（`placedOnBase`：拿掉插入的那塊後逐塊 HTML 相同、塊數剛好多一）。
+  「對應的那一版」＝進入編輯時的 `publishHtml`，之後換成打字中自己存好的（存檔回呼帶回 `publishHtml`）、放好圖的那一版。
+  對不上就走既有的不硬合併：畫面跟存檔那一刻一樣就結束打字模式照最新版本重載並講「可能在別處改過」；不一樣就留在打字模式講清楚。
+  存檔基準（`rememberSaved`）改成核對過、合併成功才推進（`onMerged`），對不上時下次存檔用舊基準、被後端 409 擋下，不會默默蓋掉。
+  後端 `placeMedia` 不收基準版本（路由只收 `afterBlockIndex`、revision 也沒有 parent），要後端擋得改 `src/server`、`src/core`，不在本 Task write_paths，沒做。

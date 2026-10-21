@@ -25,7 +25,12 @@ import type { PlacedRevision } from '../lib/use-proof-editing.js';
 export interface InsertWriter {
   /** 校樣上方正在問「照樣存」（按了「儲存」或「回去改」就不問了，面板的提示跟著收）。 */
   confirmPending: boolean;
-  place: (put: (afterBlockIndex: number) => Promise<PlacedRevision>, done: () => void | Promise<void>) => Promise<InsertResult>;
+  /** `merged`：新版本核對過、合併回編輯區之後（存檔基準推進到它；對不上不呼叫）。 */
+  place: (
+    put: (afterBlockIndex: number) => Promise<PlacedRevision>,
+    done: () => void | Promise<void>,
+    merged?: (contentHash: string) => void,
+  ) => Promise<InsertResult>;
   withSaved: (act: (at: { afterBlockIndex: number; contentHash: string | null }) => Promise<void>) => Promise<void>;
 }
 

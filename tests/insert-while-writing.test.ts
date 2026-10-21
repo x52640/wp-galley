@@ -14,6 +14,7 @@ import {
 import {
   InsertSaveError,
   placedFigure,
+  placedOnBase,
   runInsertWhileWriting,
   savedAfterIndex,
   savedAnchor,
@@ -117,6 +118,37 @@ describe('新版本裡放進來的那塊圖：對得上才合併回編輯區', (
 
   it('插在最前面：不用比前一塊', () => {
     expect(placedFigure([blocks[1]!, blocks[0]!], -1, null)).toBe(blocks[1]!.html);
+  });
+});
+
+describe('新版本必須是「我們知道的那一版＋這張圖」（Codex P1：別的分頁改過就不合併）', () => {
+  const base = [
+    { tag: 'p', text: '一', html: '<p>一</p>' },
+    { tag: 'p', text: '二', html: '<p>二</p>' },
+  ];
+  const fig = { tag: 'figure', text: '', html: '<figure class="wp-block-image"><img class="wp-image-9"></figure>' };
+
+  it('只多了那張圖：對得上', () => {
+    expect(placedOnBase([base[0]!, fig, base[1]!], base, 0)).toBe(true);
+    expect(placedOnBase([fig, ...base], base, -1)).toBe(true);
+    expect(placedOnBase([...base, fig], base, 1)).toBe(true);
+  });
+
+  it('別段被別處改過（前一塊照樣對得上）：對不上', () => {
+    expect(placedOnBase([base[0]!, fig, { tag: 'p', text: '二改', html: '<p>二改</p>' }], base, 0)).toBe(false);
+  });
+
+  it('別處多加或刪了一段：對不上', () => {
+    expect(placedOnBase([base[0]!, fig, base[1]!, { tag: 'p', text: '三', html: '<p>三</p>' }], base, 0)).toBe(false);
+    expect(placedOnBase([base[0]!, fig], base, 0)).toBe(false);
+  });
+
+  it('只差格式（文字一樣）也算改過：對不上', () => {
+    expect(placedOnBase([base[0]!, fig, { tag: 'p', text: '二', html: '<p><strong>二</strong></p>' }], base, 0)).toBe(false);
+  });
+
+  it('不知道基準：當成對不上（不硬合併）', () => {
+    expect(placedOnBase([base[0]!, fig, base[1]!], null, 0)).toBe(false);
   });
 });
 
@@ -347,6 +379,18 @@ describe('接線：校樣在打字模式也畫「在這裡插圖」、圖片按�
       expect(at, name).toBeGreaterThan(0);
       expect(editing.slice(at, at + 400), name).toContain('placingRef.current');
     }
+  });
+
+  it('合併前核對整份新版本＝已知那一版＋這張圖；存檔基準合併成功才推進（Codex P1）', () => {
+    const at = editing.indexOf('merge: (placed');
+    const merge = editing.slice(at, at + 2000);
+    expect(merge).toContain('placedOnBase(');
+    expect(merge).toContain('request.merged');
+    const workspace = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
+    const start = workspace.indexOf('placeAsset={');
+    const place = workspace.slice(start, workspace.indexOf('onMerged={', start));
+    expect(place).not.toContain('rememberSaved');
+    expect(workspace.slice(workspace.indexOf('onMerged={', start), workspace.indexOf('onMerged={', start) + 400)).toContain('rememberSaved(contentHash)');
   });
 
   it('合併的基準是存檔那一刻的內容＋插入的圖，不拿當下畫面（審查 1）', () => {
