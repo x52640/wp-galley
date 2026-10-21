@@ -253,22 +253,44 @@ export function insertFigureInEditor(body: Element, afterDomIndex: number, figur
 }
 
 /**
- * 擋打字：正文與標題暫時不可編輯（游標位置記下來，放開時放回去）。回傳放開的函式。
- * 只改 `contenteditable`，不動內容：留底的 MutationObserver 不看屬性，不會當成打字。
+ * 擋打字：正文與標題暫時不可編輯，游標位置記下來，放開時放回去。只改 `contenteditable`，不動內容：留底的 MutationObserver 不看屬性，不會當成打字。
+ *
+ * 游標記的是**當下的節點與位置**（不是活的 Range：活的 Range 在正文被換掉時會被瀏覽器改成指向 body 開頭，Codex 第三輪 2）。
+ * 放開時只有原本那個節點還在文件裡才放回去；`forget()`（照樣存換掉正文、已經重新定位過游標）之後一律不動。
  */
-export function lockWriting(doc: Document, body: HTMLElement, title: HTMLElement | null): () => void {
+export function lockWriting(
+  doc: Document,
+  body: HTMLElement,
+  title: HTMLElement | null,
+): { unlock: () => void; forget: () => void } {
   const selection = doc.getSelection();
-  const saved = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+  let saved: { startNode: Node; startOffset: number; endNode: Node; endOffset: number } | null = null;
+  if (selection && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    saved = { startNode: range.startContainer, startOffset: range.startOffset, endNode: range.endContainer, endOffset: range.endOffset };
+  }
   const titleMode = title?.getAttribute('contenteditable') ?? null;
   body.setAttribute('contenteditable', 'false');
   title?.setAttribute('contenteditable', 'false');
-  return () => {
-    body.setAttribute('contenteditable', 'true');
-    if (title && titleMode !== null) title.setAttribute('contenteditable', titleMode);
-    if (saved !== null && doc.contains(saved.startContainer)) {
+  return {
+    forget: () => {
+      saved = null;
+    },
+    unlock: () => {
+      body.setAttribute('contenteditable', 'true');
+      if (title && titleMode !== null) title.setAttribute('contenteditable', titleMode);
+      if (saved === null || !doc.contains(saved.startNode) || !doc.contains(saved.endNode)) return;
+      const range = doc.createRange();
+      try {
+        range.setStart(saved.startNode, saved.startOffset);
+        range.setEnd(saved.endNode, saved.endOffset);
+      } catch {
+        // 節點還在但變短了（偏移超出）：不動游標。
+        return;
+      }
       const current = doc.getSelection();
       current?.removeAllRanges();
-      current?.addRange(saved);
-    }
+      current?.addRange(range);
+    },
   };
 }

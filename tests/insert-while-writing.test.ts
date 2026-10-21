@@ -13,6 +13,7 @@ import {
 } from '../src/ui/lib/figure-caret.js';
 import {
   InsertSaveError,
+  lockWriting,
   placedFigure,
   placedMatchesBase,
   placedOnBase,
@@ -396,6 +397,85 @@ describe('圖片前後按 Backspace／Delete、在圖片上貼上（審查 4：�
   });
 });
 
+describe('擋打字放開時的游標（Codex 第三輪 2：照樣存換掉正文之後不准把游標蓋回文章開頭）', () => {
+  /** 最小的假文件：只做 lockWriting 用到的。range 是「活的」：換掉正文時會被瀏覽器改成指向 body。 */
+  function fakeDoc(start: { name: string }) {
+    const connected = new Set<object>([start]);
+    const live = { startContainer: start as object, startOffset: 3, endContainer: start as object, endOffset: 3, collapsed: true };
+    const added: { node: object; offset: number }[] = [];
+    let removed = 0;
+    const attrs = new Map<string, string>([['contenteditable', 'true']]);
+    const body = {
+      setAttribute: (name: string, value: string) => attrs.set(name, value),
+      getAttribute: (name: string) => attrs.get(name) ?? null,
+    };
+    const selection = {
+      rangeCount: 1,
+      getRangeAt: () => ({ ...live, cloneRange: () => live }),
+      removeAllRanges: () => {
+        removed += 1;
+      },
+      addRange: (range: { startContainer: object; startOffset: number }) => {
+        added.push({ node: range.startContainer, offset: range.startOffset });
+      },
+    };
+    const doc = {
+      getSelection: () => selection,
+      contains: (node: object) => connected.has(node) || node === body,
+      createRange: () => {
+        const range = { startContainer: null as object | null, startOffset: 0, endContainer: null as object | null, endOffset: 0 };
+        return {
+          ...range,
+          setStart(node: object, offset: number) {
+            this.startContainer = node;
+            this.startOffset = offset;
+          },
+          setEnd(node: object, offset: number) {
+            this.endContainer = node;
+            this.endOffset = offset;
+          },
+        };
+      },
+    };
+    /** 照樣存換掉正文：原本的文字節點拿掉，活的 range 被改成 body 的 0。 */
+    const replaceBody = (): void => {
+      connected.delete(start);
+      live.startContainer = body;
+      live.startOffset = 0;
+      live.endContainer = body;
+      live.endOffset = 0;
+    };
+    return { doc: doc as unknown as Document, body: body as unknown as HTMLElement, added, removed: () => removed, attrs, replaceBody };
+  }
+
+  it('沒換正文：放開時游標回到原本的節點與位置', () => {
+    const start = { name: 'text' };
+    const fake = fakeDoc(start);
+    const lock = lockWriting(fake.doc, fake.body, null);
+    expect(fake.attrs.get('contenteditable')).toBe('false');
+    lock.unlock();
+    expect(fake.attrs.get('contenteditable')).toBe('true');
+    expect(fake.added).toEqual([{ node: start, offset: 3 }]);
+  });
+
+  it('換掉正文（原本的節點不在了）：不動游標（留著換正文時重新定位的那個）', () => {
+    const fake = fakeDoc({ name: 'text' });
+    const lock = lockWriting(fake.doc, fake.body, null);
+    fake.replaceBody();
+    lock.unlock();
+    expect(fake.added).toEqual([]);
+    expect(fake.removed()).toBe(0);
+  });
+
+  it('換正文時明講作廢（forget）：就算節點還在也不還原', () => {
+    const fake = fakeDoc({ name: 'text' });
+    const lock = lockWriting(fake.doc, fake.body, null);
+    lock.forget();
+    lock.unlock();
+    expect(fake.added).toEqual([]);
+  });
+});
+
 describe('接線：校樣在打字模式也畫「在這裡插圖」、圖片按鍵掛在 iframe 文件上', () => {
   const proofView = readFileSync(new URL('../src/ui/components/ProofView.tsx', import.meta.url), 'utf8');
   const frame = readFileSync(new URL('../src/ui/lib/use-proof-frame.ts', import.meta.url), 'utf8');
@@ -440,10 +520,26 @@ describe('接線：校樣在打字模式也畫「在這裡插圖」、圖片按�
 
   it('放圖不准重入；照樣存等待中與放圖中面板都鎖住（Codex 第二輪 2）', () => {
     const at = editing.indexOf('const placeWhileWriting =');
-    expect(editing.slice(at, at + 600)).toContain('if (placingRef.current || insertAwaitingRef.current)');
-    expect(proofView).toMatch(/busy: edit\.placing \|\| edit\.insertAwaiting/);
+    expect(editing.slice(at, at + 700)).toContain('placingRef.current || insertAwaitingRef.current');
     const panel = readFileSync(new URL('../src/ui/components/InsertImagePanel.tsx', import.meta.url), 'utf8');
     expect(panel).toMatch(/const busy = place\.busy \|\| pick\.busy \|\| ai\.busy \|\| writer\?\.busy === true/);
+  });
+
+  it('放圖跟所有存檔互斥（Codex 第三輪 1）：存檔中不給放、放圖中不給存與選字動作', () => {
+    expect(proofView).toMatch(/busy: edit\.saving \|\| edit\.placing \|\| edit\.insertAwaiting/);
+    const place = editing.slice(editing.indexOf('const placeWhileWriting ='), editing.indexOf('const placeWhileWriting =') + 700);
+    expect(place).toContain('savingRef.current');
+    for (const name of ['saveEdit', 'actWhileWriting']) {
+      const at = editing.indexOf(`const ${name} = async`);
+      expect(at, name).toBeGreaterThan(0);
+      expect(editing.slice(at, at + 500), name).toContain('placingRef.current');
+    }
+    // saving 的 state 一律經過同步 ref 的設定函式（重入判斷看得到）。
+    expect(editing).not.toMatch(/\bsetSaving\((true|false)\)/);
+    // 照樣存換掉正文之後，擋打字時記下的游標作廢（第三輪 2）。
+    const replaced = editing.indexOf('replaceBodyKeepingCaret(doc, body, savedBody);\n          replaced = true;');
+    expect(replaced).toBeGreaterThan(0);
+    expect(editing.slice(replaced, replaced + 200)).toContain('locked?.forget()');
   });
 
   it('合併前標題也核對；存檔回呼帶回標題（Codex 第二輪 3）', () => {

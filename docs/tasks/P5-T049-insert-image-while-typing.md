@@ -69,7 +69,8 @@ agent、wordpress、factcheck spec。
 - 獨立審查一輪（2026-10-21）七條已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2395 測試綠，`?fixtures=1` 截圖走過空段落下插圖、圖片下一段段首 Backspace、圖片上貼上
 - PR #37 Codex 第一輪 P1（別處改過別段時只比前一塊會誤合併、之後存檔蓋掉別處修改）已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2401 測試綠，`?fixtures=1` 重跑有改先存、沒改直接放、空段落下插三條都照常合併
 - PR #37 Codex 第二輪三條已修（見「完成結果」最後一段）；修後 `npm run verify` 106 檔／2410 測試綠，`?fixtures=1` 重跑三條插圖流程照常合併
-- 下一步：Codex 下一輪；合併後移到 CURRENT_TASK 待驗證表、status 改 done
+- PR #37 Codex 第三輪（最後一輪，修正沒再經過 Codex）兩條已修；修後 `npm run verify` 106 檔／2414 測試綠；`?fixtures=1` 走過「有底線 → 插圖 → 照樣存」：底線拿掉、圖放在第 4 塊之後、留在打字模式、游標在原段落結尾（第 13 字，不是文章開頭），接著打字落在那裡
+- 下一步：合併後移到 CURRENT_TASK 待驗證表、status 改 done
 - Blocker：無
 
 ## 完成結果
@@ -103,3 +104,8 @@ agent、wordpress、factcheck spec。
   2. 放圖不准重入（放圖中或插圖在等「照樣存」時再叫 `placeWhileWriting` 直接講原因）；面板拿 `InsertWriter.busy`（放圖中＋插圖等照樣存），三條路與關閉都鎖住。
      「照樣存」等待改由 `setPending` 統一設定／清掉，插圖的等待（`insertAwaiting`）跟著收。
   3. 核對基準多記標題（進入編輯時的版本、打字中自己存的版本由存檔回呼帶回 `templateData`、放好的版本），合併前 `placedMatchesBase` 正文與標題都要一樣，否則走不合併。
+- Codex 第三輪（最後一輪，修正沒再經過 Codex）：
+  1. 放圖跟所有存檔互斥：面板 `busy` 多看 `edit.saving`（選字動作的先存還在跑時插圖鈕鎖住）；`placeWhileWriting` 在存檔中（`savingRef`，存檔狀態一律經 `markSaving` 同步 ref）直接拒絕；
+     反過來放圖中「儲存」（按鈕本來就因 saving 反灰，`saveEdit` 再擋）、選字的先存再做（`actWhileWriting` 講「正在把圖放進正文…」）都不做。
+  2. 擋打字記的游標改成當下的節點與位置（不是活的 Range），放開時原節點還在才還原；照樣存換掉正文之後呼叫 `forget()` 作廢，留著換正文時照字數重新定位的游標。
+     測試用假文件模擬「活的 Range 被改成 body 開頭」（`tests/insert-while-writing.test.ts`）。

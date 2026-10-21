@@ -313,7 +313,8 @@ export function ProofView({
           edit.placeWhileWriting({ target, put, done, ...(merged === undefined ? {} : { merged }) }),
         confirmPending: edit.insertAwaiting,
         // 放圖中、或插圖在等「照樣存」：面板整個鎖住（Codex 第二輪 2）。
-        busy: edit.placing || edit.insertAwaiting,
+        // 選字動作的先存還在跑（saving）也鎖：放圖跟所有存檔互斥（Codex 第三輪 1）。
+        busy: edit.saving || edit.placing || edit.insertAwaiting,
         withSaved: async (act) => {
           // 索引在存之前、用同一份畫面換算（存檔整理會拿掉空段落等）。
           const afterBlockIndex = edit.savedIndexOf(afterDomIndex);

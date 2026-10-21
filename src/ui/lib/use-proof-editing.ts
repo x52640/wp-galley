@@ -223,7 +223,13 @@ export function useProofEditing({
   onEditTargetMissingRef.current = onEditTargetMissing;
   /** 進入編輯那一刻的正文，用來判斷「有沒有改」與取消時還原。 */
   const originalBody = useRef<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSavingState] = useState(false);
+  /** 存檔中（state 給畫面、ref 給互斥判斷：放圖跟任何存檔不准同時跑，Codex 第三輪 1）。 */
+  const savingRef = useRef(false);
+  const markSaving = (value: boolean): void => {
+    savingRef.current = value;
+    setSavingState(value);
+  };
   const [saveError, setSaveError] = useState<string | null>(null);
   /** 打字模式存好之後的動作（查證、用此段配圖）自己出錯：只講它的錯，不當成存檔失敗（P5-T038 審查 3）。 */
   const [actError, setActError] = useState<string | null>(null);
@@ -480,6 +486,8 @@ export function useProofEditing({
   const placingRef = useRef(false);
 
   const saveEdit = async (force = false): Promise<void> => {
+    // 插圖放圖中不存（Codex 第三輪 1）：按鈕本來就反灰（saving），這裡再擋一次。
+    if (placingRef.current) return;
     // 按的是「儲存」：之前「查證這句」留下、等著「照樣存」的那段字作廢。
     setPending(null);
     const body = editBody();
@@ -526,7 +534,7 @@ export function useProofEditing({
       return;
     }
     setDropWarning(null);
-    setSaving(true);
+    markSaving(true);
     setSaveError(null);
     try {
       const savedHash = await onSaveEdit?.({
@@ -543,7 +551,7 @@ export function useProofEditing({
     } catch (cause) {
       setSaveError(describeError(cause));
     } finally {
-      setSaving(false);
+      markSaving(false);
     }
   };
 
@@ -552,6 +560,11 @@ export function useProofEditing({
    * 存完留在打字模式、校樣不重載，再用存好的那一版做。存失敗就不做，照存檔失敗的方式講。
    */
   const actWhileWriting = async (act: (savedHash: string | null) => void | Promise<void>, force = false): Promise<void> => {
+    // 插圖放圖中不先存再做（Codex 第三輪 1）：兩趟存檔會對同一個基準、互相清掉存檔狀態與 hold。
+    if (placingRef.current) {
+      setActError('正在把圖放進正文，等它放好再試一次。');
+      return;
+    }
     setActError(null);
     // 存檔之後的每一步都先確認還在發起的那一篇（第二輪審查）。
     const origin = job.uuid;
@@ -597,7 +610,7 @@ export function useProofEditing({
     }
     setPending(null);
     setDropWarning(null);
-    setSaving(true);
+    markSaving(true);
     setSaveError(null);
     // 存的那一刻的樣子：存好之後「有沒有改」改跟這一版比。等回應的期間使用者可能還在打，不能拿那時的畫面當基準。
     const rawAtSave = body.innerHTML;
@@ -609,7 +622,7 @@ export function useProofEditing({
       save: async () => (await onSaveEdit?.({ ...plan.save, stay: true, onSavedBase: rememberBase })) ?? null,
       onSaved: (savedHash) => {
         saved = savedHash;
-        setSaving(false);
+        markSaving(false);
         if (!stillHere()) return;
         const settled = settleHold(started, savedHash);
         holdRef.current = settled;
@@ -631,7 +644,7 @@ export function useProofEditing({
         if (plan.save.editedTitle !== undefined) originalTitle.current = plan.save.editedTitle;
       },
       onSaveFailed: (cause) => {
-        setSaving(false);
+        markSaving(false);
         if (!stillHere()) return;
         const settled = settleHold(started, null);
         holdRef.current = settled;
@@ -657,6 +670,8 @@ export function useProofEditing({
   const placeWhileWriting = async (request: InsertPlaceRequest, force = false): Promise<InsertResult> => {
     // 不准重入（Codex 第二輪 2）：另一張圖正在放、或正在等「照樣存」，兩趟一起跑會有一趟提早放開擋打字。
     if (placingRef.current || insertAwaitingRef.current) throw new Error('正在放另一張圖（或在等「照樣存」的回答），等它好了再放這張。');
+    // 跟所有存檔互斥（Codex 第三輪 1）：選字動作的先存還在跑時放圖，會對同一個基準再存一次（409），失敗還會清掉共用的存檔狀態與 hold。
+    if (savingRef.current) throw new Error('正在存檔，等存好了再放這張圖。');
     setActError(null);
     const origin = job.uuid;
     const stillHere = (): boolean => editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin });
@@ -683,17 +698,20 @@ export function useProofEditing({
     let replaced = false;
     /** 存檔那一刻（沒改就是判斷那一刻）的編輯區：合併的基準從這裡算，不拿當下畫面（審查 1）。 */
     let snapshot = '';
+    /** 擋打字（放開時還原游標；照樣存換掉正文之後作廢記下的游標）。 */
+    let locked: { unlock: () => void; forget: () => void } | null = null;
     return runInsertWhileWriting<{ save: { editedBody?: string; editedTitle?: string }; html: string }, PlacedRevision>({
       lock: () => {
         placingRef.current = true;
         setPlacing(true);
-        setSaving(true);
-        const unlock = lockWriting(doc, body, title);
+        markSaving(true);
+        locked = lockWriting(doc, body, title);
+        const held = locked;
         return () => {
           placingRef.current = false;
           setPlacing(false);
-          setSaving(false);
-          if (editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin })) unlock();
+          markSaving(false);
+          if (editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin })) held.unlock();
         };
       },
       prepare: () => {
@@ -766,6 +784,8 @@ export function useProofEditing({
         if (force && savedBody !== undefined) {
           replaceBodyKeepingCaret(doc, body, savedBody);
           replaced = true;
+          // 正文換掉了、游標已經照字數放回去：擋打字時記下的游標作廢（不然放開時會蓋回文章開頭，Codex 第三輪 2）。
+          locked?.forget();
           snapshot = body.innerHTML;
         }
         if (savedBody !== undefined) originalUnits.current = snapshotHtml(savedBody);
