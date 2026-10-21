@@ -10,6 +10,7 @@ import {
 import { NEW_TAB_REL, NEW_TAB_TARGET, withNewTab } from '../../contract/link-target.js';
 import { countNonSpace, locateTextOffset } from './check-while-writing.js';
 import { textAlignOf, withTextAlign, type TextAlign } from '../../contract/text-align.js';
+import { caretTokens, type CaretToken } from './align-enter.js';
 import {
   alignCommandValue,
   emphasisFromComputed,
@@ -376,13 +377,19 @@ export function selectionTextAlign(doc: Document, body: Element): TextAlign | nu
   return textAlignOf(top.getAttribute('class'));
 }
 
-/** 選取範圍的結尾剛好停在這一塊的開頭（三連擊選一段時常見）：這一塊其實一個字都沒選到。 */
-function endsAtStartOf(doc: Document, range: Range, block: Element): boolean {
+/**
+ * 選取的結尾落在這一塊裡時，這一塊算不算選到（PR #38 Codex 第二輪）。看 DOM 位置，不看字是不是空的：
+ * 結尾前面有這一塊的任何字、換行（`<br>`）或圖＝進去了；一個都沒有＝只是停在開頭（三連擊選一段的常見結果），不算。
+ * 空段落（只有佔位換行或什麼都沒有）被選到就算。`tokens` 是 `align-enter.ts` 的 `caretTokens`（以結尾為準分前後）。
+ */
+export function selectionEntersBlock(tokens: readonly CaretToken[]): boolean {
+  if (tokens.every((token) => token.kind === 'br')) return true;
+  return tokens.some((token) => token.side === 'before');
+}
+
+function endsAtStartOf(range: Range, block: Element): boolean {
   if (range.endContainer !== block && !block.contains(range.endContainer)) return false;
-  const head = doc.createRange();
-  head.selectNodeContents(block);
-  head.setEnd(range.endContainer, range.endOffset);
-  return head.toString().length === 0;
+  return !selectionEntersBlock(caretTokens(block, range.endContainer, range.endOffset));
 }
 
 /**
@@ -395,7 +402,7 @@ function alignableBlocks(doc: Document, body: Element): Element[] {
   if (!body.contains(range.commonAncestorContainer)) return [];
   const blocks = Array.from(body.children).filter((child) => ALIGN_BLOCK.test(child.tagName.toLowerCase()) && range.intersectsNode(child));
   if (range.collapsed) return blocks;
-  return blocks.filter((block, index) => index === 0 || !endsAtStartOf(doc, range, block));
+  return blocks.filter((block, index) => index === 0 || !endsAtStartOf(range, block));
 }
 
 /**

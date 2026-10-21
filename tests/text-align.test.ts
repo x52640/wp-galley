@@ -20,8 +20,11 @@ import {
   isCommandEnabled,
   type FormatState,
 } from '../src/ui/lib/rich-format.js';
-import { setBlockTextAlign, type ClassTarget } from '../src/ui/lib/rich-commands.js';
+import { selectionEntersBlock, setBlockTextAlign, type ClassTarget } from '../src/ui/lib/rich-commands.js';
 import { readFileSync } from 'node:fs';
+import { loadTemplateRegistry } from '../src/templates/registry.js';
+import { renderRevision } from '../src/templates/render.js';
+import { paths } from '../src/config/paths.js';
 import { alignEnterAction, caretEdges, type AlignEnterCaret, type CaretToken } from '../src/ui/lib/align-enter.js';
 import { createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
 
@@ -494,5 +497,43 @@ describe('段尾／段首的判斷算進換行（caretEdges）', () => {
   });
   it('|A：段首', () => {
     expect(edges('|A<br>')).toEqual({ atStart: true, atEnd: false });
+  });
+});
+
+describe('PR #38 Codex 第二輪：一塊只留一個對齊，預覽與發布一致', () => {
+  it('後端 sanitize 邊界：兩個對齊 class 只留第一個（跟編輯整理同一條規則）', () => {
+    const report = sanitizeBody('<p class="has-text-align-center has-text-align-right">字</p><h2 class="wp-block-heading has-text-align-justify has-text-align-right has-text-align-left">標</h2>', manifest);
+    expect(report.html).toBe('<p class="has-text-align-center">字</p><h2 class="wp-block-heading has-text-align-right">標</h2>');
+  });
+
+  it('Agent 的正文（不經編輯整理）直接渲染：預覽用的 publishHtml 與發布的區塊是同一個對齊', async () => {
+    const registry = await loadTemplateRegistry(paths.templates);
+    const template = registry.get('longform-v1');
+    const rendered = renderRevision(template, {
+      title: '長文',
+      body: '<p class="wp-block-paragraph has-medium-font-size has-text-align-center has-text-align-right">字</p>',
+    });
+    expect(rendered.publishHtml).toContain('has-text-align-center');
+    expect(rendered.publishHtml).not.toContain('has-text-align-right');
+    expect(toBlockMarkup(rendered.publishHtml).markup).toContain('"textAlign":"center"');
+  });
+});
+
+describe('PR #38 Codex 第二輪：跨段選取的最後一塊算不算（selectionEntersBlock）', () => {
+  const t = (kind: 'text' | 'br' | 'img', side: 'before' | 'after'): CaretToken => ({ kind, side });
+  it('結尾停在下一段開頭（一個字都沒進去）：不算', () => {
+    expect(selectionEntersBlock([t('text', 'after')])).toBe(false);
+    expect(selectionEntersBlock([t('br', 'after'), t('text', 'after')])).toBe(false);
+  });
+  it('結尾在開頭的 <br> 之後（<p><br>|B</p>）：算', () => {
+    expect(selectionEntersBlock([t('br', 'before'), t('text', 'after')])).toBe(true);
+  });
+  it('結尾在字中間：算', () => {
+    expect(selectionEntersBlock([t('text', 'before'), t('text', 'after')])).toBe(true);
+  });
+  it('空段落（只有佔位換行或什麼都沒有）被選到：算', () => {
+    expect(selectionEntersBlock([t('br', 'after')])).toBe(true);
+    expect(selectionEntersBlock([t('br', 'before')])).toBe(true);
+    expect(selectionEntersBlock([])).toBe(true);
   });
 });

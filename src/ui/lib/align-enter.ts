@@ -88,7 +88,7 @@ const ELEMENT = 1;
 const TEXT = 3;
 
 /** 段落裡的字、換行、圖，照文件順序，標上在游標前或後（游標所在的文字節點拆成兩段）。 */
-function caretTokens(block: HTMLElement, container: Node, offset: number): CaretToken[] {
+export function caretTokens(block: Element, container: Node, offset: number): CaretToken[] {
   const out: CaretToken[] = [];
   const point = block.ownerDocument.createRange();
   point.setStart(container, offset);

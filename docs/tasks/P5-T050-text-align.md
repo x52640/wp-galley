@@ -89,3 +89,6 @@ agent、factcheck spec。
   `06-enter-middle-both-centered.png`（段中 Enter 兩半都置中）；另實測小標靠右段尾 Enter 開乾淨段落、沒對齊段落的 Enter 行為不變。差異：小標段中 Enter 後半仍是小標（瀏覽器拆）。
 - PR #38 Codex 第一輪 P2（段尾判斷沒算 `<br>`）：`align-enter.ts` 改用 `caretEdges`——字、圖、Shift+Enter 的軟換行都算內容，只有段落最後一個 `<br>`（瀏覽器的佔位）不算；
   `A|<br><br>`、`A|<br>B`、`A<br>|B`、`<br>|B` 是段中（交給瀏覽器拆，兩半保留對齊），`A<br>B|`、`A|<br>`、空段是段尾。測試 8 條；Chrome 實按 Shift+Enter 再回到 `A|` 按 Enter，在游標處拆開。
+- PR #38 Codex 第二輪：(1) 後端 sanitize 對 p／h2／h3 的 class 也跑 `normalizeTextAlignClass`（一塊只留第一個合法的對齊，跟編輯整理同一份規則），
+  Agent／templateData 正文帶兩個對齊時預覽（publishHtml）與發布區塊讀到同一個；(2) 跨段選取最後一塊算不算改看 DOM 位置（`selectionEntersBlock`＋`caretTokens`）：
+  結尾前面有這塊的字、`<br>` 或圖就算，空段落被選到也算，只有停在開頭才不算。測試 6 條；Chrome 實測 `<p><br>|B</p>`、空段落、`|CC` 三種。
