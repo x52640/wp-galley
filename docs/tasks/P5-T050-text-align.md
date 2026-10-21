@@ -87,3 +87,5 @@ agent、factcheck spec。
   實作 `src/ui/lib/align-enter.ts`（純函式 `alignEnterAction`＋`attachAlignEnter`），在 `use-proof-frame.ts` 掛在 `attachFigureKeys` 後面、已被擋掉的 Enter 不管；
   只處理有對齊的段落／小標，輸入法組字中、Shift／⌘ 組合、選了字都不攔。截圖：`/private/tmp/claude-501/p5t050/05-enter-at-end-left.png`（置中段尾 Enter 打字靠左、「靠左」亮）、
   `06-enter-middle-both-centered.png`（段中 Enter 兩半都置中）；另實測小標靠右段尾 Enter 開乾淨段落、沒對齊段落的 Enter 行為不變。差異：小標段中 Enter 後半仍是小標（瀏覽器拆）。
+- PR #38 Codex 第一輪 P2（段尾判斷沒算 `<br>`）：`align-enter.ts` 改用 `caretEdges`——字、圖、Shift+Enter 的軟換行都算內容，只有段落最後一個 `<br>`（瀏覽器的佔位）不算；
+  `A|<br><br>`、`A|<br>B`、`A<br>|B`、`<br>|B` 是段中（交給瀏覽器拆，兩半保留對齊），`A<br>B|`、`A|<br>`、空段是段尾。測試 8 條；Chrome 實按 Shift+Enter 再回到 `A|` 按 Enter，在游標處拆開。

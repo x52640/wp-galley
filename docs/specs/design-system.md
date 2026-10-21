@@ -140,7 +140,7 @@ CSS 變數），改分類色時兩邊要一起改。校稿四種是淡底＋實�
     置中、靠右再按一次＝取消。清單、引用、圖片（含圖說）裡與標題上三顆反灰。改的是 class（`has-text-align-*`），
     不用瀏覽器的 justify 指令（會塞 inline style）；這一步不進 ⌘Z（取消編輯仍可整個還原）。段落與 H2／H3 互換時對齊跟著走。
     按 Enter 照古騰堡：對齊過的段落／小標**段尾**按 Enter，新的一段是乾淨段落（不帶對齊），**段首**按 Enter 在前面開空段落，**段中**拆開兩半都保留對齊
-    （`lib/align-enter.ts`；圖片上的按鍵先處理；輸入法組字中、Shift+Enter 不攔）。
+    （`lib/align-enter.ts`；Shift+Enter 的軟換行算內容，只有段落最後的佔位換行不算；圖片上的按鍵先處理；輸入法組字中、Shift+Enter 不攔）。
     校樣照前台的核心 CSS 顯示對齊。規則在 `rich-format.ts`（按鈕）、`rich-commands.ts`（套到區塊）、`contract/text-align.ts`。
   - **連結輸入框**在工具列下方展開（不用 `window.prompt`）：Enter 套用、Esc 取消；只打網域自動補 `https://`；
     收模板 `allowedSchemes` 的網址，以及站內的 `/路徑` 與 `#錨點`（規則見 security.md「連結網址規則」）；

@@ -63,25 +63,70 @@ function caretTextBlock(body: Element, node: Node | null): HTMLElement | null {
   return null;
 }
 
-function hasText(fragment: DocumentFragment): boolean {
-  return (fragment.textContent ?? '').trim() !== '' || fragment.querySelector('img') !== null;
+/** 段落裡的一個內容單位（字、換行、圖），在游標前或後。 */
+export interface CaretToken {
+  readonly kind: 'text' | 'br' | 'img';
+  readonly side: 'before' | 'after';
+}
+
+/**
+ * 游標是不是在段首／段尾（PR #38 Codex P2）。字與圖算內容；`<br>` 也算（Shift+Enter 的軟換行），
+ * **只有段落的最後一個 `<br>`（後面沒有字或圖）不算**——那是瀏覽器放的佔位（空段落的 `<p><br></p>`、段尾的 `A<br>`），看不見。
+ * 只有空白的字不算（`tokens` 由呼叫端先濾掉）。
+ */
+export function caretEdges(tokens: readonly CaretToken[]): { atStart: boolean; atEnd: boolean } {
+  const last = tokens.length - 1;
+  const placeholder = last >= 0 && tokens[last]!.kind === 'br' ? last : -1;
+  const counted = tokens.filter((_, index) => index !== placeholder);
+  return {
+    atStart: !counted.some((token) => token.side === 'before'),
+    atEnd: !counted.some((token) => token.side === 'after'),
+  };
+}
+
+const ELEMENT = 1;
+const TEXT = 3;
+
+/** 段落裡的字、換行、圖，照文件順序，標上在游標前或後（游標所在的文字節點拆成兩段）。 */
+function caretTokens(block: HTMLElement, container: Node, offset: number): CaretToken[] {
+  const out: CaretToken[] = [];
+  const point = block.ownerDocument.createRange();
+  point.setStart(container, offset);
+  point.collapse(true);
+  const sideOf = (node: Node): 'before' | 'after' => (point.comparePoint(node, 0) < 0 ? 'before' : 'after');
+  const walk = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === TEXT) {
+        const value = child.nodeValue ?? '';
+        if (child === container) {
+          if (value.slice(0, offset).trim() !== '') out.push({ kind: 'text', side: 'before' });
+          if (value.slice(offset).trim() !== '') out.push({ kind: 'text', side: 'after' });
+        } else if (value.trim() !== '') {
+          out.push({ kind: 'text', side: sideOf(child) });
+        }
+      } else if (child.nodeType === ELEMENT) {
+        const tag = (child as Element).tagName;
+        if (tag === 'BR') out.push({ kind: 'br', side: sideOf(child) });
+        else if (tag === 'IMG') out.push({ kind: 'img', side: sideOf(child) });
+        else walk(child);
+      }
+    }
+  };
+  walk(block);
+  return out;
 }
 
 function readCaret(doc: Document, block: HTMLElement): AlignEnterCaret | null {
   const selection = doc.getSelection();
   if (!selection || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
-  const before = doc.createRange();
-  before.selectNodeContents(block);
-  before.setEnd(range.startContainer, range.startOffset);
-  const after = doc.createRange();
-  after.selectNodeContents(block);
-  after.setStart(range.endContainer, range.endOffset);
+  // 選了字的情況 alignEnterAction 本來就不攔，所以用起點量就夠。
+  const { atStart, atEnd } = caretEdges(caretTokens(block, range.startContainer, range.startOffset));
   return {
     aligned: textAlignOf(block.getAttribute('class')) !== null,
     collapsed: range.collapsed,
-    atStart: !hasText(before.cloneContents()),
-    atEnd: !hasText(after.cloneContents()),
+    atStart,
+    atEnd,
   };
 }
 

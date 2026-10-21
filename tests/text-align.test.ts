@@ -22,7 +22,7 @@ import {
 } from '../src/ui/lib/rich-format.js';
 import { setBlockTextAlign, type ClassTarget } from '../src/ui/lib/rich-commands.js';
 import { readFileSync } from 'node:fs';
-import { alignEnterAction, type AlignEnterCaret } from '../src/ui/lib/align-enter.js';
+import { alignEnterAction, caretEdges, type AlignEnterCaret, type CaretToken } from '../src/ui/lib/align-enter.js';
 import { createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
 
 /**
@@ -449,5 +449,50 @@ describe('對齊的段落／小標按 Enter（alignEnterAction）', () => {
     expect(frame.indexOf('attachAlignEnter(doc')).toBeGreaterThan(frame.indexOf('attachFigureKeys(doc'));
     const dom = readFileSync(new URL('../src/ui/lib/align-enter.ts', import.meta.url), 'utf8');
     expect(dom).toContain('event.defaultPrevented');
+  });
+});
+
+/**
+ * 段尾／段首要算進換行（PR #38 Codex 第一輪 P2）：Shift+Enter 的軟換行是內容；段落最後一個 `<br>`（後面沒有字）是瀏覽器放的佔位，不算。
+ * 用 `|` 表示游標，把段落內容拆成「游標前／後」的字、換行、圖。
+ */
+describe('段尾／段首的判斷算進換行（caretEdges）', () => {
+  const tokens = (html: string): CaretToken[] => {
+    const out: CaretToken[] = [];
+    let side: 'before' | 'after' = 'before';
+    for (const piece of html.split(/(<br>|\|)/).filter((x) => x.length > 0)) {
+      if (piece === '|') side = 'after';
+      else if (piece === '<br>') out.push({ kind: 'br', side });
+      else out.push({ kind: 'text', side });
+    }
+    return out;
+  };
+  const edges = (html: string) => caretEdges(tokens(html));
+
+  it('A|<br><br>：後面還有一個軟換行，不是段尾', () => {
+    expect(edges('A|<br><br>')).toEqual({ atStart: false, atEnd: false });
+  });
+  it('A|<br>B：段中', () => {
+    expect(edges('A|<br>B')).toEqual({ atStart: false, atEnd: false });
+  });
+  it('A<br>|B：段中（前面有換行與字）', () => {
+    expect(edges('A<br>|B')).toEqual({ atStart: false, atEnd: false });
+  });
+  it('<br>|B：前面的軟換行算內容，不是段首', () => {
+    expect(edges('<br>|B')).toEqual({ atStart: false, atEnd: false });
+  });
+  it('A<br>B|：段尾', () => {
+    expect(edges('A<br>B|')).toEqual({ atStart: false, atEnd: true });
+  });
+  it('A|<br>：尾端只有佔位換行，是段尾', () => {
+    expect(edges('A|<br>')).toEqual({ atStart: false, atEnd: true });
+  });
+  it('空段 <p><br></p>：游標在佔位換行前或後，都是段首也是段尾', () => {
+    expect(edges('|<br>')).toEqual({ atStart: true, atEnd: true });
+    expect(edges('<br>|')).toEqual({ atStart: true, atEnd: true });
+    expect(edges('|')).toEqual({ atStart: true, atEnd: true });
+  });
+  it('|A：段首', () => {
+    expect(edges('|A<br>')).toEqual({ atStart: true, atEnd: false });
   });
 });
