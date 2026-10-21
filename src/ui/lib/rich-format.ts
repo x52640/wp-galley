@@ -1,10 +1,13 @@
 import { safeHref } from '../../contract/rich-text.js';
+import type { TextAlign } from '../../contract/text-align.js';
 
 /**
  * 直接在文章上改的格式工具列：純規則（P5-T028）。DOM 操作在 `rich-commands.ts`，這裡不碰 DOM，有測試。
  */
 
-export type FormatCommand = 'link' | 'bold' | 'italic' | 'h2' | 'h3' | 'paragraph' | 'ul' | 'ol' | 'quote' | 'hr';
+export type AlignCommand = 'align-left' | 'align-center' | 'align-right';
+
+export type FormatCommand = 'link' | 'bold' | 'italic' | 'h2' | 'h3' | 'paragraph' | AlignCommand | 'ul' | 'ol' | 'quote' | 'hr';
 
 /** 工具列上的順序，以及每顆按鈕需要模板允許哪些標籤。 */
 const COMMANDS: readonly { command: FormatCommand; needs: readonly string[] }[] = [
@@ -14,6 +17,10 @@ const COMMANDS: readonly { command: FormatCommand; needs: readonly string[] }[] 
   { command: 'h2', needs: ['h2'] },
   { command: 'h3', needs: ['h3'] },
   { command: 'paragraph', needs: ['p'] },
+  // 對齊（D-049）：段落與小標用，有段落就有。後端只收 p／h2／h3 的三個對齊 class。
+  { command: 'align-left', needs: ['p'] },
+  { command: 'align-center', needs: ['p'] },
+  { command: 'align-right', needs: ['p'] },
   { command: 'ul', needs: ['ul', 'li'] },
   { command: 'ol', needs: ['ol', 'li'] },
   { command: 'quote', needs: ['blockquote'] },
@@ -35,6 +42,10 @@ export interface FormatState {
   /** 最近的那一層清單。 */
   readonly list: 'ul' | 'ol' | null;
   readonly quote: boolean;
+  /** 游標在圖片（figure，含圖說）裡。沒寫＝不在。 */
+  readonly figure?: boolean;
+  /** 游標所在段落／小標的對齊（D-049）；null 或沒寫＝沒設（靠左）。 */
+  readonly align?: TextAlign | null;
 }
 
 /** 游標所在處實際的粗／斜（瀏覽器算出來的樣式）。 */
@@ -56,7 +67,11 @@ export function emphasisFromComputed(fontWeight: string, fontStyle: string): Com
  * 給了 `computed`（游標處實際的樣式）時，粗／斜照實際樣式：`<strong>A<span style="font-weight:normal">B</span></strong>`
  * 的 B 不粗，粗體按鈕不能亮（第三輪審查 #6）。標題本來就粗，標題裡的粗體按鈕只看有沒有 strong／b。
  */
-export function formatStateFrom(ancestors: readonly string[], computed?: ComputedEmphasis | null): FormatState {
+export function formatStateFrom(
+  ancestors: readonly string[],
+  computed?: ComputedEmphasis | null,
+  align: TextAlign | null = null,
+): FormatState {
   const tags = ancestors.map((tag) => tag.toLowerCase());
   const list = tags.find((tag) => tag === 'ul' || tag === 'ol') as 'ul' | 'ol' | undefined;
   const textBlock = tags.find((tag) => ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'div'].includes(tag));
@@ -76,7 +91,34 @@ export function formatStateFrom(ancestors: readonly string[], computed?: Compute
     block,
     list: list ?? null,
     quote: tags.includes('blockquote'),
+    figure: tags.includes('figure') || tags.includes('figcaption'),
+    align,
   };
+}
+
+/** 對齊按鈕能用的地方：段落與小標（不在清單、引用、圖片裡）。 */
+function alignable(state: FormatState): boolean {
+  return state.block !== 'list' && !state.quote && state.figure !== true;
+}
+
+const ALIGN_OF: Readonly<Record<AlignCommand, TextAlign>> = {
+  'align-left': 'left',
+  'align-center': 'center',
+  'align-right': 'right',
+};
+
+export function isAlignCommand(command: FormatCommand): command is AlignCommand {
+  return command in ALIGN_OF;
+}
+
+/**
+ * 按了對齊按鈕之後要設成什麼（null＝拿掉對齊設定，不輸出 class）。
+ * 「靠左」一律拿掉；置中、靠右再按一次同一個＝取消（回到靠左），跟 WordPress 的對齊按鈕一樣。
+ */
+export function alignCommandValue(command: AlignCommand, state: FormatState): TextAlign | null {
+  const target = ALIGN_OF[command];
+  if (target === 'left') return null;
+  return state.align === target ? null : target;
 }
 
 /** 按鈕要不要亮起（aria-pressed）。 */
@@ -93,6 +135,11 @@ export function isCommandActive(command: FormatCommand, state: FormatState): boo
       return state.block === command;
     case 'paragraph':
       return state.block === 'paragraph';
+    case 'align-left':
+      return alignable(state) && (state.align == null || state.align === 'left');
+    case 'align-center':
+    case 'align-right':
+      return alignable(state) && state.align === ALIGN_OF[command];
     case 'ul':
     case 'ol':
       return state.block === 'list' && state.list === command;
@@ -107,8 +154,10 @@ export function isCommandActive(command: FormatCommand, state: FormatState): boo
  * 按鈕能不能按。擋掉的是瀏覽器會做壞的組合（P5-T028 實測 Chrome）：
  * - 清單項目裡按 H2／H3，Chrome 會產生 `<h2><ul><li>`；要先按「段落」離開清單。
  * - 標題裡按粗體，Chrome 會因為標題本來就粗而包一層 `font-weight: normal`。
+ * 對齊只給段落與小標（D-049）：清單、引用、圖片裡反灰。
  */
 export function isCommandEnabled(command: FormatCommand, state: FormatState): boolean {
+  if (isAlignCommand(command)) return alignable(state);
   if ((command === 'h2' || command === 'h3') && state.block === 'list') return false;
   if (command === 'bold' && (state.block === 'h2' || state.block === 'h3')) return false;
   return true;
@@ -169,6 +218,9 @@ export const COMMAND_LABELS: Readonly<Record<FormatCommand, { label: string; hin
   h2: { label: 'H2', hint: '大標題' },
   h3: { label: 'H3', hint: '小標題' },
   paragraph: { label: '內文', hint: '回到一般段落' },
+  'align-left': { label: '靠左', hint: '靠左（拿掉對齊設定）' },
+  'align-center': { label: '置中', hint: '置中（再按一次取消）' },
+  'align-right': { label: '靠右', hint: '靠右（再按一次取消）' },
   ul: { label: '項目清單', hint: '項目清單' },
   ol: { label: '編號清單', hint: '編號清單' },
   quote: { label: '引用', hint: '引用' },

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TextAlign } from '../contract/text-align.js';
 
 /**
  * Gutenberg 區塊的中介表示法（IR）。
@@ -45,6 +46,11 @@ export interface ParagraphBlock {
   readonly html: InlineHtml;
   /** null 代表用主題預設字級，不輸出 fontSize 屬性。 */
   readonly fontSize: string | null;
+  /**
+   * 對齊（D-049）。來自內容的 `has-text-align-*` class，只有三個值（`contract/text-align.ts`）。
+   * 沒寫＝不對齊，不輸出屬性也不加 class。
+   */
+  readonly textAlign?: TextAlign | null;
 }
 
 export interface HeadingBlock {
@@ -52,6 +58,8 @@ export interface HeadingBlock {
   readonly level: 2 | 3 | 4 | 5 | 6;
   readonly html: InlineHtml;
   readonly fontSize: string | null;
+  /** 同 ParagraphBlock.textAlign。 */
+  readonly textAlign?: TextAlign | null;
 }
 
 export interface ListItem {

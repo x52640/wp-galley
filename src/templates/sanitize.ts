@@ -2,6 +2,7 @@ import sanitizeHtml from 'sanitize-html';
 import type { TemplateManifest } from './types.js';
 import { safeHref } from '../contract/rich-text.js';
 import { normalizeLinkAttrs } from '../contract/link-target.js';
+import { TEXT_ALIGN_CLASSES, TEXT_ALIGN_TAGS } from '../contract/text-align.js';
 
 /**
  * 正文 HTML 清理。
@@ -32,6 +33,16 @@ function buildOptions(manifest: TemplateManifest, onRejectedLink: () => void = (
   const allowedClasses: Record<string, (string | RegExp)[]> = {};
   for (const [tag, patterns] of Object.entries(manifest.allowedClasses)) {
     allowedClasses[tag] = patterns.map(toClassMatcher);
+  }
+  // 段落與小標的對齊（D-049）：只收 `has-text-align-left|center|right` 三個 class，規則在 contract/text-align.ts。
+  // 寫在程式裡、不寫進各模板 manifest：這是 WordPress 核心的寫法，不是某個站的慣例。模板本來就不收 class 的標籤不放行。
+  // inline style（`text-align:`）照舊不收：style 不在任何 allowedAttributes。
+  for (const tag of TEXT_ALIGN_TAGS) {
+    const classAllowed = (manifest.allowedAttributes[tag] ?? []).some((attr) => attr.toLowerCase() === 'class');
+    if (!classAllowed || !manifest.allowedTags.some((allowed) => allowed.toLowerCase() === tag)) continue;
+    // 沒有 allowedClasses 那一項＝sanitize-html 不限 class，這時不能加：一加反而變成只收對齊。
+    const existing = allowedClasses[tag];
+    if (existing !== undefined) allowedClasses[tag] = [...existing, ...TEXT_ALIGN_CLASSES];
   }
 
   return {

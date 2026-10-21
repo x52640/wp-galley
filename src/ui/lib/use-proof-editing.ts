@@ -20,6 +20,7 @@ import {
   saveSelection,
   selectionAncestors,
   selectionEmphasis,
+  selectionTextAlign,
   snapshotBody,
   snapshotHtml,
   type RichAllow,
@@ -296,7 +297,9 @@ export function useProofEditing({
       return;
     }
     const ancestors = selectionAncestors(doc, body);
-    setFormatState(ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body)));
+    setFormatState(
+      ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body), selectionTextAlign(doc, body)),
+    );
   }, []);
 
   const openLinkEditor = useCallback(() => {

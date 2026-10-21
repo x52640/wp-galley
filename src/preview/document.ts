@@ -1,11 +1,12 @@
 import type { LoadedTemplate } from '../templates/types.js';
 import type { RenderResult } from '../templates/render.js';
+import { TEXT_ALIGN_CSS } from '../contract/text-align.js';
 
 /**
  * 把渲染結果包成一份完整的 HTML 文件，供 UI 放進 sandboxed iframe。
  *
  * 這份文件是**離線且封閉**的：CSP 設成 `default-src 'none'`，樣式只吃內嵌的
- * preview.css。就算正文裡混進了什麼，也發不出任何對外請求。
+ * preview.css（＋核心的對齊 class）。就算正文裡混進了什麼，也發不出任何對外請求。
  */
 
 /**
@@ -29,6 +30,7 @@ export function buildPreviewDocument(template: LoadedTemplate, rendered: RenderR
 <title>預覽：${template.manifest.id}</title>
 <style>
 ${escapeForStyleBlock(template.previewCss)}
+${TEXT_ALIGN_CSS}
 </style>
 </head>
 <body>

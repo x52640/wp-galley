@@ -9,7 +9,16 @@ import {
 } from '../../contract/rich-text.js';
 import { NEW_TAB_REL, NEW_TAB_TARGET, withNewTab } from '../../contract/link-target.js';
 import { countNonSpace, locateTextOffset } from './check-while-writing.js';
-import { emphasisFromComputed, type ComputedEmphasis, type FormatCommand, type FormatState } from './rich-format.js';
+import { textAlignOf, withTextAlign, type TextAlign } from '../../contract/text-align.js';
+import {
+  alignCommandValue,
+  emphasisFromComputed,
+  isAlignCommand,
+  isCommandEnabled,
+  type ComputedEmphasis,
+  type FormatCommand,
+  type FormatState,
+} from './rich-format.js';
 import { safeRestoredEdit } from './draft-backup.js';
 
 /**
@@ -300,10 +309,10 @@ export function runCommand(frame: HTMLIFrameElement, body: HTMLElement, command:
     case 'h2':
     case 'h3':
       // 再按一次同一個＝回到段落。
-      return doc.execCommand('formatBlock', false, state.block === command ? 'p' : command);
+      return keepingTextAlign(doc, body, () => doc.execCommand('formatBlock', false, state.block === command ? 'p' : command));
     case 'paragraph':
       if (state.block === 'list') return toggleList(doc, state.list ?? 'ul');
-      if (state.block === 'h2' || state.block === 'h3') return doc.execCommand('formatBlock', false, 'p');
+      if (state.block === 'h2' || state.block === 'h3') return keepingTextAlign(doc, body, () => doc.execCommand('formatBlock', false, 'p'));
       return false;
     case 'ul':
     case 'ol':
@@ -314,7 +323,111 @@ export function runCommand(frame: HTMLIFrameElement, body: HTMLElement, command:
       return state.quote ? unquote(doc, body) : doc.execCommand('formatBlock', false, 'blockquote');
     case 'hr':
       return insertSeparator(doc, body);
+    case 'align-left':
+    case 'align-center':
+    case 'align-right':
+      if (!isAlignCommand(command) || !isCommandEnabled(command, state)) return false;
+      return applyTextAlign(doc, body, alignCommandValue(command, state));
   }
+}
+
+// ---------------------------------------------------------------------------
+// 對齊（D-049，P5-T050）
+// ---------------------------------------------------------------------------
+
+/** 改對齊用到的那幾個 DOM 方法（測試用假元素也能套）。 */
+export interface ClassTarget {
+  readonly tagName: string;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
+/** 設得了對齊的區塊：段落與標題（h1、h4～h6 存檔時變 h2／h3），以及存檔時會變段落的 div。 */
+const ALIGN_BLOCK = /^(p|h[1-6]|div)$/;
+
+/**
+ * 換掉一個區塊的對齊 class（規則在 `contract/text-align.ts`）。`null`＝拿掉（靠左），class 變空就拿掉 class 屬性。
+ * 不用 `execCommand('justifyCenter')`：它塞的是 inline style 或 `align` 屬性，不是古騰堡的寫法。
+ * 回傳 true＝有改。
+ */
+export function setBlockTextAlign(block: ClassTarget, align: TextAlign | null): boolean {
+  if (!ALIGN_BLOCK.test(block.tagName.toLowerCase())) return false;
+  const current = block.getAttribute('class');
+  if (align === null && !/(^|\s)has-text-align-/.test(current ?? '')) return false;
+  const next = withTextAlign(current, align);
+  if (next === current) return false;
+  if (next === null) block.removeAttribute('class');
+  else block.setAttribute('class', next);
+  return true;
+}
+
+/** 游標往外、正文最外層的那一塊。 */
+function topBlock(doc: Document, body: Element): Element | null {
+  let top = anchorElement(doc, body);
+  while (top !== null && top.parentElement !== body) top = top.parentElement;
+  return top;
+}
+
+/** 游標所在段落／小標的對齊；不在段落／小標裡（清單、引用、圖片…）是 null。 */
+export function selectionTextAlign(doc: Document, body: Element): TextAlign | null {
+  const top = topBlock(doc, body);
+  if (top === null || !ALIGN_BLOCK.test(top.tagName.toLowerCase())) return null;
+  return textAlignOf(top.getAttribute('class'));
+}
+
+/** 選取範圍的結尾剛好停在這一塊的開頭（三連擊選一段時常見）：這一塊其實一個字都沒選到。 */
+function endsAtStartOf(doc: Document, range: Range, block: Element): boolean {
+  if (range.endContainer !== block && !block.contains(range.endContainer)) return false;
+  const head = doc.createRange();
+  head.selectNodeContents(block);
+  head.setEnd(range.endContainer, range.endOffset);
+  return head.toString().length === 0;
+}
+
+/**
+ * 游標或選取碰到的段落／小標（正文最外層那幾塊；跨多段就全部）。清單、引用、圖片不算，裡面的段落也不算。
+ */
+function alignableBlocks(doc: Document, body: Element): Element[] {
+  const selection = doc.getSelection();
+  if (!selection || selection.rangeCount === 0) return [];
+  const range = selection.getRangeAt(0);
+  if (!body.contains(range.commonAncestorContainer)) return [];
+  const blocks = Array.from(body.children).filter((child) => ALIGN_BLOCK.test(child.tagName.toLowerCase()) && range.intersectsNode(child));
+  if (range.collapsed) return blocks;
+  return blocks.filter((block, index) => index === 0 || !endsAtStartOf(doc, range, block));
+}
+
+/**
+ * 段落與標題互換（formatBlock）時對齊跟著走：Chrome 換標籤時把 class 全丟了，置中的一段變成小標就不置中了。
+ * 換之前記下選到的每一塊在第幾個、什麼對齊，換完一塊對一塊補回去；塊數變了（瀏覽器拆併過）就不補，免得補錯塊。
+ */
+function keepingTextAlign(doc: Document, body: HTMLElement, run: () => boolean): boolean {
+  const children = (): Element[] => Array.from(body.children);
+  const before = children();
+  const aligns = alignableBlocks(doc, body)
+    .map((block) => ({ index: before.indexOf(block), align: textAlignOf(block.getAttribute('class')) }))
+    .filter((entry): entry is { index: number; align: TextAlign } => entry.index >= 0 && entry.align !== null);
+  const done = run();
+  const after = children();
+  if (aligns.length === 0 || after.length !== before.length) return done;
+  for (const { index, align } of aligns) {
+    const block = after[index];
+    if (block !== undefined && textAlignOf(block.getAttribute('class')) === null) setBlockTextAlign(block, align);
+  }
+  return done;
+}
+
+/**
+ * 把對齊套到游標或選取所在的段落／小標。直接改 class——這一步**不進 ⌘Z 的復原堆疊**（取消編輯仍可整個還原），
+ * 跟 unquote 一樣。改的是屬性，自動留底（P5-T048）靠 MutationObserver 看 class 變化。
+ */
+function applyTextAlign(doc: Document, body: HTMLElement, align: TextAlign | null): boolean {
+  let changed = false;
+  for (const block of alignableBlocks(doc, body)) {
+    if (setBlockTextAlign(block, align)) changed = true;
+  }
+  return changed;
 }
 
 function toggleList(doc: Document, list: 'ul' | 'ol'): boolean {

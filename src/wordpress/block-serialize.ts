@@ -9,6 +9,7 @@ import type {
   QuoteBlock,
   SeparatorBlock,
 } from './block-types.js';
+import { textAlignClass, type TextAlign } from '../contract/text-align.js';
 
 /**
  * IR → Gutenberg 區塊標記。
@@ -76,25 +77,44 @@ function wrapChildren(openTag: string, children: string[], closeTag: string): st
   return `${openTag}${children.join('\n\n')}${closeTag}`;
 }
 
+/**
+ * 對齊（D-049）。WordPress 7.0 起段落與標題都用 `supports.typography.textAlign`：值存在
+ * `style.typography.textAlign`，class 是 `has-text-align-{值}`，沒有 inline style。
+ * 查證與出處見 docs/specs/wordpress-site.md「段落與小標的對齊」。
+ */
+function textAlignStyle(align: TextAlign): Record<string, unknown> {
+  return { typography: { textAlign: align } };
+}
+
+function textAlignClassOf(align: TextAlign | null | undefined): string | null {
+  return align === null || align === undefined ? null : textAlignClass(align);
+}
+
 function serializeParagraph(block: ParagraphBlock): string {
-  const attrs = block.fontSize === null ? undefined : { fontSize: block.fontSize };
+  // 屬性順序照核心序列化：fontSize（font-size hook 先註冊）在 style 前面。
+  const attrs: Record<string, unknown> = {};
+  if (block.fontSize !== null) attrs.fontSize = block.fontSize;
+  if (block.textAlign) attrs.style = textAlignStyle(block.textAlign);
+  // class 順序照核心的 save props：對齊（text-align hook 放在最前面）→ 字級。
   return [
     openComment('paragraph', attrs),
-    `<p${classAttr(fontSizeClass(block.fontSize))}>${block.html}</p>`,
+    `<p${classAttr(textAlignClassOf(block.textAlign), fontSizeClass(block.fontSize))}>${block.html}</p>`,
     closeComment('paragraph'),
   ].join('\n');
 }
 
 function serializeHeading(block: HeadingBlock): string {
-  // level 2 是核心預設值，預設值不會被寫進屬性。順序固定 level 在 fontSize 前面。
+  // level 2 是核心預設值，預設值不會被寫進屬性。順序固定 level → fontSize → style。
   const attrs: Record<string, unknown> = {};
   if (block.level !== 2) attrs.level = block.level;
   if (block.fontSize !== null) attrs.fontSize = block.fontSize;
+  if (block.textAlign) attrs.style = textAlignStyle(block.textAlign);
 
+  // class 順序：wp-block-heading（generated-class-name 放到最前面）→ 對齊 → 字級。
   const tag = `h${block.level}`;
   return [
     openComment('heading', attrs),
-    `<${tag}${classAttr('wp-block-heading', fontSizeClass(block.fontSize))}>${block.html}</${tag}>`,
+    `<${tag}${classAttr('wp-block-heading', textAlignClassOf(block.textAlign), fontSizeClass(block.fontSize))}>${block.html}</${tag}>`,
     closeComment('heading'),
   ].join('\n');
 }

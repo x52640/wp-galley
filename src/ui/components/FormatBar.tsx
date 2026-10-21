@@ -25,12 +25,16 @@ const ICONS: Partial<Record<FormatCommand, IconName>> = {
   ol: 'list-ordered',
   quote: 'text-quote',
   hr: 'minus',
+  'align-left': 'align-left',
+  'align-center': 'align-center',
+  'align-right': 'align-right',
 };
 
-/** 按鈕分組：行內格式｜段落種類｜清單與引用｜分隔線。 */
+/** 按鈕分組：行內格式｜段落種類｜對齊｜清單與引用｜分隔線。 */
 const GROUPS: readonly (readonly FormatCommand[])[] = [
   ['link', 'bold', 'italic'],
   ['h2', 'h3', 'paragraph'],
+  ['align-left', 'align-center', 'align-right'],
   ['ul', 'ol', 'quote'],
   ['hr'],
 ];

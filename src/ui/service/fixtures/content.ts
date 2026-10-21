@@ -1,6 +1,7 @@
 /** 內容（對應後端 `service/content.ts`）：建新版本、渲染、校樣。 */
 
 import { EMPTY_BODY_HTML } from '../../../contract/empty-body.js';
+import { TEXT_ALIGN_CSS } from '../../../contract/text-align.js';
 import { checkPlainTitle, sameTitle } from '../../../contract/plain-title.js';
 import type { CreateRevisionInput, JobDetail, PublisherApi, RenderOutcome } from '../types.js';
 import { countOpenReviewItems, pendingReviewBlocker } from '../../../contract/review-state.js';
@@ -32,6 +33,7 @@ body { background:#fff; }
 .preview-meta { margin:0; font-size:.85rem; color:#6b7280; }
 .preview-body > :first-child { margin-top:0; }
 .preview-body p { margin:0 0 1.5rem; }
+${TEXT_ALIGN_CSS}
 .preview-body h3 { font-size:1.25rem; line-height:1.5; margin:2.75rem 0 1rem; color:#14161a; }
 .preview-body ul { margin:0 0 1.5rem; padding-left:1.5rem; }
 .preview-body li { margin-bottom:.5rem; }

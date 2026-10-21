@@ -56,6 +56,28 @@ const PATHS: Record<string, JSX.Element> = {
       <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
     </>
   ),
+  // 對齊（D-049）：Lucide text-align-start／center／end。
+  'align-left': (
+    <>
+      <path d="M21 5H3" />
+      <path d="M15 12H3" />
+      <path d="M17 19H3" />
+    </>
+  ),
+  'align-center': (
+    <>
+      <path d="M21 5H3" />
+      <path d="M17 12H7" />
+      <path d="M19 19H5" />
+    </>
+  ),
+  'align-right': (
+    <>
+      <path d="M21 5H3" />
+      <path d="M21 12H9" />
+      <path d="M21 19H7" />
+    </>
+  ),
   'text-quote': (
     <>
       <path d="M17 6H3" />
