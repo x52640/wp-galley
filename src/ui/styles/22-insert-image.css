@@ -55,6 +55,9 @@
 .insert-slot:focus-within .insert-slot-btn,
 .insert-slot[data-open='yes'] .insert-slot-btn { opacity: 1; }
 .insert-slot[data-open='yes'] .insert-slot-btn { background: #E4EDE8; }
+/* 打字模式（P5-T049）：整條不接滑鼠，點段落之間的空白照樣是放游標；只有中間那顆按鈕接得到（移過去才出現）。 */
+.proof-sheet[data-editing='yes'] .insert-slot { pointer-events: none; }
+.proof-sheet[data-editing='yes'] .insert-slot-btn { pointer-events: auto; }
 
 .insert-pop {
   position: absolute;

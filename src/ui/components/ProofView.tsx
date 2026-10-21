@@ -15,7 +15,8 @@ import { useProofFrame, useProofMeasure } from '../lib/use-proof-frame.js';
 import { DraftNotice, DropWarning, EditBar, EditToolbar } from './EditToolbar.js';
 import { useDraftBackup, type DraftBackupState, type ProofDraftInput } from '../lib/use-draft-backup.js';
 import { MarkGutter } from './MarkPin.js';
-import { InsertSlots, useInsertSlots } from './InsertSlots.js';
+import { InsertSlots, useInsertSlots, type InsertImageRender, type InsertWriter } from './InsertSlots.js';
+import { INSERT_LOCK_NOTE } from '../lib/insert-while-writing.js';
 import { useWordCount } from '../lib/use-word-count.js';
 import { WORD_COUNT_HINT, formatWordCount, wordCountNumber } from '../lib/word-count.js';
 
@@ -61,9 +62,12 @@ export type { ProofHighlight } from '../lib/proof-highlights.js';
  * 按「儲存」時標題與正文一起送，存成同一個新版本；標題清空不准存（`lib/write-in-place.ts`）。
  * 正文是空的（新稿件剛建好）時放一個空段落與「從這裡開始寫…」的提示（CSSOM 規則，不改正文）。
  *
- * **五、在這裡插圖（P5-T016）。**
+ * **五、在這裡插圖（P5-T016；打字模式 D-048，P5-T049）。**
  * 段落之間滑鼠移過去出現「在這裡插圖」，畫在 iframe 外層、位置用同一份量到的區塊座標。
- * 要不要出現由上層決定（`insertImage` 給 null 就不畫），編輯中這裡再擋一次。狀態與畫面在 `InsertSlots.tsx`（P5-T043）。
+ * 要不要出現由上層決定（`insertImage` 給 null 就不畫）。狀態與畫面在 `InsertSlots.tsx`（P5-T043）。
+ * 打字模式也出現：面板拿到 `InsertWriter`，放圖時擋打字、有改先照「儲存」存一版、放好之後把圖插進編輯區、留在打字模式
+ * （`lib/insert-while-writing.ts`，接線在打字模式的 hook `placeWhileWriting`）。游標在圖片上按 Enter／方向鍵／打字的處理在
+ * `lib/figure-caret.ts`（iframe 載入時由 `lib/use-proof-frame.ts` 掛上）。
  *
  * **六、選字「查證這句」（P6-T005，D-034；打字模式 D-036）。**
  * 在正文或標題上選一段字，選取下方浮出一顆膠囊按鈕（樣子跟「在這裡插圖」一致），畫在 iframe 外層，
@@ -160,7 +164,12 @@ export function ProofView({
    * 失敗就丟錯，留在編輯中。`onSaved`（存好要離開打字模式時才有）：存成功、重讀之前帶著存好的 hash 呼叫，
    * 留底在這時處理（沒再打字就刪，P5-T048）。
    */
-  onSaveEdit?: (save: { editedBody?: string; editedTitle?: string; stay?: boolean; onSaved?: (savedHash: string) => void }) => Promise<string>;
+  onSaveEdit?: (save: {
+    editedBody?: string;
+    editedTitle?: string;
+    stay?: boolean;
+    onSaved?: (savedHash: string, publishHtml: string, templateData: Record<string, unknown>) => void;
+  }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
   /** 進入編輯時要找的字與段落都標不出來（游標掉在文章開頭）：要在頂端講的話（P5-T037）。 */
@@ -169,7 +178,7 @@ export function ProofView({
    * 「在這裡插圖」按下去之後的面板內容（P5-T016）。null＝不給插（對照中、成品、稿件結束…）。
    * `afterBlockIndex` 跟 `placeMedia` 同一套索引，-1＝最前面。
    */
-  insertImage?: ((afterBlockIndex: number, close: () => void) => ReactNode) | null;
+  insertImage?: InsertImageRender | null;
   /**
    * 選字「查證這句」（P6-T005）。null＝不給（對照、成品、改字中、稿件結束）。
    * `blockedReason` 不是 null 時膠囊照樣出現但反灰、講原因（另一個 AI 動作在跑…）。
@@ -215,9 +224,12 @@ export function ProofView({
         : (save) => {
             const draftState = draftRef.current;
             const token = draftState?.beginSave() ?? null;
+            const { onSavedBase, ...rest } = save;
             return onSaveEdit({
-              ...save,
-              onSaved: (savedHash) => {
+              ...rest,
+              onSaved: (savedHash, publishHtml, templateData) => {
+                // 打字中插圖核對新版本的基準（正文與標題，Codex P1、第二輪 3）。
+                onSavedBase?.(publishHtml, templateData);
                 if (token === null) return;
                 // 先存再做（stay）留在打字模式：留底照寫，基準換成這次自己存好的那一版（只在這裡換，Codex 第一輪 1）。
                 if (save.stay === true) draftState?.rebase(token, savedHash);
@@ -229,6 +241,12 @@ export function ProofView({
     onEndEdit,
     onEditTargetMissing,
     onDiscardDraft: () => draftRef.current?.discardSession(),
+    // 打字中插圖放好、合併回編輯區（P5-T049）：留底照寫，基準換成放好的那一版（不然重新整理會問「有沒存的內容」）。
+    onPlaced: (savedHash) => {
+      const draftState = draftRef.current;
+      const token = draftState?.beginSave() ?? null;
+      if (draftState && token !== null) draftState.rebase(token, savedHash);
+    },
   });
   const { isEditing, hold, shown, saving } = edit;
   // 內容一改就換一個網址，iframe 才會真的重載而不是吃快取。
@@ -281,10 +299,29 @@ export function ProofView({
 
   // 在這裡插圖（P5-T043 抽出）：不給插了（進了對照、打開發布面板、開始改字…）就把打開的面板收掉。
   const insert = useInsertSlots({
-    canInsert: insertImage !== null && mode === 'edit' && !isEditing && !loading && blocks.length > 0,
+    canInsert: insertImage !== null && mode === 'edit' && !loading && blocks.length > 0,
     blocks,
     scrollRef,
   });
+
+  // 打字模式插圖（P5-T049）：面板拿到的放圖與「請 AI 配一張」先存再做。
+  const insertWriter = isEditing
+    ? (afterDomIndex: number): InsertWriter => ({
+        // 插入點在開始放圖（按「放這裡」、開始上傳）時記住，放的時候照那一塊目前的位置算（Codex 第二輪 1）。
+        mark: () => edit.markInsertTarget(afterDomIndex),
+        place: (target, put, done, merged) =>
+          edit.placeWhileWriting({ target, put, done, ...(merged === undefined ? {} : { merged }) }),
+        confirmPending: edit.insertAwaiting,
+        // 放圖中、或插圖在等「照樣存」：面板整個鎖住（Codex 第二輪 2）。
+        // 選字動作的先存還在跑（saving）也鎖：放圖跟所有存檔互斥（Codex 第三輪 1）。
+        busy: edit.saving || edit.placing || edit.insertAwaiting,
+        withSaved: async (act) => {
+          // 索引在存之前、用同一份畫面換算（存檔整理會拿掉空段落等）。
+          const afterBlockIndex = edit.savedIndexOf(afterDomIndex);
+          await edit.actWhileWriting((savedHash) => act({ afterBlockIndex, contentHash: savedHash }));
+        },
+      })
+    : null;
 
   // 底部字數（P5-T047）。排在所有既有 hook 之後，不動上面 effect 的順序。
   const wordCount = useWordCount({
@@ -345,13 +382,22 @@ export function ProofView({
       </header>
       {isEditing && <EditToolbar edit={edit} />}
       <DropWarning edit={edit} />
-      <DraftNotice draft={draftBackup} saving={saving} />
+      {/* 插圖擋打字中不給「恢復」：恢復會換掉正文，放好的圖合併回來時那些字會被當成已存（P5-T049 審查 1）。 */}
+      <DraftNotice
+        draft={edit.placing ? { ...draftBackup, canRestore: false, restoreBlockedNote: INSERT_LOCK_NOTE } : draftBackup}
+        saving={saving}
+      />
       {edit.saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 沒存成功：{edit.saveError}
         </p>
       )}
       <SelectionNotice actions={selectionActions} />
+      {edit.placing && (
+        <p className="proof-status" role="status">
+          {INSERT_LOCK_NOTE}
+        </p>
+      )}
       {edit.actError && !edit.saveError && (
         <p className="proof-status proof-status-bad" role="alert">
           <Icon name="alert" size={15} /> 已存，但接著的動作沒做成：{edit.actError}
@@ -391,7 +437,7 @@ export function ProofView({
               />
             )}
 
-            <InsertSlots state={insert} column={column} insertImage={insertImage} />
+            <InsertSlots state={insert} column={column} insertImage={insertImage} writer={insertWriter} locked={edit.placing} />
 
             <SelectionActions actions={selectionActions} editing={isEditing} saving={saving} />
 

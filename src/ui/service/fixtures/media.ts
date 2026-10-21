@@ -141,6 +141,8 @@ export const mediaApi: Pick<PublisherApi, 'addMedia' | 'replaceMedia' | 'removeM
     const figure = figureHtml(asset);
     kept.splice(target + 1, 0, figure);
     replaceBody(job, kept.join('\n'), '移動了圖片的位置');
+    // 跟後端一樣回新版本（P5-T049：打字模式插圖要拿它合併回編輯區）。
+    return clone(job.currentRevision!);
   },
 
   async setFeaturedMedia(uuid: string, assetId: number | null) {

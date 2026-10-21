@@ -26,9 +26,9 @@ describe('stageDisplay', () => {
   });
 });
 
-/** 「在這裡插圖」什麼時候出現（P5-T016）：只在看文章的時候，而且不是正在改字。 */
+/** 「在這裡插圖」什麼時候出現（P5-T016）：只在看文章的時候；打字模式也出現（D-048，P5-T049）。 */
 describe('canInsertImages', () => {
-  const idle = { editing: false, finished: false, working: false };
+  const idle = { finished: false, working: false };
 
   it('看文章時出現', () => {
     expect(canInsertImages(stageDisplay('article', false), idle)).toBe(true);
@@ -42,8 +42,8 @@ describe('canInsertImages', () => {
     expect(canInsertImages(stageDisplay('article', true), idle)).toBe(false);
   });
 
-  it('直接在文章上改的時候不出現', () => {
-    expect(canInsertImages(stageDisplay('article', false), { ...idle, editing: true })).toBe(false);
+  it('打字模式也出現（D-048）：按下先存再插', () => {
+    expect(canInsertImages(stageDisplay('article', false), idle)).toBe(true);
   });
 
   it('AI 還在跑、或稿件已經結束時不出現', () => {

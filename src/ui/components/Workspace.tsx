@@ -368,9 +368,8 @@ export function Workspace({
     running: working === true,
     finished: isFinished(job.state),
   });
-  // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
+  // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒有 AI 在跑的時候出現；打字模式也有（D-048，按下先存再插）。
   const insertable = canInsertImages(display, {
-    editing: editing !== null,
     finished: isFinished(job.state),
     working: working === true,
   });
@@ -564,10 +563,18 @@ export function Workspace({
             }
             insertImage={
               insertable
-                ? (afterBlockIndex, close) => (
+                ? (afterBlockIndex, close, writer) => (
                     <InsertImagePanel
                       job={job}
                       afterBlockIndex={afterBlockIndex}
+                      writer={writer}
+                      currentHash={knownHash}
+                      placeAsset={(assetId, index) => api.placeMedia(job.uuid, assetId, index)}
+                      onMerged={(contentHash) => {
+                        // 打字中放的（P5-T049）：核對過「已知那一版＋這張圖」、合併回編輯區之後，下一次存檔的基準才推進到它
+                        // （Codex P1：對不上就不推進，下次存檔用舊基準、被後端擋下來，不會默默蓋掉別處的修改）。
+                        if (isOnJob(job.uuid)) rememberSaved(contentHash);
+                      }}
                       blockText={blocks.find((block) => block.index === afterBlockIndex)?.text ?? null}
                       onRefresh={refresh}
                       onPlaced={async () => {
@@ -599,7 +606,7 @@ export function Workspace({
                 manualRevisionInput({ editedBody, editedTitle, from: editing, base }),
               );
               // 存好了：留底（P5-T048）在重讀之前刪掉，不然重讀換版本、校樣重載時會被當成還沒存的內容。換篇了也照刪。
-              onSaved?.(saved.contentHash);
+              onSaved?.(saved.contentHash, saved.publishHtml, saved.templateData);
               if (!isOnJob(origin)) return saved.contentHash;
               if (stay) {
                 rememberSaved(saved.contentHash);

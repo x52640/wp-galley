@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **105 檔 / 2356 測試**全綠（2026-10-13，P5-T048 分支；main 是 103／2283）
+- `npm run verify`：typecheck 通過；Vitest **105 檔 / 2356 測試**全綠（2026-10-13，main @ fd49b18）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。
+- [P5-T050](tasks/P5-T050-text-align.md)（D-049）段落與小標對齊：另一個 worktree 實作完，等打字模式插圖那張合併後開 PR
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,6 +20,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T049](tasks/P5-T049-insert-image-while-typing.md) | 打字模式寫一段不存 → 段落間「在這裡插圖」→ 上傳一張 → 圖出現、剛寫的字都在、還在打字模式；按 Enter 開空段落再在它下面插圖也一樣；最後一張圖後按 → 或 ↓ 打字、按 Enter → 靠左 → 存草稿看後台 |
 | [P5-T048](tasks/P5-T048-autosave-draft.md) | 打字模式寫幾段不按儲存 → 重新整理 → 同一篇自動回到打字模式、內容都在、提示「已恢復…」→ 儲存 → 再重新整理不再提示；另寫幾段 → 闔螢幕休眠幾分鐘再打開 → 頁面沒有自己重新整理 |
 | [P5-T047](tasks/P5-T047-word-count.md) | 開一篇真實草稿 → 編輯區右下「N 字」合理 → 打字模式打幾個字數字即時變 → 發布面板「正文 N 字」相同 |
 | [P5-T046](tasks/P5-T046-link-new-tab.md) | 長文加連結、勾「在新分頁開啟」→ 存草稿 → 後台該連結是 `target="_blank" rel="noopener"`、前台點了開新分頁；再打開連結框取消勾選 → 存 → 屬性消失 |
@@ -44,6 +45,12 @@
 | [P5-T025](tasks/P5-T025-edit-image-prompt.md) | 一鍵配圖 → 改封面 prompt → 存 → Codex 生圖照新描述 |
 | [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
+
+## 上次停在哪（2026-10-13 收官）
+
+- 使用者打字模式寫的一篇沒存，休眠醒來 Vite 重連自動 reload，整篇不見（救不回）。D-047 → P5-T048 合併 #36：沒存的內容留底到 localStorage、Vite 重連不 reload。獨立審查一輪＋Codex 三輪（後三輪都是多分頁掉字的邊角），**第三輪修正沒經過 Codex**。
+- 新原則（memory `publisher-no-data-loss`）：掉資料都算 bug，不准叫使用者「記得常存檔」。
+- P5-T048 手動驗證待做（見上表）；「打字中別處存新版本」「存檔回應前又打字」只有自動測試。
 
 ## 上次停在哪（2026-10-12 收官）
 
