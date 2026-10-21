@@ -665,7 +665,7 @@ describe('接法（use-draft-backup／use-proof-editing／use-proof-frame／Proo
     const unchanged = editing.slice(editing.indexOf("decision.kind === 'unchanged'"), editing.indexOf("decision.kind === 'invalid-title'"));
     expect(unchanged).toContain('onDiscardDraft');
     const save = workspace.slice(workspace.indexOf('onSaveEdit={async'), workspace.indexOf('tools={'));
-    expect(save).toContain('onSaved?.(saved.contentHash, saved.publishHtml)');
+    expect(save).toContain('onSaved?.(saved.contentHash, saved.publishHtml, saved.templateData)');
     expect(save.indexOf('onSaved?.(')).toBeGreaterThan(save.indexOf('api.createRevision'));
     expect(save.indexOf('onSaved?.(')).toBeLessThan(save.indexOf('await refresh()'));
   });

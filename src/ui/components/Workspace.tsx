@@ -606,7 +606,7 @@ export function Workspace({
                 manualRevisionInput({ editedBody, editedTitle, from: editing, base }),
               );
               // 存好了：留底（P5-T048）在重讀之前刪掉，不然重讀換版本、校樣重載時會被當成還沒存的內容。換篇了也照刪。
-              onSaved?.(saved.contentHash, saved.publishHtml);
+              onSaved?.(saved.contentHash, saved.publishHtml, saved.templateData);
               if (!isOnJob(origin)) return saved.contentHash;
               if (stay) {
                 rememberSaved(saved.contentHash);

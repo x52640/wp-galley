@@ -47,8 +47,10 @@ import {
   InsertSaveError,
   lockWriting,
   placedFigure,
-  placedOnBase,
+  placedMatchesBase,
   prefixNodes,
+  targetIndex,
+  INSERT_TARGET_GONE,
   runInsertWhileWriting,
   savedAfterIndex,
   savedAnchor,
@@ -127,6 +129,10 @@ export interface ProofEditing {
   placeWhileWriting: (request: InsertPlaceRequest) => Promise<InsertResult>;
   /** 擋打字中（插圖存檔到放進編輯區之間）。 */
   placing: boolean;
+  /** 插圖正在等「照樣存」的回答：面板跟放圖中一樣鎖住（Codex 第二輪 2）。 */
+  insertAwaiting: boolean;
+  /** 開始放圖（按「放這裡」、開始上傳）時記住插入點那一塊。 */
+  markInsertTarget: (afterDomIndex: number) => InsertTarget;
   /** 編輯區第 `afterDomIndex` 塊換算成存好那一版（存之前的整理規則）的第幾塊。 */
   savedIndexOf: (afterDomIndex: number) => number;
   /** 丟格式警告的「回去改」。 */
@@ -143,8 +149,8 @@ export interface ProofEditing {
 
 /** 打字模式插圖（`placeWhileWriting`）的請求。 */
 export interface InsertPlaceRequest {
-  /** 插在編輯區第幾塊之後（量到的區塊索引；-1＝最前面）。 */
-  afterDomIndex: number;
+  /** 插在編輯區哪一塊之後（開始放圖時記住的節點，`markInsertTarget`）：上傳期間前面加刪段落，位置跟著它走。 */
+  target: InsertTarget;
   /** 放圖：收到存好那一版的索引，回傳放好之後的版本（hash 與會發布的正文）。 */
   put: (afterBlockIndex: number) => Promise<PlacedRevision>;
   /** 放好之後（關面板、重讀）。 */
@@ -153,8 +159,15 @@ export interface InsertPlaceRequest {
   merged?: (contentHash: string) => void;
 }
 
+/** 開始放圖時記住的插入點：那一塊的節點；null＝插在最前面（Codex 第二輪 1）。 */
+export interface InsertTarget {
+  readonly node: Element | null;
+}
+
 export interface PlacedRevision {
   contentHash: string;
+  /** 放好之後的欄位（標題）：合併前核對標題沒被別處改過（Codex 第二輪 3）。 */
+  templateData: Record<string, unknown>;
   /** 放好之後會發布的正文（後端的 rendered_html）：從這裡拿那塊圖、當下一次存檔的基準。 */
   publishHtml: string;
 }
@@ -184,7 +197,12 @@ export function useProofEditing({
   measure: (token: number) => void;
   measureToken: MutableRefObject<number>;
   onSaveEdit:
-    | ((save: { editedBody?: string; editedTitle?: string; stay?: boolean; onSavedHtml?: (publishHtml: string) => void }) => Promise<string>)
+    | ((save: {
+        editedBody?: string;
+        editedTitle?: string;
+        stay?: boolean;
+        onSavedBase?: (publishHtml: string, templateData: Record<string, unknown>) => void;
+      }) => Promise<string>)
     | undefined;
   onEndEdit: ((notice?: string) => void) | undefined;
   onEditTargetMissing: ((notice: string) => void) | undefined;
@@ -217,7 +235,8 @@ export function useProofEditing({
    * 編輯區對應的那一版「會發布的正文」（進入編輯時的版本，之後換成這次打字中自己存的、放好圖的那一版）：
    * 打字中插圖時核對後端回的新版本是不是「這一版＋這張圖」（Codex P1）。
    */
-  const basePublish = useRef<string | null>(null);
+  const basePublish = useRef<{ html: string; title: string } | null>(null);
+  const titleOf = (templateData: Record<string, unknown> | null): string => readString(templateData, 'title', job.title ?? '');
   /** 進入編輯那一刻的標題（P5-T029）：取消時還原、存檔時比對有沒有改。 */
   const originalTitle = useRef<string | null>(null);
   const savedTitle = readString(job.currentRevision?.templateData ?? null, 'title', job.title ?? '');
@@ -366,7 +385,7 @@ export function useProofEditing({
       setFormatState(null);
       setLinkEditor(null);
       setDropWarning(null);
-      pendingCheck.current = null;
+      setPending(null);
       linkTarget.current = null;
       return;
     }
@@ -378,7 +397,10 @@ export function useProofEditing({
       originalUnits.current = snapshotBody(body);
       originalClean.current = cleanEditedBody(body, allowRef.current, originalUnits.current).html;
       originalTitle.current = title?.textContent ?? null;
-      basePublish.current = job.currentRevision?.publishHtml ?? null;
+      basePublish.current =
+        job.currentRevision === null || job.currentRevision === undefined
+          ? null
+          : { html: job.currentRevision.publishHtml, title: titleOf(job.currentRevision.templateData) };
       // 空文章（新稿件剛建好）：放一個有高度的空段落，游標才有地方停（存檔時照樣整理掉）。
       if (isBlankBody(body.innerHTML)) body.innerHTML = '<p><br></p>';
     }
@@ -441,8 +463,17 @@ export function useProofEditing({
    */
   const pendingCheck = useRef<((force: true) => Promise<void>) | null>(null);
   /** 打字中自己存好一版：之後核對插圖新版本用它當基準。 */
-  const rememberBase = (publishHtml: string): void => {
-    basePublish.current = publishHtml;
+  const rememberBase = (publishHtml: string, templateData: Record<string, unknown>): void => {
+    basePublish.current = { html: publishHtml, title: titleOf(templateData) };
+  };
+  /** 插圖正在等「照樣存」（state 給畫面、ref 給重入判斷）。 */
+  const [insertAwaiting, setInsertAwaiting] = useState(false);
+  const insertAwaitingRef = useRef(false);
+  /** 換掉「照樣存」之後要做的事；`insert`＝是插圖在等（面板鎖住）。null 一併清掉插圖的等待。 */
+  const setPending = (resume: ((force: true) => Promise<void>) | null, insert = false): void => {
+    pendingCheck.current = resume;
+    insertAwaitingRef.current = resume !== null && insert;
+    setInsertAwaiting(resume !== null && insert);
   };
   /** 插圖擋打字中（P5-T049）。ref 給事件處理用：擋打字期間恢復留底、連結、格式指令都不做（審查 1）。 */
   const [placing, setPlacing] = useState(false);
@@ -450,7 +481,7 @@ export function useProofEditing({
 
   const saveEdit = async (force = false): Promise<void> => {
     // 按的是「儲存」：之前「查證這句」留下、等著「照樣存」的那段字作廢。
-    pendingCheck.current = null;
+    setPending(null);
     const body = editBody();
     if (!body) return;
     // 存檔前整理一次（P5-T028）：b／i 轉 strong／em、瀏覽器的 div／<p><ul> 整理好、模板不支援的格式拿掉。
@@ -544,7 +575,7 @@ export function useProofEditing({
       }),
     );
     if (plan.kind === 'check') {
-      pendingCheck.current = null;
+      setPending(null);
       setDropWarning(null);
       try {
         await act(null);
@@ -554,17 +585,17 @@ export function useProofEditing({
       return;
     }
     if (plan.kind === 'invalid-title') {
-      pendingCheck.current = null;
+      setPending(null);
       setDropWarning(null);
       setSaveError(plan.message);
       return;
     }
     if (plan.kind === 'confirm-drop') {
-      pendingCheck.current = (again) => actWhileWriting(act, again);
+      setPending((again) => actWhileWriting(act, again));
       setDropWarning([...plan.dropped]);
       return;
     }
-    pendingCheck.current = null;
+    setPending(null);
     setDropWarning(null);
     setSaving(true);
     setSaveError(null);
@@ -575,7 +606,7 @@ export function useProofEditing({
     setHold(started);
     let saved: string | null = null;
     await saveThenAct({
-      save: async () => (await onSaveEdit?.({ ...plan.save, stay: true, onSavedHtml: rememberBase })) ?? null,
+      save: async () => (await onSaveEdit?.({ ...plan.save, stay: true, onSavedBase: rememberBase })) ?? null,
       onSaved: (savedHash) => {
         saved = savedHash;
         setSaving(false);
@@ -624,6 +655,8 @@ export function useProofEditing({
 
   /** 打字模式插圖（P5-T049，D-048）：流程與為什麼擋打字見 `lib/insert-while-writing.ts`。 */
   const placeWhileWriting = async (request: InsertPlaceRequest, force = false): Promise<InsertResult> => {
+    // 不准重入（Codex 第二輪 2）：另一張圖正在放、或正在等「照樣存」，兩趟一起跑會有一趟提早放開擋打字。
+    if (placingRef.current || insertAwaitingRef.current) throw new Error('正在放另一張圖（或在等「照樣存」的回答），等它好了再放這張。');
     setActError(null);
     const origin = job.uuid;
     const stillHere = (): boolean => editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin });
@@ -644,7 +677,7 @@ export function useProofEditing({
       holdRef.current = next;
       setHold(next);
     };
-    const domIndex = request.afterDomIndex;
+    let domIndex = -1;
     let anchorText: string | null = null;
     /** 照樣存把編輯區換成存進去的樣子了：之後編輯區的區塊就是存好那一版的區塊。 */
     let replaced = false;
@@ -680,26 +713,32 @@ export function useProofEditing({
           }),
         );
         if (plan.kind === 'invalid-title') {
-          pendingCheck.current = null;
+          setPending(null);
           setDropWarning(null);
           return { kind: 'invalid', message: plan.message };
         }
         if (plan.kind === 'confirm-drop') {
           // 按「照樣存」才接著放；那時面板那一趟已經結束：存檔的錯講成「沒存成功」，其他講成動作沒做成（審查 3）。
-          pendingCheck.current = async (again) => {
+          setPending(async (again) => {
+            // 不再等了：先清掉等待（不然下面的重入判斷會擋掉自己）。
+            setPending(null);
             try {
               await placeWhileWriting(request, again);
             } catch (cause) {
               if (cause instanceof InsertSaveError) setSaveError(cause.message);
               else setActError(describeError(cause));
             }
-          };
+          }, true);
           setDropWarning([...plan.dropped]);
           return { kind: 'confirm' };
         }
-        pendingCheck.current = null;
+        setPending(null);
         setDropWarning(null);
         setSaveError(null);
+        // 插入點：開始放圖時記住的那一塊目前在哪（上傳期間前面加刪段落，Codex 第二輪 1）；不見了就不放。
+        const at = targetIndex(Array.from(body.children), request.target.node);
+        if (at === null) return { kind: 'missing', message: INSERT_TARGET_GONE };
+        domIndex = at;
         // 錨點：往前第一個整理後還存在的區塊（空段落下面插圖，審查 2）。
         const anchor = savedAnchor(prefixNodes(body, domIndex), originalUnits.current, allow);
         anchorText = anchor.text;
@@ -710,7 +749,7 @@ export function useProofEditing({
       save: async ({ save, html }) => {
         let savedHash: string | undefined;
         try {
-          savedHash = await onSaveEdit?.({ ...save, stay: true, onSavedHtml: rememberBase });
+          savedHash = await onSaveEdit?.({ ...save, stay: true, onSavedBase: rememberBase });
         } catch (cause) {
           holdSettle(null);
           throw new Error(describeError(cause));
@@ -748,9 +787,14 @@ export function useProofEditing({
         // 照樣存換過畫面：編輯區的區塊就是存好那一版的區塊，位置用換算後的。
         const at = replaced ? afterIndex : domIndex;
         const placedBlocks = htmlBlocks(placed.publishHtml);
-        const known = basePublish.current === null ? null : htmlBlocks(basePublish.current);
-        // 整份核對：新版本＝我們知道的那一版＋這張圖（Codex P1）。別處改過就不合併。
-        const figure = placedOnBase(placedBlocks, known, afterIndex) ? placedFigure(placedBlocks, afterIndex, anchorText) : null;
+        const known = basePublish.current;
+        // 整份核對：新版本＝我們知道的那一版＋這張圖，標題也一樣（Codex P1、第二輪 3）。別處改過就不合併。
+        const matches = placedMatchesBase(
+          { blocks: placedBlocks, title: titleOf(placed.templateData) },
+          known === null ? null : { blocks: htmlBlocks(known.html), title: known.title },
+          afterIndex,
+        );
+        const figure = matches ? placedFigure(placedBlocks, afterIndex, anchorText) : null;
         // 基準：存檔那一刻的內容＋插入的圖（不拿當下畫面）。
         const baseline = figure === null ? null : withFigure(doc, snapshot, at, figure);
         if (figure === null || baseline === null) return false;
@@ -759,7 +803,7 @@ export function useProofEditing({
         originalUnits.current = snapshotHtml(placed.publishHtml);
         originalClean.current = cleanEditedBody(baseline, allowRef.current, originalUnits.current).html;
         originalBody.current = baseline.innerHTML;
-        basePublish.current = placed.publishHtml;
+        basePublish.current = { html: placed.publishHtml, title: titleOf(placed.templateData) };
         setAutoSaved(true);
         markBlank(body);
         measure(measureToken.current);
@@ -783,7 +827,7 @@ export function useProofEditing({
     });
   };
   const dismissDrop = (): void => {
-    pendingCheck.current = null;
+    setPending(null);
     setDropWarning(null);
   };
 
@@ -869,6 +913,8 @@ export function useProofEditing({
     actWhileWriting,
     placeWhileWriting: (request) => placeWhileWriting(request),
     placing,
+    insertAwaiting,
+    markInsertTarget: (afterDomIndex) => ({ node: afterDomIndex < 0 ? null : (editBody()?.children[afterDomIndex] ?? null) }),
     savedIndexOf,
     dismissDrop,
     confirmDrop,

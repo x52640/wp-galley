@@ -14,8 +14,10 @@ import {
 import {
   InsertSaveError,
   placedFigure,
+  placedMatchesBase,
   placedOnBase,
   runInsertWhileWriting,
+  targetIndex,
   savedAfterIndex,
   savedAnchor,
   topLevelCount,
@@ -152,6 +154,41 @@ describe('新版本必須是「我們知道的那一版＋這張圖」（Codex P
   });
 });
 
+describe('標題也要跟基準一樣（Codex 第二輪 3：別處只改標題）', () => {
+  const blocks = [{ tag: 'p', text: '一', html: '<p>一</p>' }];
+  const fig = { tag: 'figure', text: '', html: '<figure><img class="wp-image-9"></figure>' };
+
+  it('正文＝基準＋圖、標題一樣：對得上', () => {
+    expect(placedMatchesBase({ blocks: [...blocks, fig], title: '標題' }, { blocks, title: '標題' }, 0)).toBe(true);
+  });
+
+  it('標題被別處改過：對不上', () => {
+    expect(placedMatchesBase({ blocks: [...blocks, fig], title: '別人改的標題' }, { blocks, title: '標題' }, 0)).toBe(false);
+  });
+
+  it('不知道基準：對不上', () => {
+    expect(placedMatchesBase({ blocks: [...blocks, fig], title: '標題' }, null, 0)).toBe(false);
+  });
+});
+
+describe('上傳中在插入點前面加刪段落：用開始放圖時記住的那一塊算目前位置（Codex 第二輪 1）', () => {
+  const a = { id: 'a' };
+  const b = { id: 'b' };
+  const c = { id: 'c' };
+
+  it('前面多了一段：位置跟著那一塊走', () => {
+    expect(targetIndex([a, c, b], b)).toBe(2);
+  });
+
+  it('插在最前面（沒有錨點那一塊）：一律 -1', () => {
+    expect(targetIndex([a, b], null)).toBe(-1);
+  });
+
+  it('那一塊不見了：null（不放、講原因）', () => {
+    expect(targetIndex([a, c], b)).toBeNull();
+  });
+});
+
 describe('打字模式插圖的順序：先擋打字、先存再放、出錯一定放開打字', () => {
   function harness(options: {
     prepare?: InsertPrepare<string>;
@@ -218,6 +255,14 @@ describe('打字模式插圖的順序：先擋打字、先存再放、出錯一�
     expect(error).not.toBeInstanceOf(InsertSaveError);
     expect((error as Error).message).toBe('放不進去');
     expect(log).toEqual(['lock', 'prepare', 'save:body', 'put:2', 'unlock']);
+  });
+
+  it('插入點那一段不見了：不存不放、講原因，不算存檔錯誤', async () => {
+    const { run, log } = harness({ prepare: { kind: 'missing', message: '要插的那一段已經不見了' } });
+    const error = await run.catch((cause: unknown) => cause);
+    expect(error).not.toBeInstanceOf(InsertSaveError);
+    expect((error as Error).message).toBe('要插的那一段已經不見了');
+    expect(log).toEqual(['lock', 'prepare', 'unlock']);
   });
 
   it('標題清空之類存不了：不存不放，算存檔錯誤', async () => {
@@ -384,13 +429,28 @@ describe('接線：校樣在打字模式也畫「在這裡插圖」、圖片按�
   it('合併前核對整份新版本＝已知那一版＋這張圖；存檔基準合併成功才推進（Codex P1）', () => {
     const at = editing.indexOf('merge: (placed');
     const merge = editing.slice(at, at + 2000);
-    expect(merge).toContain('placedOnBase(');
+    expect(merge).toContain('placedMatchesBase(');
     expect(merge).toContain('request.merged');
     const workspace = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
     const start = workspace.indexOf('placeAsset={');
     const place = workspace.slice(start, workspace.indexOf('onMerged={', start));
     expect(place).not.toContain('rememberSaved');
     expect(workspace.slice(workspace.indexOf('onMerged={', start), workspace.indexOf('onMerged={', start) + 400)).toContain('rememberSaved(contentHash)');
+  });
+
+  it('放圖不准重入；照樣存等待中與放圖中面板都鎖住（Codex 第二輪 2）', () => {
+    const at = editing.indexOf('const placeWhileWriting =');
+    expect(editing.slice(at, at + 600)).toContain('if (placingRef.current || insertAwaitingRef.current)');
+    expect(proofView).toMatch(/busy: edit\.placing \|\| edit\.insertAwaiting/);
+    const panel = readFileSync(new URL('../src/ui/components/InsertImagePanel.tsx', import.meta.url), 'utf8');
+    expect(panel).toMatch(/const busy = place\.busy \|\| pick\.busy \|\| ai\.busy \|\| writer\?\.busy === true/);
+  });
+
+  it('合併前標題也核對；存檔回呼帶回標題（Codex 第二輪 3）', () => {
+    const at = editing.indexOf('merge: (placed');
+    expect(editing.slice(at, at + 2000)).toContain('placedMatchesBase(');
+    const workspace = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
+    expect(workspace).toContain('onSaved?.(saved.contentHash, saved.publishHtml, saved.templateData)');
   });
 
   it('合併的基準是存檔那一刻的內容＋插入的圖，不拿當下畫面（審查 1）', () => {

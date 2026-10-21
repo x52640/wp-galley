@@ -8,6 +8,7 @@ import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 import { assetLabel, useImageGenerationStatus } from './panels/MediaPanel.js';
 import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
 import type { InsertWriter } from './InsertSlots.js';
+import type { InsertTarget } from '../lib/use-proof-editing.js';
 import type { Revision } from '../service/types.js';
 import { INSERT_WRITING_NOTE } from '../lib/insert-while-writing.js';
 
@@ -88,14 +89,14 @@ export function InsertImagePanel({
   const putAsset = (assetId: number, index: number): Promise<Revision> =>
     placeAsset === undefined ? api.placeMedia(job.uuid, assetId, index) : placeAsset(assetId, index);
   /** 放圖：打字模式先存、放好合併回編輯區（`onPlaced` 由 writer 在放好之後呼叫）；否則直接放、再 `onPlaced`。 */
-  const placeHere = async (assetId: number): Promise<void> => {
-    if (writer === null) {
+  const placeHere = async (assetId: number, target: InsertTarget | null = writer?.mark() ?? null): Promise<void> => {
+    if (writer === null || target === null) {
       await putAsset(assetId, afterBlockIndex);
       await onPlaced();
       return;
     }
     setAwaitingConfirm(false);
-    const result = await writer.place((index) => putAsset(assetId, index), onPlaced, onMerged);
+    const result = await writer.place(target, (index) => putAsset(assetId, index), onPlaced, onMerged);
     if (result === 'confirm') {
       setAwaitingConfirm(true);
       // 剛上傳的圖要出現在上面的清單（回去改了之後還能再選）。
@@ -104,7 +105,7 @@ export function InsertImagePanel({
   };
   const generation = useImageGenerationStatus(true);
   const choices = insertableMedia(job);
-  const busy = place.busy || pick.busy || ai.busy;
+  const busy = place.busy || pick.busy || ai.busy || writer?.busy === true;
   // 另一個 Agent 動作在跑（沿用配圖卡片 runningElsewhere 的規則）：同一篇一次只跑一個。
   const agentRunning = job.agentRun?.status === 'running';
   // 確定不能用（Codex 沒裝／沒登入、Agent 在跑）才把輸入格一起鎖住；還在確認時只鎖按鈕，
@@ -371,6 +372,8 @@ export function InsertImagePanel({
                   onClick={() =>
                     void place.run(async () => {
                       const trimmed = alt.trim();
+                      // 打字模式：插入點在開始上傳時記住（上傳期間照常打字，前面加刪段落也跟著那一塊走，Codex 第二輪 1）。
+                      const target = writer?.mark() ?? null;
                       const { media: asset } = await api.addMedia(job.uuid, {
                         file: pending.blob,
                         filename: pending.filename,
@@ -381,7 +384,7 @@ export function InsertImagePanel({
                       URL.revokeObjectURL(pending.objectUrl);
                       setPending(null);
                       try {
-                        await placeHere(asset.id);
+                        await placeHere(asset.id, target);
                       } catch (cause) {
                         await onRefresh();
                         throw new Error(`圖已經上傳到媒體庫，但沒放進正文：${describeError(cause)}。可以在上面的清單再選一次。`);

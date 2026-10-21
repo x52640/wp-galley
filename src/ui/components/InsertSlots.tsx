@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode, typ
 import { Icon } from '../icons.js';
 import { insertSlots, type BlockBox } from '../lib/proof-frame.js';
 import type { InsertResult } from '../lib/insert-while-writing.js';
-import type { PlacedRevision } from '../lib/use-proof-editing.js';
+import type { InsertTarget, PlacedRevision } from '../lib/use-proof-editing.js';
 
 /**
  * 在這裡插圖（P5-T016；P5-T043 從 ProofView 抽出）。
@@ -23,10 +23,15 @@ import type { PlacedRevision } from '../lib/use-proof-editing.js';
  * - `withSaved`：請 AI 配一張。先存（有改的話），`act` 收到存好那一版的索引與 hash（沒存是 null，用畫面知道的版本）。
  */
 export interface InsertWriter {
-  /** 校樣上方正在問「照樣存」（按了「儲存」或「回去改」就不問了，面板的提示跟著收）。 */
+  /** 校樣上方正在為插圖問「照樣存」（按了「儲存」或「回去改」就不問了，面板的提示跟著收）。 */
   confirmPending: boolean;
+  /** 放圖中或插圖在等「照樣存」：面板的放圖、上傳、請 AI 都鎖住（Codex 第二輪 2）。 */
+  busy: boolean;
+  /** 開始放圖（按「放這裡」、開始上傳）時呼叫：記住插入點那一塊。 */
+  mark: () => InsertTarget;
   /** `merged`：新版本核對過、合併回編輯區之後（存檔基準推進到它；對不上不呼叫）。 */
   place: (
+    target: InsertTarget,
     put: (afterBlockIndex: number) => Promise<PlacedRevision>,
     done: () => void | Promise<void>,
     merged?: (contentHash: string) => void,

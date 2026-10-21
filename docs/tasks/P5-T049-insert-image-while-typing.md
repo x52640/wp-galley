@@ -68,6 +68,7 @@ agent、wordpress、factcheck spec。
   打字模式「請 AI 配一張」（先存、卡片位置對、留在打字模式）、最後一張圖後按 →→／↓ 再 Enter 或直接打字（新段落是乾淨 `<p>`、存後靠左）
 - 獨立審查一輪（2026-10-21）七條已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2395 測試綠，`?fixtures=1` 截圖走過空段落下插圖、圖片下一段段首 Backspace、圖片上貼上
 - PR #37 Codex 第一輪 P1（別處改過別段時只比前一塊會誤合併、之後存檔蓋掉別處修改）已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2401 測試綠，`?fixtures=1` 重跑有改先存、沒改直接放、空段落下插三條都照常合併
+- PR #37 Codex 第二輪三條已修（見「完成結果」最後一段）；修後 `npm run verify` 106 檔／2410 測試綠，`?fixtures=1` 重跑三條插圖流程照常合併
 - 下一步：Codex 下一輪；合併後移到 CURRENT_TASK 待驗證表、status 改 done
 - Blocker：無
 
@@ -96,3 +97,9 @@ agent、wordpress、factcheck spec。
   對不上就走既有的不硬合併：畫面跟存檔那一刻一樣就結束打字模式照最新版本重載並講「可能在別處改過」；不一樣就留在打字模式講清楚。
   存檔基準（`rememberSaved`）改成核對過、合併成功才推進（`onMerged`），對不上時下次存檔用舊基準、被後端 409 擋下，不會默默蓋掉。
   後端 `placeMedia` 不收基準版本（路由只收 `afterBlockIndex`、revision 也沒有 parent），要後端擋得改 `src/server`、`src/core`，不在本 Task write_paths，沒做。
+- Codex 第二輪：
+  1. 插入點在開始放圖（按「放這裡」、開始上傳）時記住那一塊的節點（`InsertWriter.mark`），放的時候（擋打字後）用 `targetIndex` 算它目前的位置；
+     上傳期間前面加刪段落位置跟著走，那一塊不見了就不存不放、講「要插圖的那一段已經不見了…圖已經在媒體庫，可以在面板上再選一次」。
+  2. 放圖不准重入（放圖中或插圖在等「照樣存」時再叫 `placeWhileWriting` 直接講原因）；面板拿 `InsertWriter.busy`（放圖中＋插圖等照樣存），三條路與關閉都鎖住。
+     「照樣存」等待改由 `setPending` 統一設定／清掉，插圖的等待（`insertAwaiting`）跟著收。
+  3. 核對基準多記標題（進入編輯時的版本、打字中自己存的版本由存檔回呼帶回 `templateData`、放好的版本），合併前 `placedMatchesBase` 正文與標題都要一樣，否則走不合併。

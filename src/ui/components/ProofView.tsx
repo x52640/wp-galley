@@ -168,7 +168,7 @@ export function ProofView({
     editedBody?: string;
     editedTitle?: string;
     stay?: boolean;
-    onSaved?: (savedHash: string, publishHtml: string) => void;
+    onSaved?: (savedHash: string, publishHtml: string, templateData: Record<string, unknown>) => void;
   }) => Promise<string>;
   /** 沒改就離開、按了取消，或編輯中版本被換掉（帶著要告訴使用者的話）。 */
   onEndEdit?: (notice?: string) => void;
@@ -224,12 +224,12 @@ export function ProofView({
         : (save) => {
             const draftState = draftRef.current;
             const token = draftState?.beginSave() ?? null;
-            const { onSavedHtml, ...rest } = save;
+            const { onSavedBase, ...rest } = save;
             return onSaveEdit({
               ...rest,
-              onSaved: (savedHash, publishHtml) => {
-                // 打字中插圖核對新版本的基準（Codex P1）。
-                onSavedHtml?.(publishHtml);
+              onSaved: (savedHash, publishHtml, templateData) => {
+                // 打字中插圖核對新版本的基準（正文與標題，Codex P1、第二輪 3）。
+                onSavedBase?.(publishHtml, templateData);
                 if (token === null) return;
                 // 先存再做（stay）留在打字模式：留底照寫，基準換成這次自己存好的那一版（只在這裡換，Codex 第一輪 1）。
                 if (save.stay === true) draftState?.rebase(token, savedHash);
@@ -307,8 +307,13 @@ export function ProofView({
   // 打字模式插圖（P5-T049）：面板拿到的放圖與「請 AI 配一張」先存再做。
   const insertWriter = isEditing
     ? (afterDomIndex: number): InsertWriter => ({
-        place: (put, done, merged) => edit.placeWhileWriting({ afterDomIndex, put, done, ...(merged === undefined ? {} : { merged }) }),
-        confirmPending: edit.dropWarning !== null,
+        // 插入點在開始放圖（按「放這裡」、開始上傳）時記住，放的時候照那一塊目前的位置算（Codex 第二輪 1）。
+        mark: () => edit.markInsertTarget(afterDomIndex),
+        place: (target, put, done, merged) =>
+          edit.placeWhileWriting({ target, put, done, ...(merged === undefined ? {} : { merged }) }),
+        confirmPending: edit.insertAwaiting,
+        // 放圖中、或插圖在等「照樣存」：面板整個鎖住（Codex 第二輪 2）。
+        busy: edit.placing || edit.insertAwaiting,
         withSaved: async (act) => {
           // 索引在存之前、用同一份畫面換算（存檔整理會拿掉空段落等）。
           const afterBlockIndex = edit.savedIndexOf(afterDomIndex);

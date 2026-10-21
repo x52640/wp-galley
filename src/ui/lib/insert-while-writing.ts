@@ -98,6 +98,32 @@ export function placedOnBase(
 }
 
 /**
+ * 正文與標題都要對得上基準（Codex 第二輪 3）：別處只改了標題時，正文核對會過、基準卻推進到含別人標題的版本，
+ * 之後改舊標題就會無衝突蓋掉。基準不知道一律對不上。
+ */
+export function placedMatchesBase(
+  placed: { readonly blocks: readonly { html: string }[]; readonly title: string },
+  base: { readonly blocks: readonly { html: string }[]; readonly title: string } | null,
+  afterIndex: number,
+): boolean {
+  if (base === null || placed.title !== base.title) return false;
+  return placedOnBase(placed.blocks, base.blocks, afterIndex);
+}
+
+/**
+ * 開始放圖時記住的那一塊（`target`；null＝插在最前面）目前在編輯區第幾塊（Codex 第二輪 1）：
+ * 上傳的期間照常打字，前面加刪段落時位置跟著那一塊走。那一塊不見了回 null（不放、講原因）。
+ */
+export function targetIndex<T>(children: readonly T[], target: T | null): number | null {
+  if (target === null) return -1;
+  const at = children.indexOf(target);
+  return at < 0 ? null : at;
+}
+
+/** 插入點那一段在上傳期間被刪掉時講的話。 */
+export const INSERT_TARGET_GONE = '要插圖的那一段已經不見了（上傳的期間被刪掉或改掉），圖沒有放；圖已經在媒體庫，可以在面板上再選一次。';
+
+/**
  * `placed`＝圖放好、留在打字模式；`confirm`＝正在問「照樣存」，還沒存也沒放；`reloaded`＝放好了但合併不回編輯區，結束打字模式重載；
  * `abandoned`＝中途換了篇或離開打字模式：不放（或放好了不合併），也不動畫面（審查 7）。
  */
@@ -115,6 +141,8 @@ export class InsertSaveError extends Error {
 export type InsertPrepare<S> =
   | { readonly kind: 'confirm' }
   | { readonly kind: 'invalid'; readonly message: string }
+  /** 插入點那一段不見了：不存不放，講原因（不是存檔錯誤）。 */
+  | { readonly kind: 'missing'; readonly message: string }
   | { readonly kind: 'go'; readonly save: S | null; readonly afterIndex: number };
 
 /**
@@ -153,6 +181,7 @@ async function runLocked<S, P>(steps: {
     const prepared = steps.prepare();
     if (prepared.kind === 'confirm') return 'confirm';
     if (prepared.kind === 'invalid') throw new InsertSaveError(prepared.message);
+    if (prepared.kind === 'missing') throw new Error(prepared.message);
     if (prepared.save !== null) {
       try {
         await steps.save(prepared.save);
