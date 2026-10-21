@@ -92,3 +92,8 @@ agent、factcheck spec。
 - PR #38 Codex 第二輪：(1) 後端 sanitize 對 p／h2／h3 的 class 也跑 `normalizeTextAlignClass`（一塊只留第一個合法的對齊，跟編輯整理同一份規則），
   Agent／templateData 正文帶兩個對齊時預覽（publishHtml）與發布區塊讀到同一個；(2) 跨段選取最後一塊算不算改看 DOM 位置（`selectionEntersBlock`＋`caretTokens`）：
   結尾前面有這塊的字、`<br>` 或圖就算，空段落被選到也算，只有停在開頭才不算。測試 6 條；Chrome 實測 `<p><br>|B</p>`、空段落、`|CC` 三種。
+- PR #38 Codex 第三輪（**這一輪的修正沒經過 Codex**）：(1) 段首／段尾的空白照「看得到就算」：正文 white-space 是 normal，只有一般空白（ASCII 空格、tab、換行、CR、FF）
+  會被摺疊、不算；`&nbsp;`、全形空白算內容（`isVisibleText`、`textTokensAtCaret`）。只有一般空格的那一邊必在行頭或行尾、被摺掉看不見，所以「 |B」是段首、「A| 」是段尾；
+  Chrome 打的會顯示的行頭行尾空格本來就存成 `&nbsp;`。(2) 跨段選取兩端都要「進去了才算」（`selectionCoversBlock`：開始端後面、結束端前面要有這一塊的內容；空段落算），
+  不分方向、不再豁免第一塊；對齊按鈕看同一個判斷（`selectionAlign` → `FormatState.alignTargets`，0 塊就反灰），按鈕跟套用一致。測試 14 條；
+  Chrome 實測：錨點在段首、反向延伸進引用 → 三顆反灰、按了不動；置中段落 `&nbsp;|B` 按 Enter 在游標處拆、兩半都置中。

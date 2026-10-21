@@ -20,7 +20,7 @@ import {
   saveSelection,
   selectionAncestors,
   selectionEmphasis,
-  selectionTextAlign,
+  selectionAlign,
   snapshotBody,
   snapshotHtml,
   type RichAllow,
@@ -297,9 +297,13 @@ export function useProofEditing({
       return;
     }
     const ancestors = selectionAncestors(doc, body);
-    setFormatState(
-      ancestors === null ? null : formatStateFrom(ancestors, selectionEmphasis(doc, body), selectionTextAlign(doc, body)),
-    );
+    if (ancestors === null) {
+      setFormatState(null);
+      return;
+    }
+    // 對齊按鈕看「按下去會套到哪幾塊」，跟實際套用同一個判斷（PR #38 Codex 第三輪）。
+    const align = selectionAlign(doc, body);
+    setFormatState(formatStateFrom(ancestors, selectionEmphasis(doc, body), align.align, align.targets));
   }, []);
 
   const openLinkEditor = useCallback(() => {

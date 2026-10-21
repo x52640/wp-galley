@@ -20,12 +20,12 @@ import {
   isCommandEnabled,
   type FormatState,
 } from '../src/ui/lib/rich-format.js';
-import { selectionEntersBlock, setBlockTextAlign, type ClassTarget } from '../src/ui/lib/rich-commands.js';
+import { selectionCoversBlock, selectionEntersBlock, setBlockTextAlign, type ClassTarget } from '../src/ui/lib/rich-commands.js';
 import { readFileSync } from 'node:fs';
 import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { renderRevision } from '../src/templates/render.js';
 import { paths } from '../src/config/paths.js';
-import { alignEnterAction, caretEdges, type AlignEnterCaret, type CaretToken } from '../src/ui/lib/align-enter.js';
+import { alignEnterAction, caretEdges, isVisibleText, textTokensAtCaret, type AlignEnterCaret, type CaretToken } from '../src/ui/lib/align-enter.js';
 import { createCoreFixture, type CoreFixture } from './helpers/core-fixture.js';
 
 /**
@@ -535,5 +535,88 @@ describe('PR #38 Codex 第二輪：跨段選取的最後一塊算不算（select
     expect(selectionEntersBlock([t('br', 'after')])).toBe(true);
     expect(selectionEntersBlock([t('br', 'before')])).toBe(true);
     expect(selectionEntersBlock([])).toBe(true);
+  });
+});
+
+/**
+ * PR #38 Codex 第三輪 #1：哪些空白算內容。原則「看得到就算」：正文的 white-space 是 normal（preview.css 沒改），
+ * 瀏覽器只摺疊一般空白（ASCII 空格、tab、換行、CR、FF）；`&nbsp;`（U+00A0）、全形空白（U+3000）等照樣顯示，算內容。
+ * 一般空格只會在「前後都有字」時顯示，那時旁邊的字已經算了；只有一般空格的那一邊一定在行頭或行尾、被摺掉、看不見——不算。
+ * Chrome 在 contenteditable 裡打的、會顯示的行頭行尾空格本來就存成 `&nbsp;`。
+ */
+describe('段首／段尾的空白：看得到就算（isVisibleText、textTokensAtCaret）', () => {
+  it('一般空白不算；nbsp、全形空白、其他字算', () => {
+    expect(isVisibleText(' \t\n\r\f')).toBe(false);
+    expect(isVisibleText('')).toBe(false);
+    expect(isVisibleText('\u00a0')).toBe(true);
+    expect(isVisibleText('\u3000')).toBe(true);
+    expect(isVisibleText(' A ')).toBe(true);
+  });
+
+  const edgesOfText = (value: string, offset: number) => caretEdges(textTokensAtCaret(value, offset));
+
+  it('&nbsp;|B：nbsp 看得到，是段中（不在前面插空段）', () => {
+    expect(edgesOfText('\u00a0B', 1)).toEqual({ atStart: false, atEnd: false });
+  });
+  it('全形空白|B、A|全形空白：段中', () => {
+    expect(edgesOfText('\u3000B', 1)).toEqual({ atStart: false, atEnd: false });
+    expect(edgesOfText('A\u3000', 1)).toEqual({ atStart: false, atEnd: false });
+  });
+  it('A|&nbsp;：後面的 nbsp 看得到，不是段尾', () => {
+    expect(edgesOfText('A\u00a0', 1)).toEqual({ atStart: false, atEnd: false });
+  });
+  it('行頭的一般空格「 |B」被摺掉看不見：段首', () => {
+    expect(edgesOfText(' B', 1)).toEqual({ atStart: true, atEnd: false });
+  });
+  it('行尾的一般空格「A| 」被摺掉看不見：段尾', () => {
+    expect(edgesOfText('A ', 1)).toEqual({ atStart: false, atEnd: true });
+  });
+  it('「A |B」：前後都有字，段中', () => {
+    expect(edgesOfText('A B', 2)).toEqual({ atStart: false, atEnd: false });
+  });
+});
+
+/**
+ * PR #38 Codex 第三輪 #2：選取的兩端都要「進去了才算」，不分方向、不分是第幾塊。
+ * `start`＝這塊含選取開始端時，以開始端分前後的內容；`end` 同理；不含就是 null（整塊在中間）。
+ */
+describe('選取兩端的那一塊算不算（selectionCoversBlock）', () => {
+  const t = (kind: 'text' | 'br' | 'img', side: 'before' | 'after'): CaretToken => ({ kind, side });
+
+  it('反向選取：錨點在段首、延伸到前面的引用——段落只含結束端而且停在開頭，不算', () => {
+    expect(selectionCoversBlock(null, [t('text', 'after')])).toBe(false);
+  });
+  it('開始端停在段尾、延伸到下一段：這段一個字都沒選到，不算', () => {
+    expect(selectionCoversBlock([t('text', 'before')], null)).toBe(false);
+    expect(selectionCoversBlock([t('text', 'before'), t('br', 'after')], null)).toBe(false);
+  });
+  it('開始端在字中間或段首：算', () => {
+    expect(selectionCoversBlock([t('text', 'before'), t('text', 'after')], null)).toBe(true);
+    expect(selectionCoversBlock([t('text', 'after')], null)).toBe(true);
+  });
+  it('開始端在段尾軟換行前（A|<br><br>）：後面還有換行，算', () => {
+    expect(selectionCoversBlock([t('text', 'before'), t('br', 'after'), t('br', 'after')], null)).toBe(true);
+  });
+  it('整塊在中間：算；空段落在兩端：算', () => {
+    expect(selectionCoversBlock(null, null)).toBe(true);
+    expect(selectionCoversBlock([t('br', 'before')], null)).toBe(true);
+    expect(selectionCoversBlock(null, [t('br', 'after')])).toBe(true);
+  });
+  it('兩端在同一塊（段內選字）：算', () => {
+    expect(selectionCoversBlock([t('text', 'before'), t('text', 'after')], [t('text', 'before'), t('text', 'after')])).toBe(true);
+  });
+});
+
+describe('按鈕狀態跟實際套用一致（formatStateFrom 的 alignTargets）', () => {
+  it('選取碰到的段落／小標一塊都不算時三顆反灰、不亮；有算到的就能按', () => {
+    const none = formatStateFrom(['p'], null, null, 0);
+    for (const command of ['align-left', 'align-center', 'align-right'] as const) {
+      expect(isCommandEnabled(command, none)).toBe(false);
+      expect(isCommandActive(command, none)).toBe(false);
+    }
+    expect(isCommandEnabled('align-center', formatStateFrom(['p'], null, null, 2))).toBe(true);
+    // 錨點在引用裡、選取延伸到後面的段落：有段落會被套到，按鈕能按（套用也只套那些段落）。
+    expect(isCommandEnabled('align-center', formatStateFrom(['p', 'blockquote'], null, 'center', 1))).toBe(true);
+    expect(isCommandActive('align-center', formatStateFrom(['p', 'blockquote'], null, 'center', 1))).toBe(true);
   });
 });

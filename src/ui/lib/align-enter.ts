@@ -72,7 +72,7 @@ export interface CaretToken {
 /**
  * 游標是不是在段首／段尾（PR #38 Codex P2）。字與圖算內容；`<br>` 也算（Shift+Enter 的軟換行），
  * **只有段落的最後一個 `<br>`（後面沒有字或圖）不算**——那是瀏覽器放的佔位（空段落的 `<p><br></p>`、段尾的 `A<br>`），看不見。
- * 只有空白的字不算（`tokens` 由呼叫端先濾掉）。
+ * 看不見的空白不算（`isVisibleText`，`tokens` 由呼叫端先濾掉）。
  */
 export function caretEdges(tokens: readonly CaretToken[]): { atStart: boolean; atEnd: boolean } {
   const last = tokens.length - 1;
@@ -82,6 +82,23 @@ export function caretEdges(tokens: readonly CaretToken[]): { atStart: boolean; a
     atStart: !counted.some((token) => token.side === 'before'),
     atEnd: !counted.some((token) => token.side === 'after'),
   };
+}
+
+/**
+ * 這段字看不看得到（PR #38 Codex 第三輪）。正文的 white-space 是 normal：瀏覽器只摺疊一般空白（ASCII 空格、tab、換行、CR、FF），
+ * `&nbsp;`、全形空白等照樣顯示，算內容。一般空格只有前後都有字時才顯示，那時旁邊的字已經算了；只有一般空格的那一邊
+ * 一定在行頭或行尾、被摺掉——不算（Chrome 打出來、要顯示的行頭行尾空格本來就存成 `&nbsp;`）。
+ */
+export function isVisibleText(value: string): boolean {
+  return /[^ \t\n\r\f]/.test(value);
+}
+
+/** 游標所在的那段字，從游標處拆成前後兩段，看得到的才算一個單位。 */
+export function textTokensAtCaret(value: string, offset: number): CaretToken[] {
+  const out: CaretToken[] = [];
+  if (isVisibleText(value.slice(0, offset))) out.push({ kind: 'text', side: 'before' });
+  if (isVisibleText(value.slice(offset))) out.push({ kind: 'text', side: 'after' });
+  return out;
 }
 
 const ELEMENT = 1;
@@ -99,9 +116,8 @@ export function caretTokens(block: Element, container: Node, offset: number): Ca
       if (child.nodeType === TEXT) {
         const value = child.nodeValue ?? '';
         if (child === container) {
-          if (value.slice(0, offset).trim() !== '') out.push({ kind: 'text', side: 'before' });
-          if (value.slice(offset).trim() !== '') out.push({ kind: 'text', side: 'after' });
-        } else if (value.trim() !== '') {
+          out.push(...textTokensAtCaret(value, offset));
+        } else if (isVisibleText(value)) {
           out.push({ kind: 'text', side: sideOf(child) });
         }
       } else if (child.nodeType === ELEMENT) {

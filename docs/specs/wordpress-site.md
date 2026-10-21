@@ -58,7 +58,7 @@
 **按 Enter（照古騰堡，P5-T050 跟進）**：古騰堡在支援 `splitting` 的區塊（段落、標題）按 Enter 時呼叫 `__unstableSplitSelection`：
 游標在段尾（含空段）→ 後面插 `createBlock(預設區塊)`，**沒有任何屬性**的段落（小標尾端也是開一般段落），游標移過去；
 在有字的段首 → 前面插一個沒屬性的空段落、游標留在原段；在段中 → 拆兩半，兩半都帶原屬性（對齊保留；小標的後半轉成段落，
-`heading/transforms.js` 轉段落時照帶 `style.typography.textAlign`）。發布台打字模式照做（`src/ui/lib/align-enter.ts`，只處理有對齊的段落／小標）。
+`heading/transforms.js` 轉段落時照帶 `style.typography.textAlign`）。發布台打字模式照做（`src/ui/lib/align-enter.ts`，只處理有對齊的段落／小標；「段首／段尾」照畫面上看得到的內容判斷：軟換行、`&nbsp;`、全形空白算，佔位換行與會被摺掉的一般空白不算）。
 差異：**小標段中**按 Enter 由瀏覽器拆，後半仍是小標（沒對齊的小標本來就這樣）。出處：
 https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/store/actions.js （`__unstableSplitSelection`）、
 https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce8826/packages/block-editor/src/components/writing-flow/use-input.js （Enter → split）、

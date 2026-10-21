@@ -44,8 +44,13 @@ export interface FormatState {
   readonly quote: boolean;
   /** 游標在圖片（figure，含圖說）裡。沒寫＝不在。 */
   readonly figure?: boolean;
-  /** 游標所在段落／小標的對齊（D-049）；null 或沒寫＝沒設（靠左）。 */
+  /** 選取碰到的第一塊段落／小標的對齊（D-049）；null 或沒寫＝沒設（靠左）。 */
   readonly align?: TextAlign | null;
+  /**
+   * 按對齊會套到幾塊段落／小標（跟實際套用同一個判斷，`rich-commands.ts` 的 `selectionAlign`）。
+   * 有寫就以它決定對齊按鈕能不能按（0＝反灰）；沒寫照游標所在的標籤判斷。
+   */
+  readonly alignTargets?: number;
 }
 
 /** 游標所在處實際的粗／斜（瀏覽器算出來的樣式）。 */
@@ -71,6 +76,7 @@ export function formatStateFrom(
   ancestors: readonly string[],
   computed?: ComputedEmphasis | null,
   align: TextAlign | null = null,
+  alignTargets?: number,
 ): FormatState {
   const tags = ancestors.map((tag) => tag.toLowerCase());
   const list = tags.find((tag) => tag === 'ul' || tag === 'ol') as 'ul' | 'ol' | undefined;
@@ -93,11 +99,13 @@ export function formatStateFrom(
     quote: tags.includes('blockquote'),
     figure: tags.includes('figure') || tags.includes('figcaption'),
     align,
+    ...(alignTargets === undefined ? {} : { alignTargets }),
   };
 }
 
 /** 對齊按鈕能用的地方：段落與小標（不在清單、引用、圖片裡）。 */
 function alignable(state: FormatState): boolean {
+  if (state.alignTargets !== undefined) return state.alignTargets > 0;
   return state.block !== 'list' && !state.quote && state.figure !== true;
 }
 

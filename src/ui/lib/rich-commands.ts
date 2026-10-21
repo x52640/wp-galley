@@ -10,7 +10,7 @@ import {
 import { NEW_TAB_REL, NEW_TAB_TARGET, withNewTab } from '../../contract/link-target.js';
 import { countNonSpace, locateTextOffset } from './check-while-writing.js';
 import { textAlignOf, withTextAlign, type TextAlign } from '../../contract/text-align.js';
-import { caretTokens, type CaretToken } from './align-enter.js';
+import { caretEdges, caretTokens, type CaretToken } from './align-enter.js';
 import {
   alignCommandValue,
   emphasisFromComputed,
@@ -363,20 +363,6 @@ export function setBlockTextAlign(block: ClassTarget, align: TextAlign | null): 
   return true;
 }
 
-/** 游標往外、正文最外層的那一塊。 */
-function topBlock(doc: Document, body: Element): Element | null {
-  let top = anchorElement(doc, body);
-  while (top !== null && top.parentElement !== body) top = top.parentElement;
-  return top;
-}
-
-/** 游標所在段落／小標的對齊；不在段落／小標裡（清單、引用、圖片…）是 null。 */
-export function selectionTextAlign(doc: Document, body: Element): TextAlign | null {
-  const top = topBlock(doc, body);
-  if (top === null || !ALIGN_BLOCK.test(top.tagName.toLowerCase())) return null;
-  return textAlignOf(top.getAttribute('class'));
-}
-
 /**
  * 選取的結尾落在這一塊裡時，這一塊算不算選到（PR #38 Codex 第二輪）。看 DOM 位置，不看字是不是空的：
  * 結尾前面有這一塊的任何字、換行（`<br>`）或圖＝進去了；一個都沒有＝只是停在開頭（三連擊選一段的常見結果），不算。
@@ -387,13 +373,31 @@ export function selectionEntersBlock(tokens: readonly CaretToken[]): boolean {
   return tokens.some((token) => token.side === 'before');
 }
 
-function endsAtStartOf(range: Range, block: Element): boolean {
-  if (range.endContainer !== block && !block.contains(range.endContainer)) return false;
-  return !selectionEntersBlock(caretTokens(block, range.endContainer, range.endOffset));
+/**
+ * 選取開始端落在這一塊裡時，這一塊算不算選到：開始端後面還有這一塊的字、換行或圖才算；停在段尾（後面只剩佔位換行）不算。空段落算。
+ */
+export function selectionLeavesBlock(tokens: readonly CaretToken[]): boolean {
+  if (tokens.every((token) => token.kind === 'br')) return true;
+  return caretEdges(tokens).atEnd === false;
+}
+
+/**
+ * 這一塊算不算被選到（PR #38 Codex 第三輪）：兩端都要「進去了才算」，不分選取方向、不分是第幾塊。
+ * `start`／`end`：這一塊含選取開始端／結束端時，以那一端分前後的內容（`caretTokens`）；不含就是 null。
+ */
+export function selectionCoversBlock(start: readonly CaretToken[] | null, end: readonly CaretToken[] | null): boolean {
+  if (start !== null && !selectionLeavesBlock(start)) return false;
+  if (end !== null && !selectionEntersBlock(end)) return false;
+  return true;
+}
+
+function holds(block: Element, node: Node): boolean {
+  return node === block || block.contains(node);
 }
 
 /**
  * 游標或選取碰到的段落／小標（正文最外層那幾塊；跨多段就全部）。清單、引用、圖片不算，裡面的段落也不算。
+ * 選取的兩端那一塊要真的選到內容才算（`selectionCoversBlock`）；游標（沒選字）所在的那塊一定算。
  */
 function alignableBlocks(doc: Document, body: Element): Element[] {
   const selection = doc.getSelection();
@@ -402,7 +406,21 @@ function alignableBlocks(doc: Document, body: Element): Element[] {
   if (!body.contains(range.commonAncestorContainer)) return [];
   const blocks = Array.from(body.children).filter((child) => ALIGN_BLOCK.test(child.tagName.toLowerCase()) && range.intersectsNode(child));
   if (range.collapsed) return blocks;
-  return blocks.filter((block, index) => index === 0 || !endsAtStartOf(range, block));
+  return blocks.filter((block) =>
+    selectionCoversBlock(
+      holds(block, range.startContainer) ? caretTokens(block, range.startContainer, range.startOffset) : null,
+      holds(block, range.endContainer) ? caretTokens(block, range.endContainer, range.endOffset) : null,
+    ),
+  );
+}
+
+/**
+ * 對齊按鈕的狀態（PR #38 Codex 第三輪：按鈕跟實際套用一致）：`targets`＝按下去會套到幾塊，`align`＝第一塊目前的對齊。
+ */
+export function selectionAlign(doc: Document, body: Element): { align: TextAlign | null; targets: number } {
+  const blocks = alignableBlocks(doc, body);
+  const first = blocks[0];
+  return { align: first === undefined ? null : textAlignOf(first.getAttribute('class')), targets: blocks.length };
 }
 
 /**
