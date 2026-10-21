@@ -41,6 +41,19 @@ import { stillOnJob } from './selection-image-view.js';
 import { missingTargetNotice } from './edit-target.js';
 import { disableWriting, editTarget, enableWriting, markBlank, showEditTarget, unwrapHighlightMarks } from './proof-edit-dom.js';
 import { decideEditSave, replaceWithSavedBody } from './proof-editing.js';
+import {
+  htmlBlocks,
+  insertFigureInEditor,
+  InsertSaveError,
+  lockWriting,
+  placedFigure,
+  prefixNodes,
+  runInsertWhileWriting,
+  savedAfterIndex,
+  savedAnchor,
+  withFigure,
+  type InsertResult,
+} from './insert-while-writing.js';
 
 /**
  * 校樣的打字模式（P5-T042 從 ProofView 抽出；行為見 ProofView 檔頭「四」「六」「七」與「選字」兩節）：
@@ -101,8 +114,20 @@ export interface ProofEditing {
   abandonOnNewVersion: () => void;
   cancelEdit: () => void;
   saveEdit: (force?: boolean) => Promise<void>;
-  /** 打字模式先存再做（查證這句、用此段配圖；`useSelectionActions` 呼叫）。 */
-  actWhileWriting: (act: () => void | Promise<void>, force?: boolean) => Promise<void>;
+  /**
+   * 打字模式先存再做（查證這句、用此段配圖、在這裡插圖的「請 AI 配一張」）。`act` 收到這次存好的 hash；沒改、沒存是 null。
+   */
+  actWhileWriting: (act: (savedHash: string | null) => void | Promise<void>, force?: boolean) => Promise<void>;
+  /**
+   * 打字模式「在這裡插圖」把圖放進正文（P5-T049，D-048；流程見 `lib/insert-while-writing.ts`）：擋打字 → 有改先存 →
+   * `put` 收到換算成存好那一版的索引、放圖並回傳新版本 → 圖插進編輯區、基準換成新版本 → 放開打字。
+   * 存失敗、放圖失敗丟出去；`confirm`＝正在問照樣存（按了之後接著放，`done` 那時才呼叫，錯誤講在頂端）。
+   */
+  placeWhileWriting: (request: InsertPlaceRequest) => Promise<InsertResult>;
+  /** 擋打字中（插圖存檔到放進編輯區之間）。 */
+  placing: boolean;
+  /** 編輯區第 `afterDomIndex` 塊換算成存好那一版（存之前的整理規則）的第幾塊。 */
+  savedIndexOf: (afterDomIndex: number) => number;
   /** 丟格式警告的「回去改」。 */
   dismissDrop: () => void;
   /** 丟格式警告的「照樣存」。 */
@@ -113,6 +138,22 @@ export interface ProofEditing {
    * 原文快照不動：「取消」照舊回到存好的那一版。
    */
   restoreDraft: (draft: { title: string | null; body: string }) => 'restored' | 'same' | 'not-ready';
+}
+
+/** 打字模式插圖（`placeWhileWriting`）的請求。 */
+export interface InsertPlaceRequest {
+  /** 插在編輯區第幾塊之後（量到的區塊索引；-1＝最前面）。 */
+  afterDomIndex: number;
+  /** 放圖：收到存好那一版的索引，回傳放好之後的版本（hash 與會發布的正文）。 */
+  put: (afterBlockIndex: number) => Promise<PlacedRevision>;
+  /** 放好之後（關面板、重讀）。 */
+  done: () => void | Promise<void>;
+}
+
+export interface PlacedRevision {
+  contentHash: string;
+  /** 放好之後會發布的正文（後端的 rendered_html）：從這裡拿那塊圖、當下一次存檔的基準。 */
+  publishHtml: string;
 }
 
 export function useProofEditing({
@@ -128,6 +169,7 @@ export function useProofEditing({
   onEndEdit,
   onEditTargetMissing,
   onDiscardDraft,
+  onPlaced,
 }: {
   job: LoadedJob;
   editing: ProofEditTarget | null;
@@ -143,6 +185,8 @@ export function useProofEditing({
   onEditTargetMissing: ((notice: string) => void) | undefined;
   /** 這次打字的留底作廢（取消、沒改就離開；D-047）。 */
   onDiscardDraft?: () => void;
+  /** 打字中插圖放好、合併回編輯區之後：留底的基準換成放好的那一版（P5-T049）。 */
+  onPlaced?: (savedHash: string) => void;
 }): ProofEditing {
   /** 目前是哪一篇：存檔後的接續動作回來時不是發起那一篇就什麼都不做（Workspace 換篇沿用這個元件，第二輪審查）。 */
   const jobUuidRef = useRef(job.uuid);
@@ -251,6 +295,7 @@ export function useProofEditing({
 
   const doCommand = useCallback(
     (command: FormatCommand) => {
+      if (placingRef.current) return;
       const frame = frameRef.current;
       const body = frame?.contentDocument?.querySelector<HTMLElement>('.preview-body');
       const state = formatStateRef.current;
@@ -270,6 +315,8 @@ export function useProofEditing({
   doCommandRef.current = doCommand;
 
   const applyLinkHref = (href: string, newTab: boolean): void => {
+    // 插圖擋打字中不改正文（審查 1）：連結框留著，放好之後再按。
+    if (placingRef.current) return;
     const frame = frameRef.current;
     const body = editBody();
     const target = linkTarget.current;
@@ -281,6 +328,7 @@ export function useProofEditing({
   };
 
   const removeCurrentLink = (): void => {
+    if (placingRef.current) return;
     const frame = frameRef.current;
     const body = editBody();
     const existing = linkTarget.current?.existing ?? null;
@@ -379,7 +427,10 @@ export function useProofEditing({
   /**
    * 打字模式按「查證這句」或「用此段配圖」時內容有會被拿掉的格式、正在問「照樣存」：存好之後要做的事。
    */
-  const pendingCheck = useRef<(() => void | Promise<void>) | null>(null);
+  const pendingCheck = useRef<((force: true) => Promise<void>) | null>(null);
+  /** 插圖擋打字中（P5-T049）。ref 給事件處理用：擋打字期間恢復留底、連結、格式指令都不做（審查 1）。 */
+  const [placing, setPlacing] = useState(false);
+  const placingRef = useRef(false);
 
   const saveEdit = async (force = false): Promise<void> => {
     // 按的是「儲存」：之前「查證這句」留下、等著「照樣存」的那段字作廢。
@@ -453,7 +504,7 @@ export function useProofEditing({
    * 打字模式按「查證這句」（D-036）或「用此段配圖」（P5-T038）：沒改直接做；有改先照「儲存」存一版（同樣的驗證與錯誤處理），
    * 存完留在打字模式、校樣不重載，再用存好的那一版做。存失敗就不做，照存檔失敗的方式講。
    */
-  const actWhileWriting = async (act: () => void | Promise<void>, force = false): Promise<void> => {
+  const actWhileWriting = async (act: (savedHash: string | null) => void | Promise<void>, force = false): Promise<void> => {
     setActError(null);
     // 存檔之後的每一步都先確認還在發起的那一篇（第二輪審查）。
     const origin = job.uuid;
@@ -480,7 +531,7 @@ export function useProofEditing({
       pendingCheck.current = null;
       setDropWarning(null);
       try {
-        await act();
+        await act(null);
       } catch (cause) {
         setActError(describeError(cause));
       }
@@ -493,7 +544,7 @@ export function useProofEditing({
       return;
     }
     if (plan.kind === 'confirm-drop') {
-      pendingCheck.current = act;
+      pendingCheck.current = (again) => actWhileWriting(act, again);
       setDropWarning([...plan.dropped]);
       return;
     }
@@ -506,9 +557,11 @@ export function useProofEditing({
     const started = beginHold(holdRef.current, shown);
     holdRef.current = started;
     setHold(started);
+    let saved: string | null = null;
     await saveThenAct({
       save: async () => (await onSaveEdit?.({ ...plan.save, stay: true })) ?? null,
       onSaved: (savedHash) => {
+        saved = savedHash;
         setSaving(false);
         if (!stillHere()) return;
         const settled = settleHold(started, savedHash);
@@ -539,13 +592,175 @@ export function useProofEditing({
         setSaveError(describeError(cause));
       },
       // 存好之後的動作自己出錯（P5-T038 審查 3）：只講那個動作的錯，不動 hold（放掉會重載、蓋掉正在打的字）。
-      act: () => (stillHere() ? act() : undefined),
+      act: () => (stillHere() ? act(saved) : undefined),
       onActFailed: (cause) => {
         if (stillHere()) setActError(describeError(cause));
       },
     });
   };
 
+  /** 編輯區第 `afterDomIndex` 塊 → 存好那一版的第幾塊（用存檔前的基準整理；P5-T049）。 */
+  const savedIndexOf = (afterDomIndex: number): number => {
+    const body = editBody();
+    if (!body) return afterDomIndex;
+    return savedAfterIndex(prefixNodes(body, afterDomIndex), originalUnits.current, allowRef.current);
+  };
+
+  /** 打字模式插圖（P5-T049，D-048）：流程與為什麼擋打字見 `lib/insert-while-writing.ts`。 */
+  const placeWhileWriting = async (request: InsertPlaceRequest, force = false): Promise<InsertResult> => {
+    setActError(null);
+    const origin = job.uuid;
+    const stillHere = (): boolean => editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin });
+    const doc = frameRef.current?.contentDocument;
+    const body = editBody();
+    if (!doc || !body) throw new Error('校樣還沒準備好，等一下再試');
+    const title = titleElement();
+    // 校樣不重載（hold）：存檔到新版本合併回來之間一直「還在存」，輪詢讀到新版本也不換 iframe。
+    const holdBegin = (): void => {
+      const next = beginHold(holdRef.current, shown);
+      holdRef.current = next;
+      setHold(next);
+    };
+    const holdSettle = (hash: string | null): void => {
+      const current = holdRef.current;
+      if (current === null) return;
+      const next = settleHold(current, hash);
+      holdRef.current = next;
+      setHold(next);
+    };
+    const domIndex = request.afterDomIndex;
+    let anchorText: string | null = null;
+    /** 照樣存把編輯區換成存進去的樣子了：之後編輯區的區塊就是存好那一版的區塊。 */
+    let replaced = false;
+    /** 存檔那一刻（沒改就是判斷那一刻）的編輯區：合併的基準從這裡算，不拿當下畫面（審查 1）。 */
+    let snapshot = '';
+    return runInsertWhileWriting<{ save: { editedBody?: string; editedTitle?: string }; html: string }, PlacedRevision>({
+      lock: () => {
+        placingRef.current = true;
+        setPlacing(true);
+        setSaving(true);
+        const unlock = lockWriting(doc, body, title);
+        return () => {
+          placingRef.current = false;
+          setPlacing(false);
+          setSaving(false);
+          if (editingRef.current && stillOnJob({ alive: true, current: jobUuidRef.current, origin })) unlock();
+        };
+      },
+      prepare: () => {
+        const { html, dropped } = cleanEditedBody(body, allow, originalUnits.current);
+        const plan = planSelectionCheck(
+          decideEditSave({
+            html,
+            dropped,
+            force,
+            originalClean: originalClean.current,
+            originalBody: originalBody.current,
+            titleText: title === null ? null : (title.textContent ?? ''),
+            originalTitle: originalTitle.current,
+            savedTitle,
+            diary: isDiary,
+            titleMaxLength: job.template.titleMaxLength,
+          }),
+        );
+        if (plan.kind === 'invalid-title') {
+          pendingCheck.current = null;
+          setDropWarning(null);
+          return { kind: 'invalid', message: plan.message };
+        }
+        if (plan.kind === 'confirm-drop') {
+          // 按「照樣存」才接著放；那時面板那一趟已經結束：存檔的錯講成「沒存成功」，其他講成動作沒做成（審查 3）。
+          pendingCheck.current = async (again) => {
+            try {
+              await placeWhileWriting(request, again);
+            } catch (cause) {
+              if (cause instanceof InsertSaveError) setSaveError(cause.message);
+              else setActError(describeError(cause));
+            }
+          };
+          setDropWarning([...plan.dropped]);
+          return { kind: 'confirm' };
+        }
+        pendingCheck.current = null;
+        setDropWarning(null);
+        setSaveError(null);
+        // 錨點：往前第一個整理後還存在的區塊（空段落下面插圖，審查 2）。
+        const anchor = savedAnchor(prefixNodes(body, domIndex), originalUnits.current, allow);
+        anchorText = anchor.text;
+        snapshot = body.innerHTML;
+        holdBegin();
+        return { kind: 'go', save: plan.kind === 'save-then-check' ? { save: plan.save, html } : null, afterIndex: anchor.afterIndex };
+      },
+      save: async ({ save, html }) => {
+        let savedHash: string | undefined;
+        try {
+          savedHash = await onSaveEdit?.({ ...save, stay: true });
+        } catch (cause) {
+          holdSettle(null);
+          throw new Error(describeError(cause));
+        }
+        if (savedHash === undefined) {
+          holdSettle(null);
+          throw new Error('存檔沒有回應');
+        }
+        holdSettle(savedHash);
+        holdBegin();
+        if (!stillHere()) return;
+        // 照樣存：畫面換成存進去的樣子（擋著打字，沒有存檔之後打的字）；換完編輯區的區塊就是存好那一版的區塊。
+        const savedBody = save.editedBody;
+        if (force && savedBody !== undefined) {
+          replaceBodyKeepingCaret(doc, body, savedBody);
+          replaced = true;
+          snapshot = body.innerHTML;
+        }
+        if (savedBody !== undefined) originalUnits.current = snapshotHtml(savedBody);
+        originalClean.current = html;
+        originalBody.current = snapshot;
+        setAutoSaved(true);
+        if (save.editedTitle !== undefined) originalTitle.current = save.editedTitle;
+      },
+      put: async (afterIndex) => {
+        try {
+          return await request.put(afterIndex);
+        } catch (cause) {
+          holdSettle(null);
+          throw cause;
+        }
+      },
+      merge: (placed, afterIndex) => {
+        holdSettle(placed.contentHash);
+        // 照樣存換過畫面：編輯區的區塊就是存好那一版的區塊，位置用換算後的。
+        const at = replaced ? afterIndex : domIndex;
+        const figure = placedFigure(htmlBlocks(placed.publishHtml), afterIndex, anchorText);
+        // 基準：存檔那一刻的內容＋插入的圖（不拿當下畫面）。
+        const baseline = figure === null ? null : withFigure(doc, snapshot, at, figure);
+        if (figure === null || baseline === null) return false;
+        if (!insertFigureInEditor(body, at, figure)) return false;
+        // 「有沒有改」的基準換成放好的那一版（跟「先存再做」一樣，不然下次存會把圖當成新加的區塊整理掉）。
+        originalUnits.current = snapshotHtml(placed.publishHtml);
+        originalClean.current = cleanEditedBody(baseline, allowRef.current, originalUnits.current).html;
+        originalBody.current = baseline.innerHTML;
+        setAutoSaved(true);
+        markBlank(body);
+        measure(measureToken.current);
+        onPlaced?.(placed.contentHash);
+        return true;
+      },
+      reload: () => {
+        // 畫面跟存檔那一刻不一樣（有還沒存的字）：不能重載，留在打字模式講清楚（審查 1）。
+        if (body.innerHTML !== snapshot) {
+          setActError('圖已經放進正文，但編輯區對不上、沒顯示出來；你剛打的字還沒存。按「儲存」會照編輯區存（圖會被拿掉，可以再插一次）。');
+          return;
+        }
+        // 對不上就不硬合併：之前都存過、期間擋著打字，結束打字模式照後端的版本重載不會掉字。
+        onDiscardDraft?.();
+        originalBody.current = null;
+        onEndEditRef.current?.('圖已經放進正文；打的字都存好了，校樣照存好的版本重新載入，要再改請按「改原文」。');
+      },
+      still: stillHere,
+      done: request.done,
+    });
+  };
   const dismissDrop = (): void => {
     pendingCheck.current = null;
     setDropWarning(null);
@@ -553,12 +768,14 @@ export function useProofEditing({
 
   const confirmDrop = (): void => {
     // 從「查證這句」／「用此段配圖」來的：照樣存之後留在打字模式、接著做（D-036、P5-T038）；從「儲存」來的照舊存完離開。
-    const act = pendingCheck.current;
-    if (act !== null) void actWhileWriting(act, true);
+    const resume = pendingCheck.current;
+    if (resume !== null) void resume(true);
     else void saveEdit(true);
   };
 
   const restoreDraft = (draft: { title: string | null; body: string }): 'restored' | 'same' | 'not-ready' => {
+    // 插圖擋打字中不換正文（審查 1）：等放好再填回。
+    if (placingRef.current) return 'not-ready';
     const frame = frameRef.current;
     const doc = frame?.contentDocument;
     const body = editBody();
@@ -629,6 +846,9 @@ export function useProofEditing({
     cancelEdit,
     saveEdit,
     actWhileWriting,
+    placeWhileWriting: (request) => placeWhileWriting(request),
+    placing,
+    savedIndexOf,
     dismissDrop,
     confirmDrop,
     restoreDraft,

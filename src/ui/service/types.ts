@@ -261,7 +261,8 @@ export interface PublisherApi {
   replaceMedia(uuid: string, assetId: number, input: AddMediaInput): Promise<MediaAsset>;
   removeMedia(uuid: string, assetId: number): Promise<void>;
   /** afterBlockIndex：-1 放在最前面，n 放在第 n 個頂層區塊後面。 */
-  placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Promise<void>;
+  /** 放好之後的新版本（打字模式插圖要拿它合併回編輯區，P5-T049）。 */
+  placeMedia(uuid: string, assetId: number, afterBlockIndex: number): Promise<Revision>;
   setFeaturedMedia(uuid: string, assetId: number | null): Promise<void>;
 
   approve(uuid: string, contentHash: string): Promise<Approval>;

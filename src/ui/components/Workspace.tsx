@@ -368,9 +368,8 @@ export function Workspace({
     running: working === true,
     finished: isFinished(job.state),
   });
-  // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒在改字、沒有 AI 在跑的時候出現。
+  // 段落之間的「在這裡插圖」（P5-T016）：只在看文章、沒有 AI 在跑的時候出現；打字模式也有（D-048，按下先存再插）。
   const insertable = canInsertImages(display, {
-    editing: editing !== null,
     finished: isFinished(job.state),
     working: working === true,
   });
@@ -564,10 +563,18 @@ export function Workspace({
             }
             insertImage={
               insertable
-                ? (afterBlockIndex, close) => (
+                ? (afterBlockIndex, close, writer) => (
                     <InsertImagePanel
                       job={job}
                       afterBlockIndex={afterBlockIndex}
+                      writer={writer}
+                      currentHash={knownHash}
+                      placeAsset={async (assetId, index) => {
+                        const placed = await api.placeMedia(job.uuid, assetId, index);
+                        // 打字中放的（P5-T049）：下一次存檔的基準是放好的這一版（工作區快照可能還沒重讀到）。
+                        if (writer !== null && isOnJob(job.uuid)) rememberSaved(placed.contentHash);
+                        return placed;
+                      }}
                       blockText={blocks.find((block) => block.index === afterBlockIndex)?.text ?? null}
                       onRefresh={refresh}
                       onPlaced={async () => {

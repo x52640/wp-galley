@@ -1,7 +1,7 @@
 ---
 id: P5-T049
 phase: 5
-status: ready
+status: done
 depends_on: []
 specs: [design-system.md, architecture.md]
 write_paths: ["src/ui/", "src/contract/", "tests/", "docs/specs/design-system.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T049-insert-image-while-typing.md", "docs/CURRENT_TASK.md"]
@@ -17,6 +17,9 @@ D-048。使用者 2026-10-21 回報兩件事：
    改法比照「用此段配圖」已有的「先存再做」（`actWhileWriting`，P5-T038／P6-T006）：按下時內容有改就先照「儲存」存一版、**留在打字模式**，再插。
 2. 圖片在文章最尾端時，接著按 Enter 打的字變成置中。推測：圖片 figure 帶 `aligncenter`（`src/core/service/media.ts`），游標只能落在 figure 裡，
    Chrome 按 Enter 把 figure 的 class 帶給新段落（或新段落落在 figure 裡）。**先用 `?fixtures=1` 重現確認原因再修**，原因不同就照實際原因修並寫進這裡。
+   **實際原因（2026-10-21 重現）**：點圖片不會放游標；從上一段按 → 或 ↓ 游標停在 figure **裡**（圖片前或圖片後）。這時按 Enter，Chrome 把整個
+   `<figure class="wp-block-image size-large aligncenter">` **複製一份**，打的字落在新 figure 裡（不是段落）；存檔整理在 edit 模式原樣保留 figure，
+   所以存進去是一塊只有字的置中圖片區塊。不按 Enter 直接打字也會打進 figure、跟圖片擠在一起。點圖片下方空白落在正文外面，放不了游標。
 
 ## 範圍
 ### 包含
@@ -60,9 +63,30 @@ agent、wordpress、factcheck spec。
 - [ ] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-21）
-- 已通過驗證：無
-- 下一步：重現 Enter 置中、寫測試、實作
+- 最後完成：實作與文件（2026-10-21，worktree `wp-galley-P5-T049`）
+- 已通過驗證：`npm run verify` 綠；`?fixtures=1` 截圖走過打字模式插圖（打一段不存 → 插 → 圖出現、字在、留在打字模式 → 再打 → 儲存）、
+  打字模式「請 AI 配一張」（先存、卡片位置對、留在打字模式）、最後一張圖後按 →→／↓ 再 Enter 或直接打字（新段落是乾淨 `<p>`、存後靠左）
+- 獨立審查一輪（2026-10-21）七條已修，見「完成結果」最後一段；修後 `npm run verify` 106 檔／2395 測試綠，`?fixtures=1` 截圖走過空段落下插圖、圖片下一段段首 Backspace、圖片上貼上
+- 下一步：PR、Codex 審查；合併後移到 CURRENT_TASK 待驗證表、status 改 done
 - Blocker：無
 
 ## 完成結果
+- 打字模式也畫「在這裡插圖」（`canInsertImages` 不再看打字模式；打字中整條不接滑鼠，只有按鈕接）。面板拿到 `InsertWriter`：
+  放圖＝上傳先做完 → 擋打字 → 有改照「儲存」存一版（stay，hold 不重載）→ 編輯區第幾塊換算成存好那一版的第幾塊 → 後端放圖（`placeMedia` 改成回新版本）→
+  新版本裡那塊圖插進編輯區同一位置、基準（原文快照、整理基準、留底基準、存檔基準 `rememberSaved`）換成新版本 → 放開打字。
+  「請 AI 配一張」走既有的先存再做（`actWhileWriting` 的 act 多收存好的 hash）。流程 `src/ui/lib/insert-while-writing.ts`、接線 `use-proof-editing.ts` 的 `placeWhileWriting`。
+- **怎麼不掉字**：擋打字從判斷之前開始到合併完才放開（存檔、換算、合併看同一份畫面，存好之後沒有新打的字）；合併對不上（第 N+1 塊不是圖或前一塊字不同）
+  就不硬合併，結束打字模式照存好的版本重載並講出來——那時所有字都存過了。存失敗不放；放圖失敗面板講原因、存好的那版照留。
+- 圖片上按鍵（`src/ui/lib/figure-caret.ts`）：figure 裡（含圖說）按 Enter → 圖片下方開乾淨 `<p>`、游標移過去（下面已是空段落就沿用）；
+  最後一塊是圖片時 ↓／（結尾）→ 一樣開新段落；圖片旁直接打字（含輸入法）→ 字放進新段落（圖前放上方、圖後放下方）。選了「↓／→／Enter」這一種，不做點圖片下方空白。
+- 新增測試 `tests/insert-while-writing.test.ts`（索引換算、合併判斷、插圖順序與失敗、圖片按鍵、接線）；`stage-view.test.ts` 改成打字模式也出現。
+- 殘餘見 `docs/known-issues.md`「打字模式插圖」「游標在圖片上」兩條。
+- 獨立審查修正：
+  1. 合併的基準改成存檔那一刻的內容＋插入的圖（`withFigure`），不拿當下畫面；擋打字期間「恢復」留底反灰、`restoreDraft`／連結套用／移除連結／格式指令不做。
+     畫面跟存檔那一刻不同時合併失敗不重載（會丟字），留在打字模式講清楚。
+  2. 錨點取往前第一個整理後還存在的區塊的字（`savedAnchor`）：在自己剛開的空段落下面插圖不再被踢出打字模式；開頭空段落下面插＝插在最前面。
+  3. 存檔這一步的錯是 `InsertSaveError`：照樣存之後存失敗或標題清空，頂端顯示「沒存成功」，不是「已存，但接著的動作沒做成」。
+  4. 圖片旁貼上先跳到新段落（捕獲階段的 paste）；圖片下一段段首 Backspace／上一段段尾 Delete 不併，游標移到圖片後／前，空段落順便刪（`besideFigureKeyAction`）。
+  5. 圖片按鍵與貼上處理在正文擋打字（`contenteditable` 不是 true）時不動 DOM。
+  6. 面板的「校樣上方在問照樣存」提示只在真的還在問時顯示（`InsertWriter.confirmPending`；按儲存離開或回去改就收）。
+  7. 放圖中途換篇或離開打字模式回 `abandoned`，不呼叫 `done`（不關新那篇的面板、不重讀）、不放開別篇的編輯區。

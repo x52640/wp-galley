@@ -337,9 +337,10 @@ const httpApi: PublisherApi = {
   },
 
   async placeMedia(uuid: string, assetId: number, afterBlockIndex: number) {
-    await sendJson<unknown>(`/api/jobs/${uuid}/media/${assetId}/place`, 'POST', {
+    const body = await sendJson<RevisionResponse>(`/api/jobs/${uuid}/media/${assetId}/place`, 'POST', {
       afterBlockIndex,
     });
+    return body.revision;
   },
 
   // 設定精選圖片與取消精選走的是兩條路徑：取消要送 null，綁在某張圖底下的

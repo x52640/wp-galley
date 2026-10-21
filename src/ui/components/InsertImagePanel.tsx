@@ -7,6 +7,9 @@ import { prepareForUpload } from '../lib/svg-to-png.js';
 import { ErrorNote, Field, Spinner, useAction } from './panels/shared.js';
 import { assetLabel, useImageGenerationStatus } from './panels/MediaPanel.js';
 import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-note.js';
+import type { InsertWriter } from './InsertSlots.js';
+import type { Revision } from '../service/types.js';
+import { INSERT_WRITING_NOTE } from '../lib/insert-while-writing.js';
 
 /**
  * 「在這裡插圖」打開的小面板（D-020，P5-T016）。
@@ -20,6 +23,9 @@ import { USER_NOTE_MAX as NOTE_MAX, userNoteLength } from '../../contract/user-n
  *   但圖會留在媒體庫——這件事要在按下去之前講清楚。
  *
  * 放進正文會建新版本；目前有有效的核准時，面板上先講「核准會失效」。
+ *
+ * 打字模式（`writer` 不是 null，D-048，P5-T049）：三條路照舊，差在放圖與請 AI 前先照「儲存」存一版、留在打字模式；
+ * 上傳先做完（不改正文，期間照常打字）才擋打字、存、放。流程在 `lib/insert-while-writing.ts`。
  */
 
 interface Pending {
@@ -45,6 +51,9 @@ export function InsertImagePanel({
   onRefresh,
   onClose,
   onAiStarted,
+  writer = null,
+  currentHash,
+  placeAsset,
 }: {
   job: LoadedJob;
   /** 插在第幾個頂層區塊之後；-1＝最前面。跟 `placeMedia` 同一套索引。 */
@@ -58,6 +67,12 @@ export function InsertImagePanel({
   onClose: () => void;
   /** 「請 AI 配一張」已經開始生圖：上層關掉面板、打開右欄圖片區並捲到那張卡片。 */
   onAiStarted: (briefId: number) => Promise<void>;
+  /** 打字模式（P5-T049）：放圖與請 AI 先存再做。null＝不在打字模式。 */
+  writer?: InsertWriter | null;
+  /** 畫面知道的目前版本（打字中先存過就是最後存的那一版）；沒給用稿件的版本。 */
+  currentHash?: string | undefined;
+  /** 放圖（回新版本）；沒給就直接叫 `api.placeMedia`。打字模式要上層記下新版本當存檔基準。 */
+  placeAsset?: (assetId: number, afterBlockIndex: number) => Promise<Revision>;
 }): JSX.Element {
   const place = useAction();
   const pick = useAction();
@@ -65,6 +80,25 @@ export function InsertImagePanel({
   const [pending, setPending] = useState<Pending | null>(null);
   const [alt, setAlt] = useState('');
   const [note, setNote] = useState('');
+  /** 打字模式按了放圖、正在問「照樣存」（P5-T049）。 */
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const putAsset = (assetId: number, index: number): Promise<Revision> =>
+    placeAsset === undefined ? api.placeMedia(job.uuid, assetId, index) : placeAsset(assetId, index);
+  /** 放圖：打字模式先存、放好合併回編輯區（`onPlaced` 由 writer 在放好之後呼叫）；否則直接放、再 `onPlaced`。 */
+  const placeHere = async (assetId: number): Promise<void> => {
+    if (writer === null) {
+      await putAsset(assetId, afterBlockIndex);
+      await onPlaced();
+      return;
+    }
+    setAwaitingConfirm(false);
+    const result = await writer.place((index) => putAsset(assetId, index), onPlaced);
+    if (result === 'confirm') {
+      setAwaitingConfirm(true);
+      // 剛上傳的圖要出現在上面的清單（回去改了之後還能再選）。
+      await onRefresh();
+    }
+  };
   const generation = useImageGenerationStatus(true);
   const choices = insertableMedia(job);
   const busy = place.busy || pick.busy || ai.busy;
@@ -85,16 +119,24 @@ export function InsertImagePanel({
 
   const askAi = (): void => {
     if (!canAskAi) return;
-    const contentHash = job.currentRevision?.contentHash;
-    void ai.run(async () => {
-      if (contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法指定位置');
-      const trimmed = note.trim();
+    const knownHash = currentHash ?? job.currentRevision?.contentHash;
+    const trimmed = note.trim();
+    const request = async (at: { afterBlockIndex: number; contentHash: string | undefined }): Promise<void> => {
+      if (at.contentHash === undefined) throw new Error('這篇稿件還沒有內容，沒辦法指定位置');
       const brief = await api.requestImageAtPosition(job.uuid, {
-        afterBlockIndex,
-        contentHash,
+        afterBlockIndex: at.afterBlockIndex,
+        contentHash: at.contentHash,
         ...(trimmed === '' ? {} : { note: trimmed }),
       });
       await onAiStarted(brief.id);
+    };
+    void ai.run(async () => {
+      if (writer === null) {
+        await request({ afterBlockIndex, contentHash: knownHash });
+        return;
+      }
+      // 打字模式：先存（有改的話），位置與版本用存好的那一版；存失敗、請求失敗講在校樣頂端。
+      await writer.withSaved((at) => request({ afterBlockIndex: at.afterBlockIndex, contentHash: at.contentHash ?? knownHash }));
     });
   };
   const rootRef = useRef<HTMLDivElement>(null);
@@ -170,6 +212,15 @@ export function InsertImagePanel({
         </p>
       )}
 
+      {writer !== null && <p className="field-hint">{INSERT_WRITING_NOTE}</p>}
+
+      {awaitingConfirm && writer?.confirmPending === true && (
+        <p className="note note-warn" role="status">
+          <Icon name="alert" size={14} />
+          <span>校樣上方在問要不要「照樣存」：按了就先存、再把圖放進來。</span>
+        </p>
+      )}
+
       <ErrorNote message={place.error ?? pick.error ?? ai.error} />
 
       {!pending && (
@@ -185,12 +236,7 @@ export function InsertImagePanel({
                     type="button"
                     className="insert-choice"
                     disabled={busy}
-                    onClick={() =>
-                      void place.run(async () => {
-                        await api.placeMedia(job.uuid, asset.id, afterBlockIndex);
-                        await onPlaced();
-                      })
-                    }
+                    onClick={() => void place.run(() => placeHere(asset.id))}
                   >
                     {asset.url ? (
                       <img className="media-thumb" src={asset.url} alt="" loading="lazy" />
@@ -332,12 +378,11 @@ export function InsertImagePanel({
                       URL.revokeObjectURL(pending.objectUrl);
                       setPending(null);
                       try {
-                        await api.placeMedia(job.uuid, asset.id, afterBlockIndex);
+                        await placeHere(asset.id);
                       } catch (cause) {
                         await onRefresh();
                         throw new Error(`圖已經上傳到媒體庫，但沒放進正文：${describeError(cause)}。可以在上面的清單再選一次。`);
                       }
-                      await onPlaced();
                     })
                   }
                 >
