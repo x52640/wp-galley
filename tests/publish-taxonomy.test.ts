@@ -390,6 +390,13 @@ describe('打字模式中，發布面板會建新版本的按鈕一律擋（PR #
     expect(panel).toContain('editingLock');
   });
 
+  it('新分類名稱框：輸入法選字的 Enter 不觸發建立或選既有（PR #39 Codex 第三輪）', () => {
+    const panel = readFileSync(new URL('../src/ui/components/panels/TaxonomyPanel.tsx', import.meta.url), 'utf8');
+    const guard = panel.indexOf('if (event.nativeEvent.isComposing || event.keyCode === 229) return;');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(panel.indexOf("if (event.key === 'Enter' && trimmedName.length > 0"));
+  });
+
   it('右欄在打字模式整條 inert（點不到、Tab 不到），跟 markEditing 用同一個 editing 狀態', () => {
     const ws = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
     expect(ws).toMatch(/<aside className="margin"[^>]*inert=\{editing !== null\}/);

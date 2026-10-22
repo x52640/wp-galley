@@ -84,3 +84,4 @@ agent、factcheck spec。
 - PR #39 Codex 第一輪：建立＋套用＋存整段用 `holdTaxonomy` 登記在每稿件的擋發布狀態（請求送出前就擋）；套用讀 store 最新的選取（`withTermAdded`，單選取代），建立期間鎖住所有選取控制。
 - PR #39 Codex 第二輪：存分類／網址（含建立整段）期間 `editBlocked` 為真，所有進打字模式的入口都擋（`editBlockState`＋`isPublishPanelSaving`，網址存檔中原本也有同樣的洞，一起補）；Workspace 把打字模式登記到 store（`markEditing`），建好時這篇在打字模式就不自動存、留成沒存（`addTermToSelection` 回 `deferred`）。
 - PR #39 跟進（打字模式中的存檔鈕）：`?fixtures=1` 實測修之前，打字模式中（頂列 inert，用程式點開發布面板）按「儲存分類」→ 出新版本、打字模式被中止、紅條「剛才打的字沒有存到」；修之後發布面板所有會建新版本的按鈕在打字模式反灰講原因（`EDITING_SAVE_NOTE`，判斷用 `markEditing` 的登記），store 的存檔函式也擋；同場景實測仍在打字模式、字還在、版本沒變。右欄與頂列本來就 inert。
+- PR #39 Codex 第三輪：新分類名稱框按 Enter 前先排除輸入法選字（`isComposing`／keyCode 229），避免選字就跳確認或自動存既有項目。**這一輪的修正沒經過 Codex**（D-041）。

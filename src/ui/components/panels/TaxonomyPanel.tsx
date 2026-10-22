@@ -277,6 +277,8 @@ export function TaxonomyPanel({
                 value={newName}
                 onChange={(event) => editName(event.target.value)}
                 onKeyDown={(event) => {
+                  // 輸入法選字的 Enter 不算（Safari 選字時 isComposing 已是 false，另看 keyCode 229）。
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                   if (event.key === 'Enter' && trimmedName.length > 0 && !termsLoading && !busy && !locked) {
                     event.preventDefault();
                     if (matches.exact) chooseExisting(matches.exact);
