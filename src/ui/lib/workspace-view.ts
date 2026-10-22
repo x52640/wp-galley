@@ -15,6 +15,23 @@ export function editBlockedNote(state: { runBlocked: boolean; pendingSync: boole
   return state.pendingSync && !state.runBlocked ? SYNC_PENDING_NOTE : RUN_BLOCKED_NOTE;
 }
 
+/** 發布面板正在存分類或網址時進打字模式被擋住的說明（PR #39 Codex 第二輪）。 */
+export const PANEL_SAVING_NOTE = '正在存分類或網址，存好再改原文。';
+
+/**
+ * 進打字模式要不要擋、講哪一句：AI 在跑 → 發布面板在存分類／網址（存好會出新版本、校樣重載）→ 待同步。
+ * 所有進打字模式的入口（改原文、卡片的自己改／去原文改、新稿自動進、留底恢復）共用這一個。
+ */
+export function editBlockState(state: { runBlocked: boolean; pendingSync: boolean; panelSaving: boolean }): {
+  blocked: boolean;
+  note: string;
+} {
+  const blocked = state.runBlocked || state.pendingSync || state.panelSaving;
+  if (state.runBlocked) return { blocked, note: RUN_BLOCKED_NOTE };
+  if (state.panelSaving) return { blocked, note: PANEL_SAVING_NOTE };
+  return { blocked, note: editBlockedNote(state) };
+}
+
 /**
  * 剛建好的那一篇載入失敗（或發布目標已經不在）：這次不進打字模式，旗標也清掉，
  * 不然之後重新讀取成功、或再打開同一篇時會莫名進打字模式（審查 #4）。

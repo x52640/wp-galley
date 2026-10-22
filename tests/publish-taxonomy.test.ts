@@ -3,9 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isTaxonomyDirty, taxonomyPublishBlocker, withTermAdded } from '../src/ui/lib/publish-slug.js';
 import {
+  addTermToSelection,
+  EDITING_SAVE_NOTE,
   clearTaxonomyDraft,
   holdTaxonomy,
+  isPublishPanelSaving,
   isTaxonomySaving,
+  markEditing,
+  runSlugSave,
   runTaxonomySave,
   setTaxonomyDraft,
   subscribeSlugSave,
@@ -13,6 +18,8 @@ import {
   type SlugSaveSteps,
 } from '../src/ui/lib/slug-save-store.js';
 import { termAddedNote } from '../src/ui/lib/term-match.js';
+import { PANEL_SAVING_NOTE, RUN_BLOCKED_NOTE, editBlockState } from '../src/ui/lib/workspace-view.js';
+import { SYNC_PENDING_NOTE } from '../src/ui/lib/check-while-writing.js';
 
 /**
  * P5-T051 跟進（D-050 2026-10-22）：
@@ -260,7 +267,133 @@ describe('PR #39 Codex 第一輪：建立期間也擋發布、套用讀最新的
     // 既有 chip、站上沒有的 chip、手動輸入框都要在忙時鎖住。
     expect(source.match(/disabled=\{busy\}/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
     const sheet = readFileSync(new URL('../src/ui/components/PublishSheet.tsx', import.meta.url), 'utf8');
-    expect(sheet).toContain('withTermAdded(');
+    expect(sheet).toContain('addTermToSelection(');
     expect(sheet).toContain('latestTerms.current');
+  });
+});
+
+describe('PR #39 Codex 第二輪：存分類／網址期間擋進打字模式；已在打字模式就不自動存', () => {
+  afterEach(() => {
+    clearTaxonomyDraft('a');
+    markEditing('a', false);
+  });
+
+  it('holdTaxonomy 期間 editBlockState 為真、講原因；結束就放開', async () => {
+    let inside: ReturnType<typeof editBlockState> | null = null;
+    await holdTaxonomy('a', async () => {
+      inside = editBlockState({ runBlocked: false, pendingSync: false, panelSaving: isPublishPanelSaving('a') });
+    });
+    expect(inside).toEqual({ blocked: true, note: PANEL_SAVING_NOTE });
+    expect(editBlockState({ runBlocked: false, pendingSync: false, panelSaving: isPublishPanelSaving('a') })).toEqual({
+      blocked: false,
+      note: RUN_BLOCKED_NOTE,
+    });
+  });
+
+  it('一般「儲存分類」與存網址的期間也擋（同一個判斷）', async () => {
+    let duringTerms = false;
+    await runTaxonomySave('a', {
+      save: async () => {
+        duringTerms = isPublishPanelSaving('a');
+      },
+      sync: async () => 'applied',
+    });
+    let duringSlug = false;
+    await runSlugSave('a', {
+      save: async () => {
+        duringSlug = isPublishPanelSaving('a');
+      },
+      sync: async () => 'applied',
+    });
+    expect(duringTerms).toBe(true);
+    expect(duringSlug).toBe(true);
+    expect(isPublishPanelSaving('a')).toBe(false);
+  });
+
+  it('擋住時講哪一句：AI 在跑優先，再來是存分類／網址，最後才是待同步', () => {
+    expect(editBlockState({ runBlocked: true, pendingSync: true, panelSaving: true }).note).toBe(RUN_BLOCKED_NOTE);
+    expect(editBlockState({ runBlocked: false, pendingSync: true, panelSaving: true }).note).toBe(PANEL_SAVING_NOTE);
+    expect(editBlockState({ runBlocked: false, pendingSync: true, panelSaving: false }).note).toBe(SYNC_PENDING_NOTE);
+    expect(PANEL_SAVING_NOTE).toBe('正在存分類或網址，存好再改原文。');
+  });
+
+  it('這篇此刻在打字模式：不自動存，選取留成「選了沒存」（會擋發布）', async () => {
+    markEditing('a', true);
+    const save = vi.fn(async () => null);
+    const outcome = await addTermToSelection({ uuid: 'a', name: '攝影', saved: SAVED, multiple: true, save });
+    expect(outcome).toEqual({ kind: 'deferred' });
+    expect(save).not.toHaveBeenCalled();
+    expect(taxonomyDraftFor('a', SAVED)).toEqual(['隨筆', '攝影']);
+    expect(taxonomyPublishBlocker({ dirty: isTaxonomyDirty(taxonomyDraftFor('a', SAVED), SAVED), saving: false })).not.toBeNull();
+  });
+
+  it('不在打字模式：照常存；存失敗回原因、選取留著', async () => {
+    const ok = await addTermToSelection({ uuid: 'a', name: '攝影', saved: SAVED, multiple: true, save: async () => null });
+    expect(ok).toEqual({ kind: 'saved' });
+    clearTaxonomyDraft('a');
+    const bad = await addTermToSelection({ uuid: 'a', name: '藝術', saved: SAVED, multiple: false, save: async () => '版本衝突' });
+    expect(bad).toEqual({ kind: 'failed', error: '版本衝突' });
+    expect(taxonomyDraftFor('a', SAVED)).toEqual(['藝術']);
+  });
+
+  it('termAddedNote：延後時講「正在改原文，先沒套到這篇」', () => {
+    expect(termAddedNote({ name: '攝影', created: true, saveError: null, deferred: true })).toEqual({
+      tone: 'warn',
+      text: '已建立「攝影」並選上，但你正在改原文，先沒有套到這篇。改完按「儲存分類」。',
+    });
+  });
+
+  it('Workspace 把打字模式登記到 store、use-job-workspace 用 editBlockState 算進 isPublishPanelSaving', () => {
+    const ws = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
+    expect(ws).toContain('markEditing(');
+    const hook = readFileSync(new URL('../src/ui/lib/use-job-workspace.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('isPublishPanelSaving(');
+    expect(hook).toContain('editBlockState(');
+    const sheet = readFileSync(new URL('../src/ui/components/PublishSheet.tsx', import.meta.url), 'utf8');
+    expect(sheet).toContain('addTermToSelection(');
+  });
+});
+
+describe('打字模式中，發布面板會建新版本的按鈕一律擋（PR #39 跟進，同一個 markEditing 判斷）', () => {
+  afterEach(() => {
+    markEditing('a', false);
+    clearTaxonomyDraft('a');
+  });
+
+  it('講原因的那一句', () => {
+    expect(EDITING_SAVE_NOTE).toBe('你正在改原文，先按上方『儲存』或『取消』再存。');
+  });
+
+  it('markEditing 會通知訂閱者（發布面板的按鈕跟著反灰）', () => {
+    const listener = vi.fn();
+    const off = subscribeSlugSave(listener);
+    markEditing('a', true);
+    markEditing('a', false);
+    off();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('打字模式中 runTaxonomySave／runSlugSave 不存、丟回原因（就算畫面沒擋到也不會建新版本）', async () => {
+    markEditing('a', true);
+    const save = vi.fn(async () => {});
+    await expect(runTaxonomySave('a', { save, sync: async () => 'applied' })).rejects.toThrow(EDITING_SAVE_NOTE);
+    await expect(runSlugSave('a', { save, sync: async () => 'applied' })).rejects.toThrow(EDITING_SAVE_NOTE);
+    expect(save).not.toHaveBeenCalled();
+    expect(isPublishPanelSaving('a')).toBe(false);
+  });
+
+  it('發布面板與分類面板都接上同一個判斷', () => {
+    const sheet = readFileSync(new URL('../src/ui/components/PublishSheet.tsx', import.meta.url), 'utf8');
+    expect(sheet).toContain('isEditingJob(job.uuid)');
+    expect(sheet).toContain('EDITING_SAVE_NOTE');
+    const panel = readFileSync(new URL('../src/ui/components/panels/TaxonomyPanel.tsx', import.meta.url), 'utf8');
+    expect(panel).toContain('editingLock');
+  });
+
+  it('右欄在打字模式整條 inert（點不到、Tab 不到），跟 markEditing 用同一個 editing 狀態', () => {
+    const ws = readFileSync(new URL('../src/ui/components/Workspace.tsx', import.meta.url), 'utf8');
+    expect(ws).toMatch(/<aside className="margin"[^>]*inert=\{editing !== null\}/);
+    expect(ws).toMatch(/<header className="docbar" inert=\{editing !== null\}>/);
+    expect(ws).toContain('markEditing(uuid, isEditingNow)');
   });
 });

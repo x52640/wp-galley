@@ -48,8 +48,14 @@ export function termAddedNote(input: {
   readonly name: string;
   readonly created: boolean;
   readonly saveError: string | null;
-}): { readonly tone: 'good' | 'bad'; readonly text: string } {
+  /** 這篇正在打字模式，沒有自動存（PR #39 Codex 第二輪）。 */
+  readonly deferred?: boolean;
+}): { readonly tone: 'good' | 'warn' | 'bad'; readonly text: string } {
   const { name, created, saveError } = input;
+  if (input.deferred === true) {
+    const head = created ? `已建立「${name}」並選上` : `站上已有「${name}」，已選上`;
+    return { tone: 'warn', text: `${head}，但你正在改原文，先沒有套到這篇。改完按「儲存分類」。` };
+  }
   if (saveError === null) {
     return { tone: 'good', text: created ? `已建立「${name}」，已選上並套用到這篇。` : `站上已有「${name}」，已選上並套用。` };
   }

@@ -40,6 +40,7 @@ import {
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
+import { markEditing } from '../lib/slug-save-store.js';
 
 /**
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
@@ -291,6 +292,14 @@ export function Workspace({
   useEffect(() => {
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
+
+  // 這篇在不在打字模式，登記到發布面板的 store（PR #39 Codex 第二輪）：建好分類要自動存時看它，
+  // 在打字模式就不自動存（會出新版本、編輯區重載），留成「選了沒存」。不管是怎麼進打字模式的都算。
+  const isEditingNow = editing !== null;
+  useEffect(() => {
+    markEditing(uuid, isEditingNow);
+    return () => markEditing(uuid, false);
+  }, [uuid, isEditingNow]);
 
   // 離開打字模式（或換篇）：打字中存過的那一版不再當存檔基準（D-036）。
   useEffect(() => {

@@ -9,7 +9,7 @@
  * 這個檔不碰 window 與 API，可以直接在 node 裡測。
  */
 
-import { isSlugDirty, isTaxonomyDirty } from './publish-slug.js';
+import { isSlugDirty, isTaxonomyDirty, withTermAdded } from './publish-slug.js';
 
 const saving = new Set<string>();
 /** 發布面板網址框沒存的字，以稿件為 key（見 `slugDraftFor`）。 */
@@ -81,6 +81,8 @@ export async function runSlugSave(uuid: string, steps: SlugSaveSteps): Promise<v
 
 /** 網址與分類共用：同一篇已經在存就什麼都不做；存好、重讀到套用才清草稿、放開；存失敗放開、草稿留著、錯誤丟回。 */
 async function runSave(busy: Set<string>, pending: Map<string, unknown>, uuid: string, steps: SlugSaveSteps): Promise<void> {
+  // 打字模式中不存（PR #39 跟進）：存了會出新版本，編輯區重載、打到一半的字被換掉。畫面上的按鈕已經反灰，這裡是最後一道。
+  if (editingJobs.has(uuid)) throw new Error(EDITING_SAVE_NOTE);
   if (busy.has(uuid)) return;
   busy.add(uuid);
   notify();
@@ -201,4 +203,56 @@ export function clearTaxonomyDraft(uuid: string): void {
 /** 跑一趟存分類（「儲存分類」與建好新項目後自動存都走這裡）。規則同 `runSlugSave`。 */
 export async function runTaxonomySave(uuid: string, steps: SlugSaveSteps): Promise<void> {
   return runSave(taxonomySaving, taxonomyDrafts, uuid, steps);
+}
+
+// --- 跟打字模式的關係（PR #39 Codex 第二輪）-----------------------------------------------
+
+/**
+ * 發布面板這篇正在存東西（存網址、存分類、建立分類的整段）。這期間存好會出新版本、校樣重載，
+ * 所以**所有進打字模式的入口**都要擋（`use-job-workspace.ts` 的 editBlocked 用它）。
+ */
+export function isPublishPanelSaving(uuid: string): boolean {
+  return saving.has(uuid) || isTaxonomySaving(uuid);
+}
+
+/** 哪幾篇此刻在打字模式（Workspace 登記；不管是怎麼進去的）。 */
+const editingJobs = new Set<string>();
+
+/** 打字模式中，發布面板會建新版本的按鈕（儲存分類、存網址、建立分類、核准並發布）反灰時講的話。 */
+export const EDITING_SAVE_NOTE = '你正在改原文，先按上方『儲存』或『取消』再存。';
+
+/** 登記這篇在不在打字模式；有變才通知訂閱的面板（按鈕跟著反灰／恢復）。 */
+export function markEditing(uuid: string, on: boolean): void {
+  if (on === editingJobs.has(uuid)) return;
+  if (on) editingJobs.add(uuid);
+  else editingJobs.delete(uuid);
+  notify();
+}
+
+export function isEditingJob(uuid: string): boolean {
+  return editingJobs.has(uuid);
+}
+
+export type AddTermOutcome =
+  | { readonly kind: 'saved' }
+  | { readonly kind: 'failed'; readonly error: string }
+  /** 這篇正在打字模式：不自動存（會出新版本、編輯區重載、打到一半的字被換掉），留成「選了沒存」。 */
+  | { readonly kind: 'deferred' };
+
+/**
+ * 建好（或選了既有的）新項目：加進**最新的**選取（單選取代）、記成草稿；這篇不在打字模式才自動存。
+ * `save` 回傳失敗原因，成功是 null。
+ */
+export async function addTermToSelection(input: {
+  readonly uuid: string;
+  readonly name: string;
+  readonly saved: readonly string[];
+  readonly multiple: boolean;
+  readonly save: (selection: readonly string[]) => Promise<string | null>;
+}): Promise<AddTermOutcome> {
+  const next = withTermAdded(taxonomyDraftFor(input.uuid, input.saved), input.name, input.multiple);
+  setTaxonomyDraft(input.uuid, next, input.saved);
+  if (isEditingJob(input.uuid)) return { kind: 'deferred' };
+  const error = await input.save(next);
+  return error === null ? { kind: 'saved' } : { kind: 'failed', error };
 }

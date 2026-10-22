@@ -3,7 +3,7 @@ import { api, describeError } from '../../service/client.js';
 import type { LoadedJob, Term } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { matchTerms, termAddedNote } from '../../lib/term-match.js';
-import { holdTaxonomy } from '../../lib/slug-save-store.js';
+import { holdTaxonomy, type AddTermOutcome } from '../../lib/slug-save-store.js';
 import { ErrorNote, Field, Spinner } from './shared.js';
 
 /**
@@ -30,6 +30,7 @@ export function TaxonomyPanel({
   error,
   onSave,
   onAddTerm,
+  editingLock,
 }: {
   job: LoadedJob;
   /** 畫面上的選取（沒存的草稿或已存的）。 */
@@ -40,8 +41,13 @@ export function TaxonomyPanel({
   error: string | null;
   /** 存這份選取到這篇（建一版新內容）；回傳失敗原因，成功是 null。 */
   onSave: (selection: readonly string[]) => Promise<string | null>;
-  /** 把項目加進最新的選取並直接存（發布面板讀 store 的最新值，不用這裡的快照）；回傳失敗原因，成功是 null。 */
-  onAddTerm: (name: string) => Promise<string | null>;
+  /** 把項目加進最新的選取（發布面板讀 store 的最新值，不用這裡的快照）；不在打字模式才直接存。 */
+  onAddTerm: (name: string) => Promise<AddTermOutcome>;
+  /**
+   * 這篇在打字模式時講的原因（PR #39 跟進，PublishSheet 用 markEditing 的登記判斷）；不是 null 就鎖住所有會建新版本的
+   * 按鈕：儲存分類、建立（確定建立）、選這個、相近項目。點選 chip 只改沒存的選取，照常可以。
+   */
+  editingLock: string | null;
 }): JSX.Element {
   const taxonomy = job.target.taxonomy;
   const multiple = job.target.contentType === 'longform';
@@ -53,7 +59,7 @@ export function TaxonomyPanel({
   /** 按了「建立」、等使用者在行內確認（D-050：建在正式站上，先講清楚再建）。 */
   const [confirming, setConfirming] = useState(false);
   /** 建立／選上之後的結果：講「已建立」或「站上已有」，存失敗講還沒套到這篇。 */
-  const [added, setAdded] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
+  const [added, setAdded] = useState<{ tone: 'good' | 'warn' | 'bad'; text: string } | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -86,6 +92,7 @@ export function TaxonomyPanel({
   // 建立、套用、存的期間鎖住所有選取控制（PR #39 Codex 第一輪）：期間點的會被存的那一份蓋掉。
   // `saving` 來自發布面板，含 holdTaxonomy 的整段，面板關掉再開也一樣鎖。
   const busy = createBusy || saving;
+  const locked = editingLock !== null;
   const known = new Set((terms ?? []).map((term) => term.name));
   const unknown = selected.filter((name) => terms !== null && !known.has(name));
 
@@ -113,7 +120,7 @@ export function TaxonomyPanel({
    * 跑完才放開（PR #39 Codex 第一輪）。存失敗：選取留著（草稿），講清楚、可以按「儲存分類」重試。
    */
   const runAdd = (obtain: () => Promise<{ term: Term; created: boolean }>): void => {
-    if (busy) return;
+    if (busy || locked) return;
     setCreateBusy(true);
     setCreateError(null);
     setAdded(null);
@@ -132,8 +139,15 @@ export function TaxonomyPanel({
       });
       setNewName('');
       setConfirming(false);
-      const saveError = await onAddTerm(term.name);
-      setAdded(termAddedNote({ name: term.name, created, saveError }));
+      const outcome = await onAddTerm(term.name);
+      setAdded(
+        termAddedNote({
+          name: term.name,
+          created,
+          saveError: outcome.kind === 'failed' ? outcome.error : null,
+          deferred: outcome.kind === 'deferred',
+        }),
+      );
     }).finally(() => setCreateBusy(false));
   };
 
@@ -263,7 +277,7 @@ export function TaxonomyPanel({
                 value={newName}
                 onChange={(event) => editName(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' && trimmedName.length > 0 && !termsLoading && !busy) {
+                  if (event.key === 'Enter' && trimmedName.length > 0 && !termsLoading && !busy && !locked) {
                     event.preventDefault();
                     if (matches.exact) chooseExisting(matches.exact);
                     else setConfirming(true);
@@ -277,7 +291,7 @@ export function TaxonomyPanel({
               <button
                 type="button"
                 className="btn btn-quiet"
-                disabled={busy || trimmedName.length === 0 || termsLoading || confirming}
+                disabled={busy || locked || trimmedName.length === 0 || termsLoading || confirming}
                 onClick={() => (matches.exact ? chooseExisting(matches.exact) : setConfirming(true))}
               >
                 <Icon name={matches.exact ? 'check' : 'plus'} size={14} />
@@ -297,7 +311,7 @@ export function TaxonomyPanel({
                 <span className="field-hint">站上有名稱相近的項目，是這個嗎？點一下直接選：</span>
                 <div className="chips">
                   {matches.similar.map((term) => (
-                    <button key={term.id} type="button" className="chip" disabled={busy} onClick={() => chooseExisting(term)}>
+                    <button key={term.id} type="button" className="chip" disabled={busy || locked} onClick={() => chooseExisting(term)}>
                       {term.name}
                       {term.count !== undefined && (
                         <span className="chip-count mono" title={`${term.count} 篇`}>
@@ -324,7 +338,7 @@ export function TaxonomyPanel({
                     {matches.similar.length > 0 ? '上面有名稱相近的既有項目，確定都不是你要的？' : ''}
                   </span>
                   <div className="row">
-                    <button type="button" className="btn btn-primary" disabled={busy} onClick={createNow}>
+                    <button type="button" className="btn btn-primary" disabled={busy || locked} onClick={createNow}>
                       {busy ? <Spinner /> : <Icon name="plus" size={14} />}
                       確定建立
                     </button>
@@ -342,7 +356,7 @@ export function TaxonomyPanel({
             )}
 
             {added && (
-              <p className={`note ${added.tone === 'good' ? 'note-good' : 'note-bad'}`} role={added.tone === 'bad' ? 'alert' : 'status'}>
+              <p className={`note note-${added.tone}`} role={added.tone === 'good' ? 'status' : 'alert'}>
                 <Icon name={added.tone === 'good' ? 'check' : 'alert'} size={14} />
                 <span>{added.text}</span>
               </p>
@@ -356,11 +370,19 @@ export function TaxonomyPanel({
       {/* 建立後自動存失敗時，上面那行已經講了；這裡只講「儲存分類」按鈕自己的失敗，不重複。 */}
       <ErrorNote message={added?.tone === 'bad' ? null : error} />
 
+      {editingLock !== null && (
+        <p className="note note-warn">
+          <Icon name="alert" size={14} />
+          <span>{editingLock}</span>
+        </p>
+      )}
+
       <div className="row row-end">
         <button
           type="button"
           className="btn btn-primary"
-          disabled={saving || createBusy || !dirty}
+          disabled={saving || createBusy || !dirty || locked}
+          title={editingLock ?? undefined}
           onClick={() => {
             setAdded(null);
             void onSave(selected);

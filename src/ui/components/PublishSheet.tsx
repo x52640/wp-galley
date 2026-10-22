@@ -11,7 +11,6 @@ import {
   slugPublishBlocker,
   taxonomyPublishBlocker,
   withSlug,
-  withTermAdded,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
 import {
@@ -24,6 +23,10 @@ import {
   slugDraftFor,
   subscribeSlugSave,
   taxonomyDraftFor,
+  addTermToSelection,
+  EDITING_SAVE_NOTE,
+  isEditingJob,
+  type AddTermOutcome,
   type SyncOutcome,
 } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
@@ -91,6 +94,12 @@ export function PublishSheet({
   const prepare = useAction();
   const go = useAction();
 
+  // 這篇在不在打字模式（Workspace 用 markEditing 登記，PR #39 跟進）：在的話這裡所有會建新版本的按鈕
+  // （存網址、儲存分類、建立分類、核准並發布）一律反灰、講原因——存了會出新版本，編輯區重載、打到一半的字被換掉。
+  // 正常操作下打字模式時頂列與右欄都是 inert、面板打不開；這是保險。面板仍可開、可看。
+  const editingNow = useSyncExternalStore(subscribeSlugSave, () => isEditingJob(job.uuid));
+  const editingLock = editingNow ? EDITING_SAVE_NOTE : null;
+
   // 網址框（P5-T039）：放在這一層，發布按鈕才知道有沒存的改動（審查 #1、#4）。
   const savedSlug = readString(job.currentRevision?.templateData ?? null, 'slug');
   // 沒存的字只記在模組層級、以稿件為 key（P5-T040 #2；PR #28 第三輪 Codex P2：面板不另存一份）：
@@ -122,7 +131,7 @@ export function PublishSheet({
   }, [slugDirty, slugEditing, savedSlug, slugSaving, job.uuid]);
 
   const storeSlug = (): void => {
-    if (!slugDirty || slugSaving) return;
+    if (!slugDirty || slugSaving || isEditingJob(job.uuid)) return;
     void slugSave.run(() =>
       runSlugSave(job.uuid, {
         save: async () => {
@@ -168,6 +177,7 @@ export function PublishSheet({
 
   /** 存分類（「儲存分類」與建好新項目後自動存共用）。回傳失敗原因，成功是 null；失敗時選取留著。 */
   const storeTaxonomy = async (selection: readonly string[]): Promise<string | null> => {
+    if (isEditingJob(job.uuid)) return EDITING_SAVE_NOTE;
     let failure: string | null = null;
     await termSave.run(async () => {
       try {
@@ -197,13 +207,18 @@ export function PublishSheet({
     return failure;
   };
 
-  /** 建好（或選了既有的）新項目：加進**最新的**選取（單選取代）、記成草稿、直接存。回傳失敗原因，成功是 null。 */
-  const addTermAndSave = async (name: string): Promise<string | null> => {
-    const { savedTerms: saved } = latestTerms.current;
-    const next = withTermAdded(taxonomyDraftFor(job.uuid, saved), name, multipleTerms);
-    setTaxonomyDraft(job.uuid, next, saved);
-    return storeTaxonomy(next);
-  };
+  /**
+   * 建好（或選了既有的）新項目：加進**最新的**選取（單選取代）、記成草稿；這篇不在打字模式才直接存
+   * （在打字模式就留成「選了沒存」，不讓自動存觸發編輯區重載，PR #39 Codex 第二輪）。
+   */
+  const addTermAndSave = (name: string): Promise<AddTermOutcome> =>
+    addTermToSelection({
+      uuid: job.uuid,
+      name,
+      saved: latestTerms.current.savedTerms,
+      multiple: multipleTerms,
+      save: storeTaxonomy,
+    });
 
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
   useEffect(() => {
@@ -243,7 +258,7 @@ export function PublishSheet({
 
   const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSaving });
   const termBlocker = job.target.taxonomy === null ? null : taxonomyPublishBlocker({ dirty: termDirty, saving: termSaving });
-  const why: string | null = slugBlocker ?? termBlocker ?? (needsCover
+  const why: string | null = editingLock ?? slugBlocker ?? termBlocker ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
       ? `還不能發布：${otherBlockers.join('、')}`
@@ -301,7 +316,8 @@ export function PublishSheet({
           job={job}
           refresh={refresh}
           approvedNow={approvedNow}
-          busy={go.busy}
+          busy={go.busy || editingNow}
+          lockNote={editingLock}
           draft={slugDraft}
           setDraft={setSlugDraft}
           editing={slugEditing}
@@ -379,6 +395,7 @@ export function PublishSheet({
             error={termSave.error}
             onSave={storeTaxonomy}
             onAddTerm={addTermAndSave}
+            editingLock={editingLock}
           />
         </section>
       )}
@@ -470,7 +487,7 @@ export function PublishSheet({
           type="button"
           className="btn btn-primary btn-big p-go-btn"
           data-danger={status === 'publish' ? 'yes' : 'no'}
-          disabled={why !== null || go.busy || prepare.busy || slugSaving || termSaving}
+          disabled={why !== null || go.busy || prepare.busy || slugSaving || termSaving || editingNow}
           onClick={publish}
         >
           {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
@@ -485,7 +502,13 @@ export function PublishSheet({
           )}
         </p>
         {slugDirty && (
-          <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSaving || go.busy} onClick={storeSlug}>
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            disabled={slugSaving || go.busy || editingNow}
+            title={editingLock ?? undefined}
+            onClick={storeSlug}
+          >
             {slugSaving ? <Spinner /> : <Icon name="check" size={13} />}
             存網址
           </button>
@@ -494,7 +517,8 @@ export function PublishSheet({
           <button
             type="button"
             className="btn btn-quiet btn-tiny"
-            disabled={termSaving || go.busy}
+            disabled={termSaving || go.busy || editingNow}
+            title={editingLock ?? undefined}
             onClick={() => void storeTaxonomy(termDraft)}
           >
             {termSaving ? <Spinner /> : <Icon name="tag" size={13} />}
@@ -534,6 +558,7 @@ function PublishSlug({
   refresh,
   approvedNow,
   busy,
+  lockNote,
   draft,
   setDraft,
   editing,
@@ -546,8 +571,10 @@ function PublishSlug({
   job: LoadedJob;
   refresh: () => Promise<void>;
   approvedNow: boolean;
-  /** 正在發布：不給改。 */
+  /** 正在發布、或這篇在打字模式：不給改。 */
   busy: boolean;
+  /** 打字模式中講的原因（PR #39 跟進）；沒有是 null。 */
+  lockNote: string | null;
   /** 框裡的值、開關、存的動作都在 PublishSheet：發布按鈕要知道有沒存的改動（審查 #1）。 */
   draft: string;
   setDraft: (value: string) => void;
@@ -571,6 +598,7 @@ function PublishSlug({
 
   return (
     <div className="p-slug">
+      {lockNote !== null && <p className="field-hint">{lockNote}</p>}
       <div className="p-slug-line">
         <Icon name="link" size={16} />
         <span className="p-slug-label">網址</span>
