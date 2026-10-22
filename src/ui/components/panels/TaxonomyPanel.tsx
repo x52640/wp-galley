@@ -3,6 +3,7 @@ import { api, describeError } from '../../service/client.js';
 import type { LoadedJob, Term } from '../../service/types.js';
 import { Icon } from '../../icons.js';
 import { matchTerms, termAddedNote } from '../../lib/term-match.js';
+import { holdTaxonomy } from '../../lib/slug-save-store.js';
 import { ErrorNote, Field, Spinner } from './shared.js';
 
 /**
@@ -28,6 +29,7 @@ export function TaxonomyPanel({
   saving,
   error,
   onSave,
+  onAddTerm,
 }: {
   job: LoadedJob;
   /** 畫面上的選取（沒存的草稿或已存的）。 */
@@ -38,6 +40,8 @@ export function TaxonomyPanel({
   error: string | null;
   /** 存這份選取到這篇（建一版新內容）；回傳失敗原因，成功是 null。 */
   onSave: (selection: readonly string[]) => Promise<string | null>;
+  /** 把項目加進最新的選取並直接存（發布面板讀 store 的最新值，不用這裡的快照）；回傳失敗原因，成功是 null。 */
+  onAddTerm: (name: string) => Promise<string | null>;
 }): JSX.Element {
   const taxonomy = job.target.taxonomy;
   const multiple = job.target.contentType === 'longform';
@@ -79,24 +83,23 @@ export function TaxonomyPanel({
 
   // 後端還沒有 /api/wordpress/terms 時退回手動輸入，不要讓整個步驟卡死。
   const termsUnavailable = loadError !== null;
+  // 建立、套用、存的期間鎖住所有選取控制（PR #39 Codex 第一輪）：期間點的會被存的那一份蓋掉。
+  // `saving` 來自發布面板，含 holdTaxonomy 的整段，面板關掉再開也一樣鎖。
+  const busy = createBusy || saving;
   const known = new Set((terms ?? []).map((term) => term.name));
   const unknown = selected.filter((name) => terms !== null && !known.has(name));
 
   const toggle = (name: string): void => {
+    if (busy) return;
     setAdded(null);
     if (selected.includes(name)) onChange(selected.filter((item) => item !== name));
     else onChange(multiple ? [...selected, name] : [name]);
   };
 
-  /** 加上某個項目（已選的不會被取消）。 */
-  const withTerm = (name: string): readonly string[] =>
-    selected.includes(name) ? selected : multiple ? [...selected, name] : [name];
-
   const trimmedName = newName.trim();
   // 用已載入的清單在前端比對（不另打 WordPress）；清單還沒載入時先不給建，免得漏看相近的。
   const matches = matchTerms(trimmedName, terms ?? []);
   const termsLoading = terms === null && !termsUnavailable;
-  const busy = createBusy || saving;
 
   const editName = (value: string): void => {
     setNewName(value);
@@ -105,42 +108,39 @@ export function TaxonomyPanel({
     setCreateError(null);
   };
 
-  /** 選上並直接存到這篇（D-050 2026-10-22）。存失敗：選取留著（草稿），講清楚、可以按「儲存分類」重試。 */
-  const applyTerm = async (term: Term, created: boolean): Promise<void> => {
-    const next = withTerm(term.name);
-    onChange(next);
-    setNewName('');
-    setConfirming(false);
-    const saveError = await onSave(next);
-    setAdded(termAddedNote({ name: term.name, created, saveError }));
-  };
-
-  const chooseExisting = (term: Term): void => {
-    if (busy) return;
-    setCreateBusy(true);
-    void applyTerm(term, false).finally(() => setCreateBusy(false));
-  };
-
-  const createNow = (): void => {
+  /**
+   * 選上並直接存到這篇（D-050 2026-10-22）。整段（含建立請求）包在 holdTaxonomy 裡：請求送出前就擋發布，
+   * 跑完才放開（PR #39 Codex 第一輪）。存失敗：選取留著（草稿），講清楚、可以按「儲存分類」重試。
+   */
+  const runAdd = (obtain: () => Promise<{ term: Term; created: boolean }>): void => {
     if (busy) return;
     setCreateBusy(true);
     setCreateError(null);
-    void (async () => {
+    setAdded(null);
+    void holdTaxonomy(job.uuid, async () => {
+      let got: { term: Term; created: boolean };
       try {
-        // 後端 resolveTerms 遇到同名的既有項目會直接回它（200，created: false），不會建第二個。
-        const { term, created } = await api.createTerm(taxonomy, trimmedName);
-        setTerms((list) => {
-          const now = list ?? [];
-          return now.some((entry) => entry.id === term.id) ? now : [...now, term];
-        });
-        await applyTerm(term, created);
+        got = await obtain();
       } catch (cause) {
         setCreateError(describeError(cause));
-      } finally {
-        setCreateBusy(false);
+        return;
       }
-    })();
+      const { term, created } = got;
+      setTerms((list) => {
+        const now = list ?? [];
+        return now.some((entry) => entry.id === term.id) ? now : [...now, term];
+      });
+      setNewName('');
+      setConfirming(false);
+      const saveError = await onAddTerm(term.name);
+      setAdded(termAddedNote({ name: term.name, created, saveError }));
+    }).finally(() => setCreateBusy(false));
   };
+
+  const chooseExisting = (term: Term): void => runAdd(async () => ({ term, created: false }));
+
+  // 後端 resolveTerms 遇到同名的既有項目會直接回它（200，created: false），不會建第二個。
+  const createNow = (): void => runAdd(() => api.createTerm(taxonomy, trimmedName));
 
   return (
     <div className="stack">
@@ -177,6 +177,7 @@ export function TaxonomyPanel({
               className="chip"
               data-active={selected.includes(term.name) ? 'yes' : 'no'}
               aria-pressed={selected.includes(term.name)}
+              disabled={busy}
               onClick={() => toggle(term.name)}
             >
               {selected.includes(term.name) && <Icon name="check" size={12} />}
@@ -201,6 +202,7 @@ export function TaxonomyPanel({
                 data-active="yes"
                 data-unknown="yes"
                 aria-pressed={true}
+                disabled={busy}
                 onClick={() => toggle(name)}
               >
                 <Icon name="alert" size={12} />
@@ -226,6 +228,7 @@ export function TaxonomyPanel({
           <input
             className="input"
             value={selected.join('、')}
+            disabled={busy}
             onChange={(event) =>
               onChange(
                 event.target.value

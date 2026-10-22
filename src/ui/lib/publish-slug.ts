@@ -99,6 +99,15 @@ export function isTaxonomyDirty(draft: readonly string[], saved: readonly string
   return draft.length !== saved.length || draft.some((name, index) => name !== saved[index]);
 }
 
+/**
+ * 把新項目加進**最新的**選取（PR #39 Codex 第一輪）：多選保留別的、單選取代；已選的原樣回傳（同一個參考）。
+ * 不要用送出建立請求之前的快照——建立期間別處改了選取，用快照會把那些改動默默蓋掉。
+ */
+export function withTermAdded(current: readonly string[], name: string, multiple: boolean): readonly string[] {
+  if (current.includes(name)) return current;
+  return multiple ? [...current, name] : [name];
+}
+
 export function taxonomyPublishBlocker(input: { readonly dirty: boolean; readonly saving: boolean }): string | null {
   if (input.saving) return '正在存分類，存好、成品重新載入之後才能發布。';
   if (input.dirty) return '分類改了還沒存：按「儲存分類」，或點掉剛選的改回原本的。';

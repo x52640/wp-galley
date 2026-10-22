@@ -81,3 +81,4 @@ agent、factcheck spec。
 - 來源防護沿用 `local-only.ts`，`tests/wordpress-api.test.ts` 補了外站、同機其他埠、`Origin: null`、cross-site／same-site、非本機 Host 都 403 且不打 WordPress。
 - 跟進（2026-10-22）：建好直接存到這篇；分類沒存擋發布（跟網址同一個 store／blocker）；`createTerm` 回 `{ term, created }`；精靈與 Workspace 講實際資料目錄路徑（`SetupStatus.locations`）。
 - 殘餘見 known-issues「發布台建立分類項目」：相近只比字面、前後端同名規則不同、沒存的選取只在記憶體。
+- PR #39 Codex 第一輪：建立＋套用＋存整段用 `holdTaxonomy` 登記在每稿件的擋發布狀態（請求送出前就擋）；套用讀 store 最新的選取（`withTermAdded`，單選取代），建立期間鎖住所有選取控制。

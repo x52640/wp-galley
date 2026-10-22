@@ -16,6 +16,8 @@ const saving = new Set<string>();
 const drafts = new Map<string, string>();
 /** 分類：存的期間與沒存的選取（見 `taxonomyDraftFor`）。 */
 const taxonomySaving = new Set<string>();
+/** 建立新項目＋套用＋存的整段（`holdTaxonomy`）。跟 taxonomySaving 分開記，存的那一步才不會被自己擋掉。 */
+const taxonomyHolds = new Map<string, number>();
 const taxonomyDrafts = new Map<string, readonly string[]>();
 const listeners = new Set<() => void>();
 
@@ -149,7 +151,25 @@ export async function runSourceSave(uuid: string, touchesSlug: boolean, steps: S
 // --- 分類／標籤（P5-T051 跟進，D-050）：跟網址同一套 ---------------------------------------
 
 export function isTaxonomySaving(uuid: string): boolean {
-  return taxonomySaving.has(uuid);
+  return taxonomySaving.has(uuid) || (taxonomyHolds.get(uuid) ?? 0) > 0;
+}
+
+/**
+ * 在發布面板建立新的分類項目時，**請求送出前**就登記「存分類中」（擋發布），建立、套用、存整段跑完（含失敗）才放開
+ * （PR #39 Codex 第一輪：以前只有面板裡的 busy，發布按鈕看不到，建立回來前按發布會送出舊分類）。
+ * 登記在模組層級、以稿件為 key：面板關掉再開照樣擋。
+ */
+export async function holdTaxonomy<T>(uuid: string, fn: () => Promise<T>): Promise<T> {
+  taxonomyHolds.set(uuid, (taxonomyHolds.get(uuid) ?? 0) + 1);
+  notify();
+  try {
+    return await fn();
+  } finally {
+    const left = (taxonomyHolds.get(uuid) ?? 1) - 1;
+    if (left > 0) taxonomyHolds.set(uuid, left);
+    else taxonomyHolds.delete(uuid);
+    notify();
+  }
 }
 
 /**

@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isTaxonomyDirty, taxonomyPublishBlocker } from '../src/ui/lib/publish-slug.js';
+import { isTaxonomyDirty, taxonomyPublishBlocker, withTermAdded } from '../src/ui/lib/publish-slug.js';
 import {
   clearTaxonomyDraft,
+  holdTaxonomy,
   isTaxonomySaving,
   runTaxonomySave,
   setTaxonomyDraft,
@@ -201,5 +202,65 @@ describe('發布面板接上分類的擋發布（守門：跟網址同一套）'
     const source = readFileSync(new URL('../src/ui/components/panels/TaxonomyPanel.tsx', import.meta.url), 'utf8');
     expect(source).not.toContain('才會套到這篇');
     expect(source).not.toMatch(/useState<string\[\]>\(current\)/);
+  });
+});
+
+describe('PR #39 Codex 第一輪：建立期間也擋發布、套用讀最新的選取', () => {
+  afterEach(() => clearTaxonomyDraft('a'));
+
+  it('holdTaxonomy：請求送出前就登記「存分類中」（擋發布），結束（含失敗）才放開', async () => {
+    let during = false;
+    let release!: () => void;
+    const pending = holdTaxonomy('a', async () => {
+      during = isTaxonomySaving('a');
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    expect(isTaxonomySaving('a')).toBe(true);
+    expect(taxonomyPublishBlocker({ dirty: false, saving: isTaxonomySaving('a') })).not.toBeNull();
+    release();
+    await pending;
+    expect(during).toBe(true);
+    expect(isTaxonomySaving('a')).toBe(false);
+
+    await expect(
+      holdTaxonomy('a', async () => {
+        throw new Error('建不起來');
+      }),
+    ).rejects.toThrow('建不起來');
+    expect(isTaxonomySaving('a')).toBe(false);
+  });
+
+  it('holdTaxonomy 期間照樣能跑 runTaxonomySave（建好接著存，不會被自己擋掉）', async () => {
+    let saved = false;
+    await holdTaxonomy('a', async () => {
+      await runTaxonomySave('a', {
+        save: async () => {
+          saved = true;
+        },
+        sync: async () => 'applied',
+      });
+    });
+    expect(saved).toBe(true);
+  });
+
+  it('withTermAdded：從最新的選取加上新項目；多選保留別的、單選取代、已選的不重複', () => {
+    expect(withTermAdded(['A', 'B'], 'C', true)).toEqual(['A', 'B', 'C']);
+    expect(withTermAdded(['A'], 'C', false)).toEqual(['C']);
+    const current = ['A', 'C'];
+    expect(withTermAdded(current, 'C', true)).toBe(current);
+  });
+
+  it('TaxonomyPanel 建立整段包在 holdTaxonomy 裡、套用交給發布面板讀最新值、選取控制在忙時鎖住', () => {
+    const source = readFileSync(new URL('../src/ui/components/panels/TaxonomyPanel.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('holdTaxonomy(');
+    expect(source).toContain('onAddTerm(');
+    expect(source).not.toContain('withTerm = ');
+    // 既有 chip、站上沒有的 chip、手動輸入框都要在忙時鎖住。
+    expect(source.match(/disabled=\{busy\}/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    const sheet = readFileSync(new URL('../src/ui/components/PublishSheet.tsx', import.meta.url), 'utf8');
+    expect(sheet).toContain('withTermAdded(');
+    expect(sheet).toContain('latestTerms.current');
   });
 });

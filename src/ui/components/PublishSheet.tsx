@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
@@ -11,6 +11,7 @@ import {
   slugPublishBlocker,
   taxonomyPublishBlocker,
   withSlug,
+  withTermAdded,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
 import {
@@ -160,6 +161,10 @@ export function PublishSheet({
   const termSavingShared = useSyncExternalStore(subscribeSlugSave, () => isTaxonomySaving(job.uuid));
   const termSaving = termSavingShared || termSave.busy;
   const termDirty = job.target.taxonomy !== null && isTaxonomyDirty(termDraft, savedTerms);
+  // 建立新項目要等一趟 WordPress，回來時畫面可能已經重讀過、選取也可能變了（PR #39 Codex 第一輪）：
+  // 存與套用一律讀這裡的最新值，不用送出請求那一刻的快照。
+  const latestTerms = useRef({ job, savedTerms });
+  latestTerms.current = { job, savedTerms };
 
   /** 存分類（「儲存分類」與建好新項目後自動存共用）。回傳失敗原因，成功是 null；失敗時選取留著。 */
   const storeTaxonomy = async (selection: readonly string[]): Promise<string | null> => {
@@ -168,13 +173,14 @@ export function PublishSheet({
       try {
         await runTaxonomySave(job.uuid, {
           save: async () => {
-            const baseHash = job.currentRevision?.contentHash ?? null;
+            const { job: now } = latestTerms.current;
+            const baseHash = now.currentRevision?.contentHash ?? null;
             // templateData 是整份取代，現有欄位一定要帶上；單選清空就拿掉 category 鍵（P5-T021）。
             // 帶上 expectedContentHash：中間被別處改過就擋下來，不蓋掉。
             await guardEdit(() =>
               api.createRevision(job.uuid, {
                 origin: 'manual',
-                templateData: taxonomyTemplateData(job.currentRevision?.templateData, multipleTerms, selection),
+                templateData: taxonomyTemplateData(now.currentRevision?.templateData, multipleTerms, selection),
                 reason: '修改分類',
                 ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
               }),
@@ -189,6 +195,14 @@ export function PublishSheet({
       }
     });
     return failure;
+  };
+
+  /** 建好（或選了既有的）新項目：加進**最新的**選取（單選取代）、記成草稿、直接存。回傳失敗原因，成功是 null。 */
+  const addTermAndSave = async (name: string): Promise<string | null> => {
+    const { savedTerms: saved } = latestTerms.current;
+    const next = withTermAdded(taxonomyDraftFor(job.uuid, saved), name, multipleTerms);
+    setTaxonomyDraft(job.uuid, next, saved);
+    return storeTaxonomy(next);
   };
 
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
@@ -364,6 +378,7 @@ export function PublishSheet({
             saving={termSaving}
             error={termSave.error}
             onSave={storeTaxonomy}
+            onAddTerm={addTermAndSave}
           />
         </section>
       )}
