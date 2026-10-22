@@ -12,15 +12,17 @@ const TAXONOMY_NAME_PATTERN = /^[a-z0-9_]+(?:-[a-z0-9_]+)*$/;
 /**
  * 發布目標：把「模板」對應到「WordPress 上的哪個內容類型」。
  *
- * 放在 config/publish-targets.json 而不是寫死在程式碼裡，因為這是**站台設定**——
+ * 放在站台設定檔（資料目錄的 publish-targets.json，D-035）而不是寫死在程式碼裡，因為這是**站台設定**——
  * 換一個網站就要換一份，但程式不用改。一次連一個站（D-016），所以這是**本機檔**，
  * 不進 git；repo 只附範例：`config/publish-targets.example.json`（通用：文章＋頁面）與
  * `config/examples/remusplus.json`（作者站台）。裡面沒有秘密，只是每個人的站不一樣。
  *
- * 每個 target 上的三個開關是安全邊界，預設全部保守：
+ * 每個 target 上的兩個開關是安全邊界，預設全部保守：
  * - allowCreate      能不能建立新內容
  * - allowUpdate      能不能覆寫既有內容
- * - allowCreateTerms 能不能建立新的分類項目（預設 false，見 terms.ts 的說明）
+ *
+ * 分類項目沒有開關（D-050）：使用者在發布台手動建立一律可用；發布時對不上的名稱一律不自動建（D-004）。
+ * 舊設定檔的 `allowCreateTerms` 仍讀得進來，但讀完就丟掉、沒有作用（見下面 schema）。
  *
  * 另有 `disabled`（預設 false）：使用者在精靈裡關掉不用的類型，只影響「能不能建新稿」。
  */
@@ -63,7 +65,12 @@ export const PublishTargetSchema = z
     fixedObjectId: z.number().int().positive().nullable().default(null),
     allowCreate: z.boolean().default(false),
     allowUpdate: z.boolean().default(false),
-    allowCreateTerms: z.boolean().default(false),
+    /**
+     * **已廢止（D-050），沒有作用。** 舊設定檔（包括使用者資料目錄那份）可能還留著它；`.strict()` 不認得的欄位會報錯，
+     * 所以這裡照收（格式仍須是布林），parse 完在下面的 transform 丟掉，程式裡任何地方都讀不到。
+     * 精靈不再寫它；精靈改寫設定檔時保留使用者原樣，舊檔的這個欄位會原樣留著，無害。
+     */
+    allowCreateTerms: z.boolean().optional(),
     /** 長文 15/15 篇都有精選圖片；日記 0/100 篇有。 */
     requireFeaturedImage: z.boolean().default(false),
     /** 發布前是否需要第二次確認（首頁用）。 */
@@ -93,13 +100,8 @@ export const PublishTargetSchema = z
         message: `${target.key}：沒有設定 taxonomy，taxonomyRestBase 沒有意義`,
       });
     }
-    if (target.allowCreateTerms && target.taxonomy === null) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `${target.key}：沒有設定 taxonomy，allowCreateTerms 沒有意義`,
-      });
-    }
-  });
+  })
+  .transform(({ allowCreateTerms: _legacy, ...target }) => target);
 
 export type PublishTarget = z.infer<typeof PublishTargetSchema>;
 

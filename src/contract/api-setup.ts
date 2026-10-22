@@ -14,10 +14,15 @@ export interface SetupStatus {
   readonly needsSetup: boolean;
   /** 已設定的連線（只有網址與帳號）。 */
   readonly wordpress: { readonly url: string; readonly username: string } | null;
-  /** 本機站台設定檔（`config/publish-targets.json`）目前的內容。 */
+  /** 本機站台設定檔（資料目錄的 `publish-targets.json`，D-035）目前的內容。 */
   readonly siteConfig: { readonly exists: boolean; readonly targets: PublishTargetSummary[] };
   /** 這個後端能不能寫設定（測試或特殊啟動方式沒給檔案路徑時是 false）。 */
   readonly canWrite: boolean;
+  /**
+   * 站台設定檔與備份實際放在哪（P5-T051 跟進），給畫面照實講。家目錄開頭寫成 `~`（跟 D-035 的寫法一樣）。
+   * 沒給檔案路徑（`canWrite` 是 false）時是 null。
+   */
+  readonly locations: { readonly siteConfigFile: string; readonly backupsDir: string } | null;
 }
 
 export interface SetupConnectionRequest {

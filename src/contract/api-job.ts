@@ -34,8 +34,6 @@ export interface JobTarget {
   readonly postType: string;
   readonly taxonomy: string | null;
   readonly requireFeaturedImage: boolean;
-  /** 設定檔有沒有允許從發布台建立新的分類項目（D-004：預設不允許）。 */
-  readonly allowCreateTerms: boolean;
 }
 
 export interface JobTemplate {

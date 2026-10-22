@@ -380,3 +380,56 @@ describe('#13 更新既有文章時送完整的封面與分類', () => {
     expect(payload).not.toHaveProperty('diary-category');
   });
 });
+
+// --- D-050：發布時對不上的分類名稱一律不自動建立 ------------------------------
+
+describe('D-050 發布路徑不自動建立分類項目', () => {
+  /** 舊設定檔還留著 allowCreateTerms: true（D-050 之前的開關）。 */
+  function legacyCreateTermsTargets() {
+    return createTargetRegistry([
+      PublishTargetSchema.parse({
+        key: 'diary',
+        displayName: '日•記',
+        contentType: 'diary',
+        postType: 'diary',
+        restBase: 'diary',
+        templateId: 'diary-v1',
+        taxonomy: 'diary-category',
+        allowCreate: true,
+        allowUpdate: true,
+        allowCreateTerms: true,
+      }),
+    ]);
+  }
+
+  it('設定檔寫 allowCreateTerms: true，Agent 給的名稱對不上：不送建立分類的請求，照 D-004 原樣回報', async () => {
+    const f = await setup({ targets: legacyCreateTermsTargets() });
+    const uuid = f.core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      templateData: { title: '20260828', body: '<p class="wp-block-paragraph">內文</p>', category: '經濟學思考' },
+    }).uuid;
+    approveJob(f.core, uuid);
+
+    const result = await f.core.publish(uuid, { status: 'draft' });
+
+    expect(result.unknownTerms).toEqual(['經濟學思考']);
+    expect(writes(f).filter((request) => pathOf(request) === '/wp-json/wp/v2/diary-category')).toEqual([]);
+    const created = writes(f).find((request) => pathOf(request) === '/wp-json/wp/v2/diary');
+    expect(JSON.parse(created!.body)).not.toHaveProperty('diary-category');
+  });
+
+  it('作者站台範例（沒有這個欄位）也一樣不自動建', async () => {
+    const f = await setup();
+    const uuid = f.core.createJob({
+      targetKey: 'diary',
+      sourceText: SOURCE,
+      templateData: { title: '20260828', body: '<p class="wp-block-paragraph">內文</p>', category: '新的' },
+    }).uuid;
+    approveJob(f.core, uuid);
+
+    const result = await f.core.publish(uuid, { status: 'draft' });
+    expect(result.unknownTerms).toEqual(['新的']);
+    expect(writes(f).filter((request) => pathOf(request) === '/wp-json/wp/v2/diary-category')).toEqual([]);
+  });
+});

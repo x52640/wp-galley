@@ -1,7 +1,7 @@
 # 模板與發布目標
 
 > 擁有範圍：模板資料夾結構、manifest 欄位、三種嚴格度、內容類型到 WordPress 的對應。
-> 程式：`src/templates/`、`templates/<template-id>/`、`config/publish-targets.json`（本機檔，見下方「站台設定檔」）、
+> 程式：`src/templates/`、`templates/<template-id>/`、資料目錄的 `publish-targets.json`（本機檔，見下方「站台設定檔」）、
 > `src/wordpress/targets.ts`。
 > 為什麼只送正文：[ADR-0004](../adr/0004-body-slot-only.md)。首頁為什麼不在範圍內：
 > [ADR-0003](../adr/0003-homepage-out-of-mvp.md)。
@@ -69,7 +69,7 @@ target 的 `postType` 叫「文章」（post）或「頁面」（page），同�
 
 ## 站台設定檔
 
-一次連一個站（D-016），站台設定是**本機檔** `config/publish-targets.json`，不進 git。repo 附兩份範例：
+一次連一個站（D-016），站台設定是**本機檔**：資料目錄的 `publish-targets.json`（D-035；P8-T003 之前在 `config/`），不進 git。repo 附兩份範例：
 
 | 檔案 | 內容 |
 | --- | --- |
@@ -93,12 +93,14 @@ target 的 `postType` 叫「文章」（post）或「頁面」（page），同�
 
 ## 發布目標（target）的欄位
 
-`config/publish-targets.json` 每個 target：`key`、`displayName`、`contentType`、
+站台設定檔（資料目錄的 `publish-targets.json`，D-035）每個 target：`key`、`displayName`、`contentType`、
 `postType`、`restBase`、`templateId`、`taxonomy`、`taxonomyRestBase`（選填，分類法的 REST 名稱，
 不寫＝等於 `taxonomy`；核心 `category` 要寫 `categories`；兩者都只准小寫英數、底線、連字號，
 連線診斷會拿站上的 `rest_base` 比對）、`fixedObjectId`（首頁用，目前皆 null）、
-`allowCreate`、`allowUpdate`、`allowCreateTerms`（預設 false，見 D-004）、
+`allowCreate`、`allowUpdate`、
 `requireFeaturedImage`、`requireSecondConfirmation`、`disabled`（選填布林，P5-T032，D-032）。
+舊檔的 `allowCreateTerms`（布林）照樣讀得進來，但讀完就丟掉、沒有作用（D-050，P5-T051）：手動建立分類項目一律可用，
+發布時一律不自動建；精靈與範例不再寫它。
 
 **`disabled`**：`true`＝使用者在設定精靈停用了這個類型——新稿件選單與拖放／貼上建稿不出現，`createJob` 拒絕；
 已經用它的舊稿件照常打開、編輯、發布。**不寫＝啟用**，舊檔不用改。通常不用手寫：精靈「發到哪裡」的開關會寫

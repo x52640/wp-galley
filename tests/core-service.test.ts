@@ -86,8 +86,8 @@ describe('建立與讀取', () => {
     expect(detail.previewUrl).toBe(`/api/jobs/${job.uuid}/preview`);
     // 第一版沒有上一版可比。
     expect(detail.marks).toEqual([]);
-    // 分類面板靠這個決定能不能建新項目；以前後端沒送，畫面永遠當成「關閉」。
-    expect(detail.target?.allowCreateTerms).toBe(false);
+    // D-050：建立分類項目不再有開關，詳情不送這個欄位。
+    expect(detail.target).not.toHaveProperty('allowCreateTerms');
     // 發布面板靠它講清楚「發到 WordPress 的哪個內容類型」。
     expect(detail.target?.postType).toBe('diary');
   });

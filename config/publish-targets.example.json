@@ -12,7 +12,6 @@
       "fixedObjectId": null,
       "allowCreate": true,
       "allowUpdate": true,
-      "allowCreateTerms": false,
       "requireFeaturedImage": false,
       "requireSecondConfirmation": false
     },
@@ -27,7 +26,6 @@
       "fixedObjectId": null,
       "allowCreate": true,
       "allowUpdate": true,
-      "allowCreateTerms": false,
       "requireFeaturedImage": false,
       "requireSecondConfirmation": false
     }

@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { api, describeError } from '../../service/client.js';
 import type { LoadedJob, Term } from '../../service/types.js';
 import { Icon } from '../../icons.js';
-import { readString, readStringArray } from '../../lib/format.js';
-import { useConfirm } from '../ConfirmDialog.js';
-import { ErrorNote, Field, Spinner, guardEdit, useAction } from './shared.js';
-import { taxonomyTemplateData } from './template-data.js';
+import { matchTerms, termAddedNote } from '../../lib/term-match.js';
+import { ErrorNote, Field, Spinner } from './shared.js';
 
 /**
  * 分類項目。
  *
- * **預設只能選既有的項目。** 理由寫在 plan.md D-004：Agent 很容易生出
- * 「經濟」「經濟學」「經濟學思考」這種近義詞，自動建立幾個月後分類就變垃圾場。
- * 所以要建新項目得使用者自己打字、自己按確認，而且發布目標的
- * `allowCreateTerms` 還要是開的。
+ * **發布時不自動建立項目**（plan.md D-004）：Agent 很容易生出「經濟」「經濟學」「經濟學思考」
+ * 這種近義詞，自動建立幾個月後分類就變垃圾場。要新項目由使用者在這裡自己打字、看過站上名稱相近的
+ * 既有項目、再按一次確認才建（D-050：一律可用，沒有設定檔開關）。同名的直接選既有的，不建第二個。
+ * 從這裡建好（或選了既有的）就直接存到這篇（D-050 2026-10-22），不用再按「儲存分類」。
+ *
+ * **選取不放在這個元件裡**（P5-T051 跟進）：跟網址一樣記在 `lib/slug-save-store.ts`、以稿件為 key，
+ * 由發布面板（PublishSheet）讀寫——選了沒存要擋發布，面板關掉再開、別處存了別的欄位都照樣擋。
  *
  * 長文用多選（tags）；日記與通用文章用單選（category）——這是模板 schema 的差別，
  * 不是這裡自己決定的。
@@ -21,32 +22,36 @@ import { taxonomyTemplateData } from './template-data.js';
 
 export function TaxonomyPanel({
   job,
-  refresh,
+  selected,
+  onChange,
+  dirty,
+  saving,
+  error,
+  onSave,
 }: {
   job: LoadedJob;
-  refresh: () => Promise<void>;
+  /** 畫面上的選取（沒存的草稿或已存的）。 */
+  selected: readonly string[];
+  onChange: (next: readonly string[]) => void;
+  dirty: boolean;
+  saving: boolean;
+  error: string | null;
+  /** 存這份選取到這篇（建一版新內容）；回傳失敗原因，成功是 null。 */
+  onSave: (selection: readonly string[]) => Promise<string | null>;
 }): JSX.Element {
   const taxonomy = job.target.taxonomy;
   const multiple = job.target.contentType === 'longform';
 
-  const current = useMemo(
-    () =>
-      multiple
-        ? readStringArray(job.currentRevision?.templateData, 'tags')
-        : [readString(job.currentRevision?.templateData, 'category')].filter((v) => v !== ''),
-    [job.currentRevision, multiple],
-  );
-
   const [terms, setTerms] = useState<Term[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string[]>(current);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
-  const save = useAction();
-  const create = useAction();
-  const confirm = useConfirm();
-
-  useEffect(() => setSelected(current), [current]);
+  /** 按了「建立」、等使用者在行內確認（D-050：建在正式站上，先講清楚再建）。 */
+  const [confirming, setConfirming] = useState(false);
+  /** 建立／選上之後的結果：講「已建立」或「站上已有」，存失敗講還沒套到這篇。 */
+  const [added, setAdded] = useState<{ tone: 'good' | 'bad'; text: string } | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (taxonomy === null) return;
@@ -76,14 +81,65 @@ export function TaxonomyPanel({
   const termsUnavailable = loadError !== null;
   const known = new Set((terms ?? []).map((term) => term.name));
   const unknown = selected.filter((name) => terms !== null && !known.has(name));
-  const dirty =
-    selected.length !== current.length || selected.some((name, index) => name !== current[index]);
 
   const toggle = (name: string): void => {
-    setSelected((now) => {
-      if (now.includes(name)) return now.filter((item) => item !== name);
-      return multiple ? [...now, name] : [name];
-    });
+    setAdded(null);
+    if (selected.includes(name)) onChange(selected.filter((item) => item !== name));
+    else onChange(multiple ? [...selected, name] : [name]);
+  };
+
+  /** 加上某個項目（已選的不會被取消）。 */
+  const withTerm = (name: string): readonly string[] =>
+    selected.includes(name) ? selected : multiple ? [...selected, name] : [name];
+
+  const trimmedName = newName.trim();
+  // 用已載入的清單在前端比對（不另打 WordPress）；清單還沒載入時先不給建，免得漏看相近的。
+  const matches = matchTerms(trimmedName, terms ?? []);
+  const termsLoading = terms === null && !termsUnavailable;
+  const busy = createBusy || saving;
+
+  const editName = (value: string): void => {
+    setNewName(value);
+    setConfirming(false);
+    setAdded(null);
+    setCreateError(null);
+  };
+
+  /** 選上並直接存到這篇（D-050 2026-10-22）。存失敗：選取留著（草稿），講清楚、可以按「儲存分類」重試。 */
+  const applyTerm = async (term: Term, created: boolean): Promise<void> => {
+    const next = withTerm(term.name);
+    onChange(next);
+    setNewName('');
+    setConfirming(false);
+    const saveError = await onSave(next);
+    setAdded(termAddedNote({ name: term.name, created, saveError }));
+  };
+
+  const chooseExisting = (term: Term): void => {
+    if (busy) return;
+    setCreateBusy(true);
+    void applyTerm(term, false).finally(() => setCreateBusy(false));
+  };
+
+  const createNow = (): void => {
+    if (busy) return;
+    setCreateBusy(true);
+    setCreateError(null);
+    void (async () => {
+      try {
+        // 後端 resolveTerms 遇到同名的既有項目會直接回它（200，created: false），不會建第二個。
+        const { term, created } = await api.createTerm(taxonomy, trimmedName);
+        setTerms((list) => {
+          const now = list ?? [];
+          return now.some((entry) => entry.id === term.id) ? now : [...now, term];
+        });
+        await applyTerm(term, created);
+      } catch (cause) {
+        setCreateError(describeError(cause));
+      } finally {
+        setCreateBusy(false);
+      }
+    })();
   };
 
   return (
@@ -111,7 +167,7 @@ export function TaxonomyPanel({
           {terms?.length === 0 && (
             <span className="field-hint">
               {taxonomy} 目前一個項目都沒有，不選分類也能發布。
-              {job.target.allowCreateTerms === true ? '要分類的話，在下面建立第一個項目。' : ''}
+              要分類的話，在下面建立第一個項目。
             </span>
           )}
           {terms?.map((term) => (
@@ -171,7 +227,7 @@ export function TaxonomyPanel({
             className="input"
             value={selected.join('、')}
             onChange={(event) =>
-              setSelected(
+              onChange(
                 event.target.value
                   .split(/[、,，]/)
                   .map((name) => name.trim())
@@ -198,88 +254,116 @@ export function TaxonomyPanel({
         </button>
         {creating && (
           <div className="disclosure-body">
-            {job.target.allowCreateTerms !== true ? (
-              <p className="note note-warn">
-                <Icon name="alert" size={14} />
-                <span>
-                  這個發布目標關閉了「建立分類項目」。要開啟，把 config/publish-targets.json 裡
-                  {job.target.key} 的 <code>allowCreateTerms</code> 改成 true，重啟後端。
-                </span>
+            <div className="row">
+              <input
+                className="input"
+                value={newName}
+                onChange={(event) => editName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && trimmedName.length > 0 && !termsLoading && !busy) {
+                    event.preventDefault();
+                    if (matches.exact) chooseExisting(matches.exact);
+                    else setConfirming(true);
+                  }
+                }}
+                placeholder="新分類項目名稱"
+                aria-label="新分類項目名稱"
+                maxLength={120}
+                disabled={busy}
+              />
+              <button
+                type="button"
+                className="btn btn-quiet"
+                disabled={busy || trimmedName.length === 0 || termsLoading || confirming}
+                onClick={() => (matches.exact ? chooseExisting(matches.exact) : setConfirming(true))}
+              >
+                <Icon name={matches.exact ? 'check' : 'plus'} size={14} />
+                {matches.exact ? '選這個' : '建立'}
+              </button>
+            </div>
+
+            {matches.exact && (
+              <p className="note note-info">
+                <Icon name="check" size={14} />
+                <span>站上已經有「{matches.exact.name}」，按「選這個」直接用它，不會再建一個。</span>
               </p>
-            ) : (
-              <>
-                <p className="field-hint">
-                  新項目會直接建在正式站上，之後每一篇文章都選得到。先確認站上沒有意思相近的既有項目。
-                </p>
-                <div className="row">
-                  <input
-                    className="input"
-                    value={newName}
-                    onChange={(event) => setNewName(event.target.value)}
-                    placeholder="分類項目名稱"
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-quiet"
-                    disabled={create.busy || newName.trim().length === 0}
-                    onClick={() =>
-                      confirm({
-                        title: `在站上建立「${newName.trim()}」？`,
-                        danger: false,
-                        body: (
-                          <p>
-                            這會在 {taxonomy} 底下建立一個新的分類項目，之後無法在這裡刪除。
-                            如果站上已經有意思相近的項目，請改選那一個。
-                          </p>
-                        ),
-                        confirmLabel: '建立',
-                        onConfirm: async () => {
-                          const term = await api.createTerm(taxonomy, newName.trim());
-                          setTerms((list) => [...(list ?? []), term]);
-                          setSelected((now) => (multiple ? [...now, term.name] : [term.name]));
-                          setNewName('');
-                        },
-                      })
-                    }
-                  >
-                    <Icon name="plus" size={14} />
-                    建立
-                  </button>
-                </div>
-                <ErrorNote message={create.error} />
-              </>
             )}
+
+            {!matches.exact && matches.similar.length > 0 && (
+              <div className="term-create-group">
+                <span className="field-hint">站上有名稱相近的項目，是這個嗎？點一下直接選：</span>
+                <div className="chips">
+                  {matches.similar.map((term) => (
+                    <button key={term.id} type="button" className="chip" disabled={busy} onClick={() => chooseExisting(term)}>
+                      {term.name}
+                      {term.count !== undefined && (
+                        <span className="chip-count mono" title={`${term.count} 篇`}>
+                          {term.count}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {termsUnavailable && trimmedName.length > 0 && (
+              <p className="field-hint">讀不到站上的既有項目，沒辦法比對相近的名稱；同名的話會直接用既有的。</p>
+            )}
+
+            {confirming && !matches.exact && (
+              <div className="note note-warn" role="group" aria-label="確認建立分類項目">
+                <Icon name="alert" size={14} />
+                <div className="term-create-group">
+                  <span>
+                    會直接在正式站的 {taxonomy} 建立「{trimmedName}」，之後每一篇文章都選得到；
+                    發布台裡不能刪除或改名。
+                    {matches.similar.length > 0 ? '上面有名稱相近的既有項目，確定都不是你要的？' : ''}
+                  </span>
+                  <div className="row">
+                    <button type="button" className="btn btn-primary" disabled={busy} onClick={createNow}>
+                      {busy ? <Spinner /> : <Icon name="plus" size={14} />}
+                      確定建立
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      disabled={busy}
+                      onClick={() => setConfirming(false)}
+                    >
+                      先不要
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {added && (
+              <p className={`note ${added.tone === 'good' ? 'note-good' : 'note-bad'}`} role={added.tone === 'bad' ? 'alert' : 'status'}>
+                <Icon name={added.tone === 'good' ? 'check' : 'alert'} size={14} />
+                <span>{added.text}</span>
+              </p>
+            )}
+
+            <ErrorNote message={createError === null ? null : `沒有建立：${createError}`} />
           </div>
         )}
       </div>
 
-      <ErrorNote message={save.error} />
+      {/* 建立後自動存失敗時，上面那行已經講了；這裡只講「儲存分類」按鈕自己的失敗，不重複。 */}
+      <ErrorNote message={added?.tone === 'bad' ? null : error} />
 
       <div className="row row-end">
         <button
           type="button"
           className="btn btn-primary"
-          disabled={save.busy || !dirty}
-          onClick={() =>
-            void save.run(async () => {
-              const baseHash = job.currentRevision?.contentHash ?? null;
-              // templateData 是整份取代，現有欄位一定要帶上，否則會把正文清掉。
-              // 單選取消到一個都不剩時拿掉 category 鍵（schema 是選填、但不收空字串，P5-T021）。
-              // 帶上 expectedContentHash：這份欄位是從哪一版抄來的，就報哪一版；
-              // 中間被別人改過的話寧可被擋下來，也不要把對方的修改蓋掉。
-              await guardEdit(() =>
-                api.createRevision(job.uuid, {
-                  origin: 'manual',
-                  templateData: taxonomyTemplateData(job.currentRevision?.templateData, multiple, selected),
-                  reason: '修改分類',
-                  ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
-                }),
-              );
-              await refresh();
-            })
-          }
+          disabled={saving || createBusy || !dirty}
+          onClick={() => {
+            setAdded(null);
+            void onSave(selected);
+          }}
         >
-          {save.busy ? <Spinner /> : <Icon name="tag" size={14} />}
+          {saving ? <Spinner /> : <Icon name="tag" size={14} />}
           儲存分類
         </button>
       </div>

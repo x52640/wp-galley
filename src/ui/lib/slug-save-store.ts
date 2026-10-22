@@ -1,5 +1,6 @@
 /**
  * 發布面板「存網址」進行中的狀態，放在模組層級、以稿件 uuid 為 key（P5-T039，PR #25 Codex 審查 P2）。
+ * 分類／標籤的「沒存的選取」與「存分類進行中」也放這裡、走同一套（P5-T051 跟進，D-050）：沒存擋發布，關面板再開照樣擋。
  *
  * 不放在元件裡：存的期間面板被關掉（關閉鈕、點外面、工作區換畫面）再打開，元件是新的，
  * 本地的 busy 會變回 false、發布按鈕又能按；這時發布請求若先到後端，會用舊網址發出去，
@@ -8,11 +9,14 @@
  * 這個檔不碰 window 與 API，可以直接在 node 裡測。
  */
 
-import { isSlugDirty } from './publish-slug.js';
+import { isSlugDirty, isTaxonomyDirty } from './publish-slug.js';
 
 const saving = new Set<string>();
 /** 發布面板網址框沒存的字，以稿件為 key（見 `slugDraftFor`）。 */
 const drafts = new Map<string, string>();
+/** 分類：存的期間與沒存的選取（見 `taxonomyDraftFor`）。 */
+const taxonomySaving = new Set<string>();
+const taxonomyDrafts = new Map<string, readonly string[]>();
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -70,17 +74,22 @@ async function syncUntilApplied(steps: SlugSaveSteps): Promise<void> {
  * 工作區已經不在這一篇（`gone`）就不再等：存是成功的，草稿一樣清掉（下次進來會重新讀）。
  */
 export async function runSlugSave(uuid: string, steps: SlugSaveSteps): Promise<void> {
-  if (saving.has(uuid)) return;
-  saving.add(uuid);
+  return runSave(saving, drafts, uuid, steps);
+}
+
+/** 網址與分類共用：同一篇已經在存就什麼都不做；存好、重讀到套用才清草稿、放開；存失敗放開、草稿留著、錯誤丟回。 */
+async function runSave(busy: Set<string>, pending: Map<string, unknown>, uuid: string, steps: SlugSaveSteps): Promise<void> {
+  if (busy.has(uuid)) return;
+  busy.add(uuid);
   notify();
   try {
     await steps.save();
     await syncUntilApplied(steps);
     // 存好、畫面也讀到新值：這篇的草稿一律清掉（PR #28 第二輪 Codex P2）。面板關著時沒有元件替它清；
     // 開著的面板訂閱這裡，跟著讀到新的已存值。
-    drafts.delete(uuid);
+    pending.delete(uuid);
   } finally {
-    saving.delete(uuid);
+    busy.delete(uuid);
     notify();
   }
 }
@@ -135,4 +144,41 @@ export async function runSourceSave(uuid: string, touchesSlug: boolean, steps: S
   }
   if (saving.has(uuid)) throw new Error('正在存網址，等它存好再存。');
   return runSlugSave(uuid, steps);
+}
+
+// --- 分類／標籤（P5-T051 跟進，D-050）：跟網址同一套 ---------------------------------------
+
+export function isTaxonomySaving(uuid: string): boolean {
+  return taxonomySaving.has(uuid);
+}
+
+/**
+ * 分類面板該顯示哪些選取：這篇有沒存的選取就用它，沒有（或已存的已經跟上它）就用已存的。別篇拿不到。
+ * 回傳的一定是傳進來的 `saved` 或存著的那一份（同一個參考），給 `useSyncExternalStore` 用。
+ */
+export function taxonomyDraftFor(uuid: string, saved: readonly string[]): readonly string[] {
+  const draft = taxonomyDrafts.get(uuid);
+  if (draft === undefined) return saved;
+  if (!isTaxonomyDirty(draft, saved)) {
+    taxonomyDrafts.delete(uuid);
+    return saved;
+  }
+  return draft;
+}
+
+/** 點選／取消某個項目：跟已存的不一樣才記，一樣就清掉；通知訂閱的面板。 */
+export function setTaxonomyDraft(uuid: string, draft: readonly string[], saved: readonly string[]): void {
+  if (isTaxonomyDirty(draft, saved)) taxonomyDrafts.set(uuid, [...draft]);
+  else taxonomyDrafts.delete(uuid);
+  notify();
+}
+
+export function clearTaxonomyDraft(uuid: string): void {
+  taxonomyDrafts.delete(uuid);
+  notify();
+}
+
+/** 跑一趟存分類（「儲存分類」與建好新項目後自動存都走這裡）。規則同 `runSlugSave`。 */
+export async function runTaxonomySave(uuid: string, steps: SlugSaveSteps): Promise<void> {
+  return runSave(taxonomySaving, taxonomyDrafts, uuid, steps);
 }

@@ -380,8 +380,16 @@ const httpApi: PublisherApi = {
     return body.terms;
   },
 
-  createTerm: (taxonomy: string, name: string) =>
-    sendJson<Term>('/api/wordpress/terms', 'POST', { taxonomy, name }),
+  // 201＝真的建了、200＝站上本來就有（後端 resolveTerms 回既有的）。畫面靠它決定講「已建立」還是「站上已有」。
+  async createTerm(taxonomy: string, name: string) {
+    const response = await send('/api/wordpress/terms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ taxonomy, name }),
+    });
+    const term = (await response.json()) as Term;
+    return { term, created: response.status === 201 };
+  },
 
   listAuthors: () => getJson<AuthorsResponse>('/api/wordpress/authors'),
 

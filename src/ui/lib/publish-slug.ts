@@ -92,6 +92,20 @@ export function slugPublishBlocker(input: { readonly dirty: boolean; readonly sa
 }
 
 /**
+ * 發布面板的分類／標籤選了沒存（P5-T051 跟進，D-050）：跟網址同一條規則——沒存擋發布、存的期間也擋，
+ * 講清楚怎麼解。選取的草稿與「存的期間」都在 `slug-save-store.ts`（跟網址同一個 store）。
+ */
+export function isTaxonomyDirty(draft: readonly string[], saved: readonly string[]): boolean {
+  return draft.length !== saved.length || draft.some((name, index) => name !== saved[index]);
+}
+
+export function taxonomyPublishBlocker(input: { readonly dirty: boolean; readonly saving: boolean }): string | null {
+  if (input.saving) return '正在存分類，存好、成品重新載入之後才能發布。';
+  if (input.dirty) return '分類改了還沒存：按「儲存分類」，或點掉剛選的改回原本的。';
+  return null;
+}
+
+/**
  * 在發布面板按 Escape 時網址列要做什麼（審查 #3）：存網址進行中一律擋下、什麼都不動（PR #25 審查 P2：
  * 關掉重開會讓發布按鈕在存檔還在路上時又能按）；有沒存的改動只還原框內的字、不關面板；
  * 按「改」打開而沒改動就收起編輯；其他照常關面板。

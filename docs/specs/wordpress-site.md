@@ -171,7 +171,7 @@ http 只准 loopback（本機測試站）。能不能發看 `users/me` 的 `capa
 
 - 站上沒有那個類型（沒開 REST）或帳號不能發 → 那一項選不了，理由寫在卡片上。
 - post 的分類法：`types.post.taxonomies` 有 `category`、`/wp/v2/taxonomies` 也有它時才掛，
-  `taxonomyRestBase` 用站上回報的 `rest_base`（通常是 `categories`）。D-004 不變：`allowCreateTerms: false`。
+  `taxonomyRestBase` 用站上回報的 `rest_base`（通常是 `categories`）。不寫 `allowCreateTerms`（D-050 廢止）。
 - 寫出來的 target 欄位與順序跟 `config/publish-targets.example.json` 一字不差（有測試守著）。
 
 **已經有站台設定檔（資料目錄的 `publish-targets.json`）時（例如作者的 read-think／diary）**：
@@ -446,7 +446,14 @@ Application Password 實測）。
 
 `diary-category` **一個項目都沒有**，跟 100 篇日記全部沒有分類一致。
 
-據此決定預設不自動建立分類項目，見 `plan.md` D-004。
+據此決定**發布時不自動建立分類項目**，見 `plan.md` D-004：發布時對不上的名稱（可能是 Agent 給的）原樣回報
+（`unknownTerms`），`publish.ts` 寫死 `allowCreate: false`，不看設定檔。
+
+**使用者手動建立**（D-050，P5-T051）：發布面板「分類／標籤」→「建立新的分類項目」，只要發布目標有分類法就能建，
+沒有設定檔開關（舊檔的 `allowCreateTerms` 讀進來就丟掉）。打名稱時用已載入的清單在前端比對相近的既有項目
+（`src/ui/lib/term-match.ts`：NFKC 全半形、去空白、不分大小寫；相等＝同名、包含或被包含＝相近），
+同名直接選既有的不建；要建先行內確認一次。建好（或選了既有的）直接存到這篇；分類選了沒存時擋發布。後端走 `resolveTerms(..., { allowCreate: true })`，同名（trim＋小寫）回既有的、不建第二個。
+路由只給本機 UI（`local-only.ts` 的來源防護），MCP 不給建立。不做刪除、改名、父分類、`post_tag`。
 
 兩個分類法的 `rest_base` 都等於 slug（`read-think-tag`、`diary-category`），所以設定檔不用寫
 `taxonomyRestBase`（通用站的 `category` 就要寫，見上方「通用站台」）。
@@ -467,6 +474,9 @@ WordPress 核心預設不收 SVG（可內嵌 script），要開啟只能裝外�
 
 這是唯一一個「刪掉就沒事」不成立的地方，UI 在把狀態改成公開之前應該提醒一次。
 建草稿、改草稿、上傳媒體都不會觸發。
+
+手動建立分類項目（D-050）是**直接寫進正式站**的：建了之後每篇文章都選得到，發布台裡不能刪除或改名（要到 WordPress 後台）。
+不寄信、不公開文章，但收不回來的程度跟「建了一個沒人用的分類」一樣，所以建立前一定行內確認。
 
 尚未確認使用者實際有沒有開那些自動化——階段 4 的真實驗證全部停在草稿狀態，
 沒有公開過任何測試文章。

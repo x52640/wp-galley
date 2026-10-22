@@ -69,12 +69,14 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * 建立分類項目。
+   * 建立分類項目（使用者在發布台右欄手動按「建立」）。
    *
-   * **必須經過該 target 的 `allowCreateTerms`**（兩個 target 目前都是 false）。
-   * 這個開關存在的理由寫在 wordpress/terms.ts：自動建立近義詞會把分類變成垃圾場，
-   * 所以只有使用者在設定檔裡明確打開才准建。開放一個「反正是本機工具」的後門，
-   * 階段 6 的 MCP 就從同一個洞進來了。
+   * D-050：**不看任何開關**，只要發布目標有分類法就能建。D-004 擋的是「發布時把 Agent 給的名稱自動建立」
+   * （近義詞會把分類變垃圾場），那條路在 core/service/publish.ts 寫死 `allowCreate: false`，跟這裡無關。
+   *
+   * 這條路由只給本機發布台自己的畫面：來源防護在 server/plugins/local-only.ts（loopback、Host、Origin 同源、
+   * Sec-Fetch-Site），外站網頁、同機其他埠、沙箱 iframe 送來的 POST 都擋（tests/wordpress-api.test.ts）。
+   * MCP 不提供建立工具。
    *
    * 實際建立走 `resolveTerms(..., { allowCreate: true })` 而不是自己寫一份 POST：
    * 同名的既有項目會直接回傳，不會建出第二個。
@@ -82,14 +84,6 @@ export async function wordpressRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/wordpress/terms', async (request, reply): Promise<Term> => {
     const body = parseBody(CreateTermBody, request.body);
     const target = requireTargetForTaxonomy(app, body.taxonomy);
-    if (!target.allowCreateTerms) {
-      throw new AppError(
-        errorCodes.PUBLISH_BLOCKED,
-        `發布目標 ${target.key} 沒有開啟「可以建立新的分類項目」。` +
-          `請先在既有項目裡挑一個，或在 config/publish-targets.json 把 allowCreateTerms 改成 true。`,
-        403,
-      );
-    }
 
     const client = requireClient(app);
     const resolution = await guard(() =>
@@ -187,7 +181,6 @@ export function summarize(targets: readonly PublishTarget[]): PublishTargetSumma
     templateId: target.templateId,
     taxonomy: target.taxonomy,
     requireFeaturedImage: target.requireFeaturedImage,
-    allowCreateTerms: target.allowCreateTerms,
     disabled: target.disabled,
   }));
 }

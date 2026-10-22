@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import { sep } from 'node:path';
 import { z } from 'zod';
 import type {
   AuthorsResponse,
@@ -166,7 +168,17 @@ function status(app: FastifyInstance): SetupStatus {
       : null,
     siteConfig: { exists: siteExists, targets: summarize(ctx.targets.list()) },
     canWrite: ctx.setupFiles !== null,
+    locations: ctx.setupFiles
+      ? { siteConfigFile: displayPath(ctx.setupFiles.siteConfigFile), backupsDir: displayPath(ctx.setupFiles.backupsDir) }
+      : null,
   };
+}
+
+/** 畫面上講路徑：家目錄開頭寫成 `~`（`~/Library/Application Support/Galley/…`，D-035 的寫法），其他照原樣。 */
+export function displayPath(path: string, home: string = homedir()): string {
+  if (home === '' || home === sep) return path;
+  if (path === home) return '~';
+  return path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path;
 }
 
 /** 設定檔裡現有的目標：有檔案路徑就讀磁碟（使用者可能啟動後手動改過），否則用記憶體裡的。 */

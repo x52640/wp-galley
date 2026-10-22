@@ -219,7 +219,8 @@ describe('GET /api/wordpress/terms', () => {
 });
 
 describe('POST /api/wordpress/terms', () => {
-  function targetsWithCreate(allowCreateTerms: boolean): PublishTargetRegistry {
+  /** 舊設定檔可能還留著 allowCreateTerms（D-050 之前的開關）；不寫、寫 false、寫 true 都一樣能手動建立。 */
+  function targetsWithCreate(legacy?: boolean): PublishTargetRegistry {
     return createTargetRegistry([
       PublishTargetSchema.parse({
         key: 'diary',
@@ -231,22 +232,32 @@ describe('POST /api/wordpress/terms', () => {
         taxonomy: 'diary-category',
         allowCreate: true,
         allowUpdate: true,
-        allowCreateTerms,
+        ...(legacy === undefined ? {} : { allowCreateTerms: legacy }),
       }),
     ]);
   }
 
-  it('target 沒開 allowCreateTerms 就拒絕，而且不送任何請求', async () => {
-    mock = await startMockWordPress(() => ({ body: [] }));
-    const instance = await buildWith(
-      new WordPressClient({
-        baseUrl: mock.url,
-        username: 'ai_publisher',
-        appPassword: APP_PASSWORD,
-        sleepImpl: async () => {},
-      }),
-      targetsWithCreate(false),
-    );
+  function createHandler() {
+    return (req: { method: string }) => {
+      if (req.method === 'POST') {
+        return { status: 201, body: { id: 99, name: '新分類', slug: 'new', parent: 0, count: 0 } };
+      }
+      return { body: [{ id: 11, name: '隨筆', slug: 'essay', parent: 0, count: 3 }], headers: { 'X-WP-TotalPages': '1' } };
+    };
+  }
+
+  function clientFor(url: string): WordPressClient {
+    return new WordPressClient({ baseUrl: url, username: 'ai_publisher', appPassword: APP_PASSWORD, sleepImpl: async () => {} });
+  }
+
+  // D-050：手動建立不再看 allowCreateTerms，只要發布目標有分類法就能建。
+  it.each([
+    ['沒寫', undefined],
+    ['舊檔寫 false', false],
+    ['舊檔寫 true', true],
+  ] as const)('設定檔 allowCreateTerms %s：照樣建得起來', async (_name, legacy) => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(clientFor(mock.url), targetsWithCreate(legacy));
 
     const res = await instance.inject({
       method: 'POST',
@@ -255,12 +266,93 @@ describe('POST /api/wordpress/terms', () => {
       payload: { taxonomy: 'diary-category', name: '新分類' },
     });
 
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ id: 99, name: '新分類' });
+    const posts = mock.requests.filter((request) => request.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.path.split('?')[0]).toBe('/wp-json/wp/v2/diary-category');
+  });
+
+  it('作者站台範例（設定檔沒有這個欄位）也建得起來', async () => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(clientFor(mock.url));
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/wordpress/terms',
+      headers,
+      payload: { taxonomy: 'read-think-tag', name: '新分類' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  // 路由只給本機發布台自己的畫面：外站網頁、同機其他埠、沙箱 iframe 送來的都擋，而且一個請求都不送到 WordPress。
+  it.each([
+    ['外站網頁（Origin 是別的網域）', { origin: 'https://evil.example' }],
+    ['同一台機器其他埠的網頁', { origin: 'http://127.0.0.1:8080' }],
+    ['沙箱 iframe／file://（Origin: null）', { origin: 'null' }],
+    ['瀏覽器說是跨站', { 'sec-fetch-site': 'cross-site' }],
+    ['瀏覽器說是同 site 不同源', { 'sec-fetch-site': 'same-site' }],
+  ])('來源防護：%s → 403，不打 WordPress', async (_name, extra) => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(clientFor(mock.url), targetsWithCreate());
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/wordpress/terms',
+      headers: { ...headers, ...extra },
+      payload: { taxonomy: 'diary-category', name: '新分類' },
+    });
     expect(res.statusCode).toBe(403);
-    expect(res.json().error.message).toContain('allowCreateTerms');
+    expect(res.json().error.code).toBe('CROSS_ORIGIN_BLOCKED');
     expect(mock.requests).toHaveLength(0);
   });
 
-  it('開了才建得起來，而且同名的既有項目直接沿用', async () => {
+  it('非本機 Host（DNS rebinding）→ 403，不打 WordPress', async () => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(clientFor(mock.url), targetsWithCreate());
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/wordpress/terms',
+      headers: { host: 'evil.example:3000' },
+      payload: { taxonomy: 'diary-category', name: '新分類' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('發布台自己的畫面（同源，經 Vite proxy 也是）照常', async () => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(clientFor(mock.url), targetsWithCreate());
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/wordpress/terms',
+      headers: { host: '127.0.0.1:5173', origin: 'http://127.0.0.1:5173', 'sec-fetch-site': 'same-origin' },
+      payload: { taxonomy: 'diary-category', name: '新分類' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('沒有分類法的發布目標不能建（不給任意 REST 代理）', async () => {
+    mock = await startMockWordPress(createHandler());
+    const instance = await buildWith(
+      clientFor(mock.url),
+      createTargetRegistry([
+        PublishTargetSchema.parse({
+          key: 'page', displayName: '頁面', contentType: 'article', postType: 'page', restBase: 'pages',
+          templateId: 'article-v1', taxonomy: null, allowCreate: true, allowUpdate: true, allowCreateTerms: true,
+        }),
+      ]),
+    );
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/wordpress/terms',
+      headers,
+      payload: { taxonomy: 'pages', name: '新分類' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mock.requests).toHaveLength(0);
+  });
+
+  it('建得起來，而且同名的既有項目直接沿用（不建第二個）', async () => {
     mock = await startMockWordPress((req) => {
       if (req.method === 'POST') {
         return { status: 201, body: { id: 99, name: '新分類', slug: 'new', parent: 0, count: 0 } };
@@ -274,7 +366,7 @@ describe('POST /api/wordpress/terms', () => {
         appPassword: APP_PASSWORD,
         sleepImpl: async () => {},
       }),
-      targetsWithCreate(true),
+      targetsWithCreate(),
     );
 
     const created = await instance.inject({
@@ -307,7 +399,7 @@ describe('POST /api/wordpress/terms', () => {
         appPassword: APP_PASSWORD,
         sleepImpl: async () => {},
       }),
-      targetsWithCreate(true),
+      targetsWithCreate(),
     );
 
     const res = await instance.inject({

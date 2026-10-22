@@ -272,7 +272,8 @@ export interface PublisherApi {
 
   /** 分類項目只讀既有的；要建立新項目得使用者明確確認。 */
   listTerms(taxonomy: string): Promise<Term[]>;
-  createTerm(taxonomy: string, name: string): Promise<Term>;
+  /** `created`：後端真的建了（201）；false＝站上本來就有同名的，回的是既有那個（200）。 */
+  createTerm(taxonomy: string, name: string): Promise<{ term: Term; created: boolean }>;
 
   listTargets(): Promise<PublishTargetSummary[]>;
 

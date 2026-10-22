@@ -25,7 +25,15 @@ interface FixtureSetupState {
   wordpress: { url: string; username: string } | null;
   siteConfig: { exists: boolean; targets: PublishTargetSummary[] };
   canWrite: boolean;
+  locations: { siteConfigFile: string; backupsDir: string } | null;
 }
+
+/** 示範資料的資料目錄（D-035 的預設位置，家目錄寫成 ~，跟後端 displayPath 一樣）。 */
+const FIXTURE_DATA_DIR = '~/Library/Application Support/Galley';
+const FIXTURE_LOCATIONS = {
+  siteConfigFile: `${FIXTURE_DATA_DIR}/publish-targets.json`,
+  backupsDir: `${FIXTURE_DATA_DIR}/backups`,
+};
 
 let fixtureSetup: FixtureSetupState | null = null;
 
@@ -33,12 +41,13 @@ function setupState(): FixtureSetupState {
   if (fixtureSetup) return fixtureSetup;
   const fresh = new URLSearchParams(window.location.search).get('setup') === 'needed';
   fixtureSetup = fresh
-    ? { needsSetup: true, wordpress: null, siteConfig: { exists: false, targets: [] }, canWrite: true }
+    ? { needsSetup: true, wordpress: null, siteConfig: { exists: false, targets: [] }, canWrite: true, locations: FIXTURE_LOCATIONS }
     : {
         needsSetup: false,
         wordpress: { url: 'https://example.com', username: 'ming' },
         siteConfig: { exists: true, targets: [LONGFORM_TARGET, DIARY_TARGET, POST_TARGET, PAGE_TARGET] },
         canWrite: true,
+        locations: FIXTURE_LOCATIONS,
       };
   return fixtureSetup;
 }
@@ -361,7 +370,7 @@ export const setupApi: Pick<PublisherApi, 'listTargets' | 'getSetupStatus' | 'te
     return {
       saved: true as const,
       restartRequired: false,
-      backupFile: had ? 'backups/publish-targets-20260924-101500.json' : null,
+      backupFile: had ? `${FIXTURE_LOCATIONS.backupsDir}/publish-targets-20260924-101500.json` : null,
       status: clone(state),
     };
   },

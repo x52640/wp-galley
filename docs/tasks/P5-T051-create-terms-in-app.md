@@ -1,7 +1,7 @@
 ---
 id: P5-T051
 phase: 5
-status: ready
+status: done
 depends_on: []
 specs: [wordpress-site.md, http-api.md, security.md, design-system.md, architecture.md]
 write_paths: ["src/server/", "src/core/", "src/wordpress/", "src/contract/", "src/ui/", "config/", "tests/", "docs/specs/wordpress-site.md", "docs/specs/http-api.md", "docs/specs/templates.md", "docs/specs/design-system.md", "docs/specs/architecture.md", "docs/known-issues.md", "docs/tasks/P5-T051-create-terms-in-app.md", "docs/CURRENT_TASK.md"]
@@ -34,6 +34,10 @@ D-004 擋的是**Agent 給的名稱在發布時自動建立**（近義詞會把�
 - 錯誤訊息與文件中過期的 `config/publish-targets.json` 路徑一併修正（本 Task 碰到的範圍內）。
 - spec：wordpress-site.md（分類法、外部副作用）、http-api.md（terms 路由）、templates.md 若有提到、design-system.md、architecture.md 功能地圖；known-issues。
 
+- 跟進（使用者 2026-10-22 裁定，D-050）：
+  - 建好新分類（或後端回既有的 200、或在建立框選了既有的）直接套到這篇並存，走「儲存分類」同一條路；存失敗講清楚、選取留著可重按。成功訊息分「已建立」與「站上已有」（client `createTerm` 帶回 201／200）。
+  - 分類選了沒存時擋發布，沿用網址沒存擋發布那套（`lib/slug-save-store.ts` 草稿與存的期間、`lib/publish-slug.ts` 的 blocker、發布按鈕旁的快捷鈕）；關面板再開、別處操作後仍擋。
+  - 設定精靈與 Workspace 畫面上的舊路徑 `config/publish-targets.json` 改成實際資料目錄路徑（`GET /api/setup` 新增 `locations`，家目錄寫成 `~`）。
 ### 不包含
 - 刪除、改名、建立階層（父分類）。
 - 標籤（`post_tag`）。
@@ -55,18 +59,25 @@ agent、factcheck spec。
 ### 自動驗證
 `npm run verify` 綠。
 ### 手動驗證（使用者）
-右欄分類 → 建立新的分類項目 → 打一個跟既有相近的名稱看到提示 → 打一個新名稱 → 確認 → 建好自動選上 → 存草稿，後台看到新分類且文章有勾。（會在正式站真的建一個分類項目，不會公開文章。）
+發布面板「分類／標籤」→ 建立新的分類項目 → 打一個跟既有相近的名稱看到提示（打既有的同名則按鈕變「選這個」）→ 打一個新名稱 → 建立 → 確定建立 → 建好自動選上並套用（綠框「已建立…已選上並套用到這篇」）→ 核准並存成草稿，後台看到新分類且文章有勾。另外：點一個既有分類不存 → 發布按鈕反灰、講「分類改了還沒存」→ 關面板再開仍擋 → 按「儲存分類」放行。設定精靈「發到哪裡」底下寫的是資料目錄的實際路徑。（會在正式站真的建一個分類項目，不會公開文章。）
 
 ## 完成定義
-- [ ] `npm run verify` 綠
-- [ ] 擁有這些行為的 spec 已更新（architecture.md 功能地圖）
-- [ ] 留下的殘餘已寫進 `docs/known-issues.md`
-- [ ] CURRENT_TASK 已更新
+- [x] `npm run verify` 綠
+- [x] 擁有這些行為的 spec 已更新（architecture.md 功能地圖）
+- [x] 留下的殘餘已寫進 `docs/known-issues.md`
+- [x] CURRENT_TASK 已更新
 
 ## 中斷／接手紀錄
-- 最後完成：開 Task（2026-10-22）
-- 已通過驗證：無
-- 下一步：寫測試、實作
+- 最後完成：實作＋文件（2026-10-22）
+- 已通過驗證：`npm run verify` 綠；`?fixtures=1` 截圖（展開、相近、同名、確認、建好選上；跟進：建好已套用、選了沒存被擋、關面板再開仍擋）
+- 下一步：審查、PR；使用者手動驗證
 - Blocker：無
 
 ## 完成結果
+
+- 手動建立（`POST /api/wordpress/terms`）不看任何開關，發布目標有分類法就能建；發布路徑 `publish.ts` 寫死 `allowCreate: false`。
+- `allowCreateTerms`：schema 仍收布林（`.strict()` 才不會讓舊檔報錯），parse 後 transform 丟掉；精靈、範例、契約、UI 都拿掉。
+- 前端相近名稱比對在 `src/ui/lib/term-match.ts`；面板行內確認，同名直接選既有的。
+- 來源防護沿用 `local-only.ts`，`tests/wordpress-api.test.ts` 補了外站、同機其他埠、`Origin: null`、cross-site／same-site、非本機 Host 都 403 且不打 WordPress。
+- 跟進（2026-10-22）：建好直接存到這篇；分類沒存擋發布（跟網址同一個 store／blocker）；`createTerm` 回 `{ term, created }`；精靈與 Workspace 講實際資料目錄路徑（`SetupStatus.locations`）。
+- 殘餘見 known-issues「發布台建立分類項目」：相近只比字面、前後端同名規則不同、沒存的選取只在記憶體。

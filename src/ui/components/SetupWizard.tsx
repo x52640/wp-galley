@@ -780,7 +780,7 @@ function DestinationStep({
                         }
                       />
                       <span>
-                        已經有「{option.existing.displayName}」。用精靈的設定取代它（原本的檔會先備份到 backups/）
+                        已經有「{option.existing.displayName}」。用精靈的設定取代它（原本的檔會先備份到 {status.locations?.backupsDir ?? '資料目錄的 backups'}）
                       </span>
                     </label>
                   )}
@@ -801,7 +801,10 @@ function DestinationStep({
           <ErrorNote message={save.error} />
 
           <div className="setup-actions">
-            <span className="field-hint">存在這台電腦的 config/publish-targets.json，不用重新啟動。</span>
+            <span className="field-hint">
+              存在這台電腦的 <span className="mono">{status.locations?.siteConfigFile ?? '資料目錄的 publish-targets.json'}</span>
+              ，不用重新啟動。
+            </span>
             {unchanged && hasExisting ? (
               <button type="button" className="btn btn-primary btn-big" onClick={() => onSaved(status, null)}>
                 不改，下一步

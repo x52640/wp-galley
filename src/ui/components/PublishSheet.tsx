@@ -1,22 +1,28 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
-import { api } from '../service/client.js';
+import { api, describeError } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { readString, shortHash } from '../lib/format.js';
+import { readString, readStringArray, shortHash } from '../lib/format.js';
 import {
   isSlugDirty,
+  isTaxonomyDirty,
   publishSlugView,
   slugEscapeAction,
   slugPublishBlocker,
+  taxonomyPublishBlocker,
   withSlug,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
 import {
   isSlugSaving,
+  isTaxonomySaving,
   runSlugSave,
+  runTaxonomySave,
   setSlugDraft as storeSlugDraft,
+  setTaxonomyDraft,
   slugDraftFor,
   subscribeSlugSave,
+  taxonomyDraftFor,
   type SyncOutcome,
 } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
@@ -24,6 +30,7 @@ import { countBodyWords } from '../../contract/word-count.js';
 import { WORD_COUNT_HINT, wordCountNumber } from '../lib/word-count.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
+import { taxonomyTemplateData } from './panels/template-data.js';
 import { ErrorNote, Spinner, guardEdit, useAction } from './panels/shared.js';
 import { SlugSuggest } from './SlugSuggest.js';
 import { AuthorPicker, authorBlocker, useAuthors } from './AuthorPicker.js';
@@ -137,6 +144,53 @@ export function PublishSheet({
     );
   };
 
+  // 分類／標籤（P5-T051 跟進，D-050）：跟網址同一套——選了沒存的記在模組層級、以稿件為 key，
+  // 沒存或存的期間擋發布；面板關掉再開、別處存了別的欄位，照樣擋。長文多選（tags），其他單選（category）。
+  const multipleTerms = job.target.contentType === 'longform';
+  const savedTerms = useMemo<readonly string[]>(
+    () =>
+      multipleTerms
+        ? readStringArray(job.currentRevision?.templateData, 'tags')
+        : [readString(job.currentRevision?.templateData ?? null, 'category')].filter((value) => value !== ''),
+    [job.currentRevision, multipleTerms],
+  );
+  const termDraft = useSyncExternalStore(subscribeSlugSave, () => taxonomyDraftFor(job.uuid, savedTerms));
+  const setTermDraft = (next: readonly string[]): void => setTaxonomyDraft(job.uuid, next, savedTerms);
+  const termSave = useAction();
+  const termSavingShared = useSyncExternalStore(subscribeSlugSave, () => isTaxonomySaving(job.uuid));
+  const termSaving = termSavingShared || termSave.busy;
+  const termDirty = job.target.taxonomy !== null && isTaxonomyDirty(termDraft, savedTerms);
+
+  /** 存分類（「儲存分類」與建好新項目後自動存共用）。回傳失敗原因，成功是 null；失敗時選取留著。 */
+  const storeTaxonomy = async (selection: readonly string[]): Promise<string | null> => {
+    let failure: string | null = null;
+    await termSave.run(async () => {
+      try {
+        await runTaxonomySave(job.uuid, {
+          save: async () => {
+            const baseHash = job.currentRevision?.contentHash ?? null;
+            // templateData 是整份取代，現有欄位一定要帶上；單選清空就拿掉 category 鍵（P5-T021）。
+            // 帶上 expectedContentHash：中間被別處改過就擋下來，不蓋掉。
+            await guardEdit(() =>
+              api.createRevision(job.uuid, {
+                origin: 'manual',
+                templateData: taxonomyTemplateData(job.currentRevision?.templateData, multipleTerms, selection),
+                reason: '修改分類',
+                ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+              }),
+            );
+          },
+          // 重讀到新值才算存好；沒套用就維持「正在存分類」、每 3 秒再讀（同存網址）。
+          sync,
+        });
+      } catch (cause) {
+        failure = describeError(cause);
+        throw cause;
+      }
+    });
+    return failure;
+  };
+
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
   useEffect(() => {
     if (!NEEDS_RENDER.has(job.state) || job.currentRevision === null) return;
@@ -174,7 +228,8 @@ export function PublishSheet({
   const torn = job.approval !== null && !job.approval.valid;
 
   const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSaving });
-  const why: string | null = slugBlocker ?? (needsCover
+  const termBlocker = job.target.taxonomy === null ? null : taxonomyPublishBlocker({ dirty: termDirty, saving: termSaving });
+  const why: string | null = slugBlocker ?? termBlocker ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
       ? `還不能發布：${otherBlockers.join('、')}`
@@ -301,7 +356,15 @@ export function PublishSheet({
             <span className="p-num">3</span>
             {job.target.contentType === 'longform' ? '標籤' : '分類'}
           </h3>
-          <TaxonomyPanel job={job} refresh={refresh} />
+          <TaxonomyPanel
+            job={job}
+            selected={termDraft}
+            onChange={setTermDraft}
+            dirty={termDirty}
+            saving={termSaving}
+            error={termSave.error}
+            onSave={storeTaxonomy}
+          />
         </section>
       )}
 
@@ -392,7 +455,7 @@ export function PublishSheet({
           type="button"
           className="btn btn-primary btn-big p-go-btn"
           data-danger={status === 'publish' ? 'yes' : 'no'}
-          disabled={why !== null || go.busy || prepare.busy || slugSaving}
+          disabled={why !== null || go.busy || prepare.busy || slugSaving || termSaving}
           onClick={publish}
         >
           {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
@@ -410,6 +473,17 @@ export function PublishSheet({
           <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSaving || go.busy} onClick={storeSlug}>
             {slugSaving ? <Spinner /> : <Icon name="check" size={13} />}
             存網址
+          </button>
+        )}
+        {termDirty && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            disabled={termSaving || go.busy}
+            onClick={() => void storeTaxonomy(termDraft)}
+          >
+            {termSaving ? <Spinner /> : <Icon name="tag" size={13} />}
+            儲存分類
           </button>
         )}
         {mismatch && (

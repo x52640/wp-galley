@@ -333,8 +333,8 @@ export function Workspace({
       <div className="screen-error">
         <p role="alert">
           <Icon name="alert" size={16} />
-          這篇稿件的發布目標已經不在 config/publish-targets.json 裡了，所以無法編輯或發布。
-          把目標加回設定檔並重啟後端，或直接取消這篇稿件。
+          這篇稿件的發布目標已經不在站台設定檔（<SiteConfigPath />）裡了，所以無法編輯或發布。
+          把目標加回設定檔並重新啟動發布台，或直接取消這篇稿件。
         </p>
         <div className="row">
           <button type="button" className="btn btn-quiet" onClick={onBack}>
@@ -726,4 +726,25 @@ export function Workspace({
       )}
     </div>
   );
+}
+
+/**
+ * 站台設定檔實際在哪（P5-T051 跟進）：問後端（`GET /api/setup` 的 `locations`），問不到就講「資料目錄的 publish-targets.json」。
+ * 只在發布目標被拿掉的錯誤畫面用到，不常出現，所以用到才問。
+ */
+function SiteConfigPath(): JSX.Element {
+  const [path, setPath] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSetupStatus()
+      .then((status) => {
+        if (!cancelled) setPath(status.locations?.siteConfigFile ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return <span className="mono">{path ?? '資料目錄的 publish-targets.json'}</span>;
 }
