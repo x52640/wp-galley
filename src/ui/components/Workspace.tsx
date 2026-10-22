@@ -40,6 +40,7 @@ import {
 import { PublishSheet } from './PublishSheet.js';
 import { SourcePanel } from './panels/SourcePanel.js';
 import { forgetOtherSlugSuggests } from '../lib/slug-suggest-store.js';
+import { markEditing } from '../lib/slug-save-store.js';
 
 /**
  * 工作區（B1，決策 D-013）：文章在中間，建議標在字上，右邊的卡片一對一對應。
@@ -292,6 +293,14 @@ export function Workspace({
     setEditing((current) => dropStaleFactCheck(current, factChecks?.findings ?? null));
   }, [factChecks]);
 
+  // 這篇在不在打字模式，登記到發布面板的 store（PR #39 Codex 第二輪）：建好分類要自動存時看它，
+  // 在打字模式就不自動存（會出新版本、編輯區重載），留成「選了沒存」。不管是怎麼進打字模式的都算。
+  const isEditingNow = editing !== null;
+  useEffect(() => {
+    markEditing(uuid, isEditingNow);
+    return () => markEditing(uuid, false);
+  }, [uuid, isEditingNow]);
+
   // 離開打字模式（或換篇）：打字中存過的那一版不再當存檔基準（D-036）。
   useEffect(() => {
     if (editing === null) forgetSaved();
@@ -333,8 +342,8 @@ export function Workspace({
       <div className="screen-error">
         <p role="alert">
           <Icon name="alert" size={16} />
-          這篇稿件的發布目標已經不在 config/publish-targets.json 裡了，所以無法編輯或發布。
-          把目標加回設定檔並重啟後端，或直接取消這篇稿件。
+          這篇稿件的發布目標已經不在站台設定檔（<SiteConfigPath />）裡了，所以無法編輯或發布。
+          把目標加回設定檔並重新啟動發布台，或直接取消這篇稿件。
         </p>
         <div className="row">
           <button type="button" className="btn btn-quiet" onClick={onBack}>
@@ -726,4 +735,25 @@ export function Workspace({
       )}
     </div>
   );
+}
+
+/**
+ * 站台設定檔實際在哪（P5-T051 跟進）：問後端（`GET /api/setup` 的 `locations`），問不到就講「資料目錄的 publish-targets.json」。
+ * 只在發布目標被拿掉的錯誤畫面用到，不常出現，所以用到才問。
+ */
+function SiteConfigPath(): JSX.Element {
+  const [path, setPath] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSetupStatus()
+      .then((status) => {
+        if (!cancelled) setPath(status.locations?.siteConfigFile ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return <span className="mono">{path ?? '資料目錄的 publish-targets.json'}</span>;
 }

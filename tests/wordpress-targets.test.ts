@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { paths } from '../src/config/paths.js';
 import {
@@ -56,11 +56,13 @@ describe('repo 附的站台設定範例', () => {
     expect(page.requireFeaturedImage).toBe(false);
   });
 
-  it('兩份範例都不允許建立分類項目（D-004）', async () => {
+  it('兩份範例都不再寫 allowCreateTerms（D-050：手動建立一律可用，發布時一律不自動建）', async () => {
     for (const file of ['publish-targets.example.json', join('examples', 'remusplus.json')]) {
+      const raw = await readFile(join(paths.config, file), 'utf8');
+      expect(raw, file).not.toContain('allowCreateTerms');
       const registry = await loadPublishTargets(join(paths.config, file));
       for (const target of registry.list()) {
-        expect(target.allowCreateTerms).toBe(false);
+        expect(target).not.toHaveProperty('allowCreateTerms');
       }
     }
   });
@@ -107,7 +109,6 @@ describe('設定驗證', () => {
     });
     expect(minimal.allowCreate).toBe(false);
     expect(minimal.allowUpdate).toBe(false);
-    expect(minimal.allowCreateTerms).toBe(false);
     expect(minimal.taxonomy).toBeNull();
   });
 
@@ -123,10 +124,27 @@ describe('設定驗證', () => {
     ).toThrow(/allowCreate/);
   });
 
-  it('沒設分類法卻允許建立分類項目會被擋', () => {
-    expect(() =>
-      PublishTargetSchema.parse({ ...VALID, taxonomy: null, allowCreateTerms: true }),
-    ).toThrow(/allowCreateTerms/);
+  // D-050：舊設定檔（含使用者資料目錄那份）留著 allowCreateTerms 也要讀得進來，但讀進來就丟掉，
+  // 程式裡任何地方都拿不到它，自然不會有作用。
+  it.each([true, false])('舊設定檔寫 allowCreateTerms: %s：讀得進來、不報錯、讀完沒有這個欄位', (value) => {
+    const parsed = PublishTargetSchema.parse({ ...VALID, allowCreateTerms: value });
+    expect(parsed).not.toHaveProperty('allowCreateTerms');
+    expect(parsed.taxonomy).toBe(VALID.taxonomy);
+  });
+
+  it('沒設分類法、舊欄位寫 true 也不再擋（欄位已沒有作用）', () => {
+    const parsed = PublishTargetSchema.parse({ ...VALID, taxonomy: null, allowCreateTerms: true });
+    expect(parsed).not.toHaveProperty('allowCreateTerms');
+  });
+
+  it('舊欄位寫成非布林一樣擋（格式錯就是錯，不默默吞掉）', () => {
+    expect(() => PublishTargetSchema.parse({ ...VALID, allowCreateTerms: 'yes' })).toThrow();
+  });
+
+  it('含 allowCreateTerms 的舊設定檔整份讀得進來', async () => {
+    const file = await writeTargetsFile({ targets: [{ ...VALID, allowCreateTerms: true }] });
+    const registry = await loadPublishTargets(file);
+    expect(registry.get(VALID.key)).not.toHaveProperty('allowCreateTerms');
   });
 
   it('key 重複會被擋', async () => {

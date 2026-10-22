@@ -66,12 +66,12 @@
 | `POST` | `/api/jobs/:uuid/publish` | 發布 | `PublishRequest` → `PublishResponse` |
 | `GET` | `/api/wordpress` | 站台探查與發布目標；檢查的內容類型＝設定檔裡 target 的 `postType`（沒有站台設定時 `publishTargets` 是空陣列） | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
 | `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` 帶分類法 **slug**（跟 `taxonomy` 欄位一樣）；後端換成 REST 名稱去查（`category` → `/wp/v2/categories`） | → `TermsResponse` |
-| `POST` | `/api/wordpress/terms` | 建立分類項目（target 須 `allowCreateTerms`） | `CreateTermRequest` → `Term` |
+| `POST` | `/api/wordpress/terms` | 使用者手動建立分類項目（D-050：沒有開關，`taxonomy` 須是某個發布目標的分類法，否則 400）；同名既有的回 200、真的建了回 201（UI 的 `createTerm` 回 `{ term, created }` 帶出這個差別）。只給本機 UI（來源防護擋外站、同機其他埠、`Origin: null`）；MCP 不提供 | `CreateTermRequest` → `Term` |
 | `GET` | `/api/wordpress/authors` | 站上可以當作者的人、發布台的帳號、預設作者（P5-T024） | → `AuthorsResponse` |
 | `POST` | `/api/setup/default-author` | 設這個站的預設作者（寫站台設定檔，當場生效）；`null` 清掉 | `SetDefaultAuthorRequest` → `AuthorsResponse` |
 | `GET` | `/api/image-generation` | 能不能生圖（只有 Codex 能） | → `ImageGenerationStatus` |
 
-| `GET` | `/api/setup` | 設定精靈：要不要跑、目前設定了什麼（不含密碼） | → `SetupStatus` |
+| `GET` | `/api/setup` | 設定精靈：要不要跑、目前設定了什麼（不含密碼）；`locations` 給站台設定檔與備份資料夾的實際位置（家目錄寫成 `~`，沒給檔案路徑時 null，P5-T051） | → `SetupStatus` |
 | `POST` | `/api/setup/wordpress/test` | 測試連線（只讀）；通過回 `testId` | `SetupConnectionRequest` → `SetupConnectionResult` |
 | `POST` | `/api/setup/wordpress` | 把通過測試的那組存進 `.env` 並當場套用 | `SetupSaveWordPressRequest` → `SetupSaveResponse` |
 | `POST` | `/api/setup/agents` | 重新偵測三個 CLI（會啟動子行程），附安裝／登入指令；body `{}` | → `SetupAgentsResponse` |

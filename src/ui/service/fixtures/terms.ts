@@ -23,10 +23,14 @@ export const termsApi: Pick<PublisherApi, 'listTerms' | 'createTerm'> = {
     return clone(TERMS[taxonomy] ?? []);
   },
 
-  async createTerm(taxonomy: string, name: string): Promise<Term> {
+  // 跟後端一樣（resolveTerms）：同名的既有項目直接回它，不建第二個。示範模式一律可建（D-050 沒有開關）。
+  async createTerm(taxonomy: string, name: string): Promise<{ term: Term; created: boolean }> {
     await delay(300);
+    const key = name.trim().toLowerCase();
+    const existing = (TERMS[taxonomy] ?? []).find((entry) => entry.name.trim().toLowerCase() === key);
+    if (existing) return { term: clone(existing), created: false };
     const term: Term = { id: Math.floor(Math.random() * 900) + 100, name, slug: encodeURIComponent(name), count: 0 };
     TERMS[taxonomy] = [...(TERMS[taxonomy] ?? []), term];
-    return term;
+    return { term, created: true };
   },
 };

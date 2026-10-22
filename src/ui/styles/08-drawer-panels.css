@@ -16,6 +16,9 @@
 }
 .disclosure-toggle:hover { color: var(--shell-text); }
 .disclosure-body { display: flex; flex-direction: column; gap: .55rem; padding-top: .55rem; }
+/* 分類面板「建立新的分類項目」：相近項目、行內確認（P5-T051）。 */
+.term-create-group { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.term-create-group .row { flex-wrap: wrap; }
 .disclosure-body code {
   font-family: var(--font-num);
   font-size: .82em;

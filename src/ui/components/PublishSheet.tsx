@@ -1,22 +1,32 @@
-import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
-import { api } from '../service/client.js';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { api, describeError } from '../service/client.js';
 import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
-import { readString, shortHash } from '../lib/format.js';
+import { readString, readStringArray, shortHash } from '../lib/format.js';
 import {
   isSlugDirty,
+  isTaxonomyDirty,
   publishSlugView,
   slugEscapeAction,
   slugPublishBlocker,
+  taxonomyPublishBlocker,
   withSlug,
 } from '../lib/publish-slug.js';
 import { clearSlugSuggest } from '../lib/slug-suggest-store.js';
 import {
   isSlugSaving,
+  isTaxonomySaving,
   runSlugSave,
+  runTaxonomySave,
   setSlugDraft as storeSlugDraft,
+  setTaxonomyDraft,
   slugDraftFor,
   subscribeSlugSave,
+  taxonomyDraftFor,
+  addTermToSelection,
+  EDITING_SAVE_NOTE,
+  isEditingJob,
+  type AddTermOutcome,
   type SyncOutcome,
 } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
@@ -24,6 +34,7 @@ import { countBodyWords } from '../../contract/word-count.js';
 import { WORD_COUNT_HINT, wordCountNumber } from '../lib/word-count.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
+import { taxonomyTemplateData } from './panels/template-data.js';
 import { ErrorNote, Spinner, guardEdit, useAction } from './panels/shared.js';
 import { SlugSuggest } from './SlugSuggest.js';
 import { AuthorPicker, authorBlocker, useAuthors } from './AuthorPicker.js';
@@ -83,6 +94,12 @@ export function PublishSheet({
   const prepare = useAction();
   const go = useAction();
 
+  // 這篇在不在打字模式（Workspace 用 markEditing 登記，PR #39 跟進）：在的話這裡所有會建新版本的按鈕
+  // （存網址、儲存分類、建立分類、核准並發布）一律反灰、講原因——存了會出新版本，編輯區重載、打到一半的字被換掉。
+  // 正常操作下打字模式時頂列與右欄都是 inert、面板打不開；這是保險。面板仍可開、可看。
+  const editingNow = useSyncExternalStore(subscribeSlugSave, () => isEditingJob(job.uuid));
+  const editingLock = editingNow ? EDITING_SAVE_NOTE : null;
+
   // 網址框（P5-T039）：放在這一層，發布按鈕才知道有沒存的改動（審查 #1、#4）。
   const savedSlug = readString(job.currentRevision?.templateData ?? null, 'slug');
   // 沒存的字只記在模組層級、以稿件為 key（P5-T040 #2；PR #28 第三輪 Codex P2：面板不另存一份）：
@@ -114,7 +131,7 @@ export function PublishSheet({
   }, [slugDirty, slugEditing, savedSlug, slugSaving, job.uuid]);
 
   const storeSlug = (): void => {
-    if (!slugDirty || slugSaving) return;
+    if (!slugDirty || slugSaving || isEditingJob(job.uuid)) return;
     void slugSave.run(() =>
       runSlugSave(job.uuid, {
         save: async () => {
@@ -136,6 +153,72 @@ export function PublishSheet({
       }),
     );
   };
+
+  // 分類／標籤（P5-T051 跟進，D-050）：跟網址同一套——選了沒存的記在模組層級、以稿件為 key，
+  // 沒存或存的期間擋發布；面板關掉再開、別處存了別的欄位，照樣擋。長文多選（tags），其他單選（category）。
+  const multipleTerms = job.target.contentType === 'longform';
+  const savedTerms = useMemo<readonly string[]>(
+    () =>
+      multipleTerms
+        ? readStringArray(job.currentRevision?.templateData, 'tags')
+        : [readString(job.currentRevision?.templateData ?? null, 'category')].filter((value) => value !== ''),
+    [job.currentRevision, multipleTerms],
+  );
+  const termDraft = useSyncExternalStore(subscribeSlugSave, () => taxonomyDraftFor(job.uuid, savedTerms));
+  const setTermDraft = (next: readonly string[]): void => setTaxonomyDraft(job.uuid, next, savedTerms);
+  const termSave = useAction();
+  const termSavingShared = useSyncExternalStore(subscribeSlugSave, () => isTaxonomySaving(job.uuid));
+  const termSaving = termSavingShared || termSave.busy;
+  const termDirty = job.target.taxonomy !== null && isTaxonomyDirty(termDraft, savedTerms);
+  // 建立新項目要等一趟 WordPress，回來時畫面可能已經重讀過、選取也可能變了（PR #39 Codex 第一輪）：
+  // 存與套用一律讀這裡的最新值，不用送出請求那一刻的快照。
+  const latestTerms = useRef({ job, savedTerms });
+  latestTerms.current = { job, savedTerms };
+
+  /** 存分類（「儲存分類」與建好新項目後自動存共用）。回傳失敗原因，成功是 null；失敗時選取留著。 */
+  const storeTaxonomy = async (selection: readonly string[]): Promise<string | null> => {
+    if (isEditingJob(job.uuid)) return EDITING_SAVE_NOTE;
+    let failure: string | null = null;
+    await termSave.run(async () => {
+      try {
+        await runTaxonomySave(job.uuid, {
+          save: async () => {
+            const { job: now } = latestTerms.current;
+            const baseHash = now.currentRevision?.contentHash ?? null;
+            // templateData 是整份取代，現有欄位一定要帶上；單選清空就拿掉 category 鍵（P5-T021）。
+            // 帶上 expectedContentHash：中間被別處改過就擋下來，不蓋掉。
+            await guardEdit(() =>
+              api.createRevision(job.uuid, {
+                origin: 'manual',
+                templateData: taxonomyTemplateData(now.currentRevision?.templateData, multipleTerms, selection),
+                reason: '修改分類',
+                ...(baseHash === null ? {} : { expectedContentHash: baseHash }),
+              }),
+            );
+          },
+          // 重讀到新值才算存好；沒套用就維持「正在存分類」、每 3 秒再讀（同存網址）。
+          sync,
+        });
+      } catch (cause) {
+        failure = describeError(cause);
+        throw cause;
+      }
+    });
+    return failure;
+  };
+
+  /**
+   * 建好（或選了既有的）新項目：加進**最新的**選取（單選取代）、記成草稿；這篇不在打字模式才直接存
+   * （在打字模式就留成「選了沒存」，不讓自動存觸發編輯區重載，PR #39 Codex 第二輪）。
+   */
+  const addTermAndSave = (name: string): Promise<AddTermOutcome> =>
+    addTermToSelection({
+      uuid: job.uuid,
+      name,
+      saved: latestTerms.current.savedTerms,
+      multiple: multipleTerms,
+      save: storeTaxonomy,
+    });
 
   // 還沒渲染的稿子先渲染一次：左邊的「成品」才是真正會送出去的樣子。
   useEffect(() => {
@@ -174,7 +257,8 @@ export function PublishSheet({
   const torn = job.approval !== null && !job.approval.valid;
 
   const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSaving });
-  const why: string | null = slugBlocker ?? (needsCover
+  const termBlocker = job.target.taxonomy === null ? null : taxonomyPublishBlocker({ dirty: termDirty, saving: termSaving });
+  const why: string | null = editingLock ?? slugBlocker ?? termBlocker ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
       ? `還不能發布：${otherBlockers.join('、')}`
@@ -232,7 +316,8 @@ export function PublishSheet({
           job={job}
           refresh={refresh}
           approvedNow={approvedNow}
-          busy={go.busy}
+          busy={go.busy || editingNow}
+          lockNote={editingLock}
           draft={slugDraft}
           setDraft={setSlugDraft}
           editing={slugEditing}
@@ -301,7 +386,17 @@ export function PublishSheet({
             <span className="p-num">3</span>
             {job.target.contentType === 'longform' ? '標籤' : '分類'}
           </h3>
-          <TaxonomyPanel job={job} refresh={refresh} />
+          <TaxonomyPanel
+            job={job}
+            selected={termDraft}
+            onChange={setTermDraft}
+            dirty={termDirty}
+            saving={termSaving}
+            error={termSave.error}
+            onSave={storeTaxonomy}
+            onAddTerm={addTermAndSave}
+            editingLock={editingLock}
+          />
         </section>
       )}
 
@@ -392,7 +487,7 @@ export function PublishSheet({
           type="button"
           className="btn btn-primary btn-big p-go-btn"
           data-danger={status === 'publish' ? 'yes' : 'no'}
-          disabled={why !== null || go.busy || prepare.busy || slugSaving}
+          disabled={why !== null || go.busy || prepare.busy || slugSaving || termSaving || editingNow}
           onClick={publish}
         >
           {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
@@ -407,9 +502,27 @@ export function PublishSheet({
           )}
         </p>
         {slugDirty && (
-          <button type="button" className="btn btn-quiet btn-tiny" disabled={slugSaving || go.busy} onClick={storeSlug}>
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            disabled={slugSaving || go.busy || editingNow}
+            title={editingLock ?? undefined}
+            onClick={storeSlug}
+          >
             {slugSaving ? <Spinner /> : <Icon name="check" size={13} />}
             存網址
+          </button>
+        )}
+        {termDirty && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-tiny"
+            disabled={termSaving || go.busy || editingNow}
+            title={editingLock ?? undefined}
+            onClick={() => void storeTaxonomy(termDraft)}
+          >
+            {termSaving ? <Spinner /> : <Icon name="tag" size={13} />}
+            儲存分類
           </button>
         )}
         {mismatch && (
@@ -445,6 +558,7 @@ function PublishSlug({
   refresh,
   approvedNow,
   busy,
+  lockNote,
   draft,
   setDraft,
   editing,
@@ -457,8 +571,10 @@ function PublishSlug({
   job: LoadedJob;
   refresh: () => Promise<void>;
   approvedNow: boolean;
-  /** 正在發布：不給改。 */
+  /** 正在發布、或這篇在打字模式：不給改。 */
   busy: boolean;
+  /** 打字模式中講的原因（PR #39 跟進）；沒有是 null。 */
+  lockNote: string | null;
   /** 框裡的值、開關、存的動作都在 PublishSheet：發布按鈕要知道有沒存的改動（審查 #1）。 */
   draft: string;
   setDraft: (value: string) => void;
@@ -482,6 +598,7 @@ function PublishSlug({
 
   return (
     <div className="p-slug">
+      {lockNote !== null && <p className="field-hint">{lockNote}</p>}
       <div className="p-slug-line">
         <Icon name="link" size={16} />
         <span className="p-slug-label">網址</span>

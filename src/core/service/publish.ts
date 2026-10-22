@@ -472,9 +472,9 @@ export class PublishModule {
     if (names.length === 0) return { ids: [], unknown: [] };
 
     // 用 REST 名稱查：作者站台的分類法 slug＝rest_base，核心的 category 不是（見 docs/specs/wordpress-site.md）。
-    const resolution = await resolveTerms(client, restBase, names, {
-      allowCreate: target.allowCreateTerms,
-    });
+    // **寫死不自動建立**（D-004、D-050）：名稱可能是 Agent 給的，對不上就原樣回報；要新項目由使用者在右欄手動建。
+    // 不看設定檔——舊檔的 allowCreateTerms 讀進來就丟掉了（wordpress/targets.ts）。
+    const resolution = await resolveTerms(client, restBase, names, { allowCreate: false });
     return { ids: resolution.ids, unknown: resolution.unknown };
   }
 }

@@ -130,7 +130,6 @@ export class JobsModule {
             postType: target.postType,
             taxonomy: target.taxonomy,
             requireFeaturedImage: target.requireFeaturedImage,
-            allowCreateTerms: target.allowCreateTerms,
           }
         : null,
       template: template

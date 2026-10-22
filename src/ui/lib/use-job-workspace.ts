@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { FactCheckListResponse, JobDetail } from '../service/types.js';
 import { isWorkspaceBusy } from './factcheck-view.js';
@@ -11,8 +11,8 @@ import {
   stillOnJob,
 } from './selection-image-view.js';
 import { createRefreshScheduler, type ReadResult, type RefreshScheduler } from './refresh-scheduler.js';
-import type { SyncOutcome } from './slug-save-store.js';
-import { editBlockedNote } from './workspace-view.js';
+import { isPublishPanelSaving, subscribeSlugSave, type SyncOutcome } from './slug-save-store.js';
+import { editBlockState } from './workspace-view.js';
 
 /**
  * 工作區的「讀稿件與同步」（P5-T045 從 `components/Workspace.tsx` 原樣搬出，行為不變）：
@@ -221,8 +221,12 @@ export function useJobWorkspace({
    * 這時再進打字模式存檔基準會是舊的 → 409。所有進打字模式的入口先擋，同時一直重讀到成功為止。
    */
   const pendingSync = syncPending({ editing, savedAt, okSeq });
-  const editBlocked = runBlocked || pendingSync;
-  const blockedNote = editBlockedNote({ runBlocked, pendingSync });
+  /**
+   * 發布面板在存分類／網址（含建立分類的整段，PR #39 Codex 第二輪）：存好會出新版本、校樣重載，
+   * 這時進打字模式，打到一半的字會被換掉。所有進打字模式的入口一起擋，講原因。
+   */
+  const panelSaving = useSyncExternalStore(subscribeSlugSave, () => isPublishPanelSaving(uuid));
+  const { blocked: editBlocked, note: blockedNote } = editBlockState({ runBlocked, pendingSync, panelSaving });
   // 輪詢交給同一個重讀排程（PR #28 第四輪 Codex P2）：查證在跑（1.5 秒）、待同步（3 秒）各登記一個需求，
   // 一次只跑一個、上一次結束才排下一次；`working`／`pendingSync` 都是照最新一次套用成功的資料算的，
   // 查證跑完、同步好了，需求拿掉就停。

@@ -687,7 +687,7 @@ export function destinationOptions(
 
 /**
  * 一個 target 寫進設定檔的樣子。欄位順序照 `config/publish-targets.example.json`，
- * 沒有分類法時不寫 `taxonomyRestBase`（範例的 page 就是這樣）。D-004：allowCreateTerms 一律 false。
+ * 沒有分類法時不寫 `taxonomyRestBase`（範例的 page 就是這樣）。不寫 allowCreateTerms（D-050 廢止）。
  */
 export function setupTargetJson(option: SetupDestinationOption): Record<string, unknown> {
   if (option.restBase === null) throw new PublishTargetError(`${option.displayName} 在站上沒有 REST，不能加入`);
@@ -703,7 +703,6 @@ export function setupTargetJson(option: SetupDestinationOption): Record<string, 
     fixedObjectId: null,
     allowCreate: true,
     allowUpdate: true,
-    allowCreateTerms: false,
     requireFeaturedImage: false,
     requireSecondConfirmation: false,
   };

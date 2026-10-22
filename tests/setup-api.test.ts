@@ -113,9 +113,16 @@ async function connect(instance: FastifyInstance): Promise<void> {
 
 describe('GET /api/setup', () => {
   it('什麼都沒設定：needsSetup', async () => {
-    const { app } = await build();
+    const { app, files } = await build();
     const body = (await app.inject({ method: 'GET', url: '/api/setup', headers })).json();
-    expect(body).toEqual({ needsSetup: true, wordpress: null, siteConfig: { exists: false, targets: [] }, canWrite: true });
+    expect(body).toEqual({
+      needsSetup: true,
+      wordpress: null,
+      siteConfig: { exists: false, targets: [] },
+      canWrite: true,
+      // 畫面講站台設定檔與備份在哪，照實際資料目錄（P5-T051；暫存目錄不在家目錄底下，照原樣給）。
+      locations: { siteConfigFile: files!.siteConfigFile, backupsDir: files!.backupsDir },
+    });
   });
 
   it('連線與站台設定都有：不打擾，也不回密碼', async () => {
@@ -125,6 +132,7 @@ describe('GET /api/setup', () => {
     });
     const res = await app.inject({ method: 'GET', url: '/api/setup', headers });
     expect(res.json()).toMatchObject({ needsSetup: false, wordpress: { url: 'https://example.com', username: 'ming' }, canWrite: false });
+    expect(res.json().locations).toBeNull();
     expect(res.json().siteConfig.targets.map((target: { key: string }) => target.key)).toEqual(['read-think', 'diary']);
     expect(res.body).not.toContain(GOOD_PASSWORD);
   });
@@ -686,5 +694,17 @@ describe('Codex 審查（PR #9）', () => {
     const res = await app.inject({ method: 'POST', url: '/api/setup/destinations', headers, payload: { include: [], replace: [], disabled: [longKey] } });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(readFileSync(files.siteConfigFile, 'utf8')).targets[1].disabled).toBe(true);
+  });
+});
+
+describe('displayPath：畫面上講路徑用 ~ 開頭（D-035 的寫法）', () => {
+  it('家目錄底下的換成 ~，其他照原樣', async () => {
+    const { displayPath } = await import('../src/server/routes/setup.js');
+    expect(displayPath('/Users/ming/Library/Application Support/Galley/publish-targets.json', '/Users/ming')).toBe(
+      '~/Library/Application Support/Galley/publish-targets.json',
+    );
+    expect(displayPath('/Users/mingming/x.json', '/Users/ming')).toBe('/Users/mingming/x.json');
+    expect(displayPath('/var/folders/tmp/publish-targets.json', '/Users/ming')).toBe('/var/folders/tmp/publish-targets.json');
+    expect(displayPath('/Users/ming', '/Users/ming')).toBe('~');
   });
 });

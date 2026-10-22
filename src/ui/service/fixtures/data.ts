@@ -14,7 +14,6 @@ export const DIARY_TARGET: PublishTargetSummary = {
   templateId: 'diary-v1',
   taxonomy: 'diary-category',
   requireFeaturedImage: false,
-  allowCreateTerms: false,
   disabled: false,
 };
 
@@ -26,7 +25,6 @@ export const LONGFORM_TARGET: PublishTargetSummary = {
   templateId: 'longform-v1',
   taxonomy: 'read-think-tag',
   requireFeaturedImage: true,
-  allowCreateTerms: false,
   disabled: false,
 };
 
@@ -39,7 +37,6 @@ export const POST_TARGET: PublishTargetSummary = {
   templateId: 'article-v1',
   taxonomy: 'category',
   requireFeaturedImage: false,
-  allowCreateTerms: false,
   disabled: false,
 };
 
@@ -51,7 +48,6 @@ export const PAGE_TARGET: PublishTargetSummary = {
   templateId: 'article-v1',
   taxonomy: null,
   requireFeaturedImage: false,
-  allowCreateTerms: false,
   disabled: false,
 };
 

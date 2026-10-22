@@ -352,7 +352,9 @@ describe('目的地與站台設定檔', () => {
     const taxonomies = { category: { ...TAXONOMIES_BODY.category, rest_base: 'topics' } };
     const [post] = destinationOptions(TYPES_BODY as never, taxonomies as never, editor, []);
     expect(post!.taxonomyRestBase).toBe('topics');
-    expect(setupTargetJson(post!)).toMatchObject({ taxonomy: 'category', taxonomyRestBase: 'topics', allowCreateTerms: false });
+    expect(setupTargetJson(post!)).toMatchObject({ taxonomy: 'category', taxonomyRestBase: 'topics' });
+    // D-050：精靈不再寫 allowCreateTerms。
+    expect(setupTargetJson(post!)).not.toHaveProperty('allowCreateTerms');
   });
 
   it('站上沒開放頁面的 REST：頁面選不了，講原因', () => {
