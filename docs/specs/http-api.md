@@ -63,7 +63,8 @@
 | `DELETE` | `/api/jobs/:uuid/featured` | 取消精選圖片 | → `RevisionResponse` |
 | `POST` | `/api/jobs/:uuid/approve` | 核准（actor 寫死 `ui`） | `ApproveRequest` → `ApprovalResponse`（201） |
 | `DELETE` | `/api/jobs/:uuid/approve` | 撤銷核准 | `RevokeApprovalRequest` → `RevokedResponse` |
-| `POST` | `/api/jobs/:uuid/publish` | 發布 | `PublishRequest` → `PublishResponse` |
+| `POST` | `/api/jobs/:uuid/publish` | 草稿／公開／排程發布（排程須帶 `scheduledAt` UTC 時間與確認；Core 前置再驗合法且晚超過五分鐘，否則零寫入；進行中每次寫入前至少留一分鐘） | `PublishRequest` → `PublishResponse` |
+| `POST` | `/api/jobs/:uuid/cancel-schedule` | 取消目前站台的排程、回草稿並重設浮動日期；近兩分鐘／已過時間的取消回應帶副作用警告；不需核准，遠端已改或不是排程就拒絕；只給本機 UI，沿用同源／CSRF 防護，MCP 不開 | → `CancelScheduleResponse` |
 | `GET` | `/api/wordpress` | 站台探查與發布目標；檢查的內容類型＝設定檔裡 target 的 `postType`（沒有站台設定時 `publishTargets` 是空陣列） | → 探查結果＋`publishTargets: PublishTargetSummary[]` |
 | `GET` | `/api/wordpress/terms` | 分類項目，`?taxonomy=` 帶分類法 **slug**（跟 `taxonomy` 欄位一樣）；後端換成 REST 名稱去查（`category` → `/wp/v2/categories`） | → `TermsResponse` |
 | `POST` | `/api/wordpress/terms` | 使用者手動建立分類項目（D-050：沒有開關，`taxonomy` 須是某個發布目標的分類法，否則 400）；同名既有的回 200、真的建了回 201（UI 的 `createTerm` 回 `{ term, created }` 帶出這個差別）。只給本機 UI（來源防護擋外站、同機其他埠、`Origin: null`）；MCP 不提供 | `CreateTermRequest` → `Term` |

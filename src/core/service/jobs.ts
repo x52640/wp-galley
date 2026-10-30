@@ -1,5 +1,7 @@
 /** 建立與讀取稿件、取消與恢復、稽核紀錄。 */
 
+import { wordpressDateUtc } from '../../contract/schedule.js';
+
 import { randomUUID } from 'node:crypto';
 import type {
   AgentRunTask,
@@ -156,6 +158,7 @@ export class JobsModule {
               wordpressId: publishedRow.wordpress_id,
               status: publishedRow.status ?? 'draft',
               link: publishedRow.link,
+              dateGmt: snapshotDate(publishedRow.remote_snapshot_json),
             }
           : null,
       // AI 查證（P6-T004）正在跑或是最近一趟：由查證紀錄組出來（抓網頁、核對兩段沒有 running 的 agent_runs）。
@@ -193,6 +196,8 @@ export class JobsModule {
         revisionNumber: latest?.revision_number ?? null,
         approved: approval !== null && latest !== null && approval.content_hash === latest.content_hash,
         publishedId: published?.wordpress_id ?? null,
+        publishedStatus: published?.status ?? null,
+        publishedDateGmt: snapshotDate(published?.remote_snapshot_json ?? null),
         pendingReviewCount: this.ctx.review.pendingReviewCount(row.id),
       };
     });
@@ -328,5 +333,16 @@ export class JobsModule {
     }
 
     return blockers;
+  }
+}
+
+/** 舊紀錄或無效 JSON 沒日期就明說未知，不猜排程時間。 */
+function snapshotDate(json: string | null): string | null {
+  try {
+    const value: unknown = JSON.parse(json ?? 'null');
+    return value !== null && typeof value === 'object' && 'dateGmt' in value && typeof value.dateGmt === 'string'
+      ? wordpressDateUtc(value.dateGmt) : null;
+  } catch {
+    return null;
   }
 }

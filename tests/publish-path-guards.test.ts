@@ -310,7 +310,7 @@ describe('#1 更新既有文章時選草稿', () => {
       await expect(f.core.publish(uuid, { status: 'draft' })).rejects.toThrow(/比對基準/);
 
       await expect(f.core.publish(uuid, { status: choice })).rejects.toThrow(
-        new RegExp(`已經是 ${status}.*不支援修改已公開的文章.*Q-5`),
+        status === 'future' ? /這篇已排程.*取消排程/ : new RegExp(`已經是 ${status}.*不支援修改已公開的文章.*Q-5`),
       );
       expect(writes(f)).toHaveLength(0);
       // 前置檢查擋下，沒進 PUBLISHING，核准還在。

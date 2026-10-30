@@ -1,6 +1,7 @@
 /** 發布：前置檢查、讀遠端比對、建立或更新 WordPress 文章。 */
 
-import type { PublishResult } from '../../contract/api.js';
+import type { PublishResult, CancelScheduleResult } from '../../contract/api.js';
+import { checkSchedule, checkInFlightSchedule, wordpressDateUtc } from '../../contract/schedule.js';
 import { PublishBlockedError } from '../errors.js';
 import { containsImage } from '../html-blocks.js';
 import type { ApprovalRow, EventActor, JobRow, MediaAssetRow, RevisionRow, WordPressObjectRow } from '../repository.js';
@@ -14,6 +15,8 @@ import {
   createDraft,
   fetchSnapshot,
   setStatus,
+  schedulePost,
+  cancelPostSchedule,
   snapshotOf,
   updateDraft,
   nonDraftUpdateMessage,
@@ -83,6 +86,8 @@ function parseSnapshot(json: string | null, expectedId: number): RemoteSnapshot 
     slug: value.slug,
     featuredMediaId: value.featuredMediaId,
     terms: Array.isArray(value.terms) ? [...value.terms] : null,
+    ...(value.author === undefined ? {} : { author: value.author }),
+    ...(value.dateGmt === undefined ? {} : { dateGmt: value.dateGmt }),
   };
 }
 
@@ -182,7 +187,13 @@ export class PublishModule {
       actor,
       eventType: 'publish',
       status: 'started',
-      detail: this.ctx.scrub({ status: input.status, targetKey: target.key, creating, authorId: author?.id ?? null }),
+      detail: this.ctx.scrub({
+        status: input.status,
+        scheduledAt: input.scheduledAt ?? null,
+        targetKey: target.key,
+        creating,
+        authorId: author?.id ?? null,
+      }),
     });
 
     try {
@@ -221,27 +232,40 @@ export class PublishModule {
       let post: Post;
       if (creating) {
         this.ctx.approval.assertApprovalUnchanged(job, approval, noWriteMessage);
+        this.assertSchedule(job, input, actor, true);
         post = await createDraft(client, target, fields);
       } else {
         post = await updateDraft(client, target, targetId!, fields, {
           expect: expect!,
-          beforeWrite: () => this.ctx.approval.assertApprovalUnchanged(job, approval, noWriteMessage),
+          beforeWrite: () => {
+            this.ctx.approval.assertApprovalUnchanged(job, approval, noWriteMessage);
+            this.assertSchedule(job, input, actor, true);
+          },
         });
       }
 
-      if (input.status === 'publish') {
+      if (input.status === 'publish' || input.status === 'future') {
         // 改成公開是收不回來的一步（電子報、自動分享）。沒了核准就維持寫進去時的狀態，不改公開。
         const written = post;
-        post = await setStatus(client, target, post.id, 'publish', {
+        const options = {
           expect: snapshotOf(post, termsField),
           beforeWrite: () =>
             this.ctx.approval.assertApprovalUnchanged(
               job,
               approval,
-              `發布途中核准被撤銷了，所以沒有把文章改成公開：WordPress 上那篇（第 ${written.id} 號）` +
+              `發布途中核准被撤銷了，所以沒有把文章改成${input.status === 'future' ? '排程' : '公開'}：WordPress 上那篇（第 ${written.id} 號）` +
                 `維持${written.status === 'draft' ? '草稿' : `原本的 ${written.status} 狀態`}，工作項目標成失敗。`,
             ),
-        });
+        };
+        post = input.status === 'future'
+          ? await schedulePost(client, target, post.id, input.scheduledAt!, {
+              ...options,
+              beforeWrite: () => {
+                options.beforeWrite();
+                this.assertSchedule(job, input, actor, true);
+              },
+            })
+          : await setStatus(client, target, post.id, 'publish', options);
       }
 
       // 快照整包存下來，下一次更新才有東西可以比對（見 baselineFor）。
@@ -269,6 +293,8 @@ export class PublishModule {
         detail: this.ctx.scrub({
           wordpressId: post.id,
           status: post.status,
+          scheduledAt: input.scheduledAt ?? null,
+          dateGmt: wordpressDateUtc(post.date_gmt),
           unknownTerms: terms.unknown,
           authorId: author?.id ?? null,
         }),
@@ -277,6 +303,7 @@ export class PublishModule {
       return {
         wordpressId: post.id,
         status: post.status,
+        dateGmt: wordpressDateUtc(post.date_gmt),
         link: post.link,
         created: creating,
         unknownTerms: [...terms.unknown],
@@ -298,6 +325,70 @@ export class PublishModule {
     }
   }
 
+  private assertSchedule(job: JobRow, input: PublishInput, actor: EventActor, inFlight = false): void {
+    if (input.status !== 'draft' && input.status !== 'publish' && input.status !== 'future') {
+      throw this.rejectPublish(job, actor, '發布方式不正確。');
+    }
+    if (input.status !== 'future') return;
+    if (actor !== 'ui') throw this.rejectPublish(job, actor, '排程發布只能從本機發布面板操作。');
+    const problem = (inFlight ? checkInFlightSchedule : checkSchedule)(input.scheduledAt);
+    if (problem !== null) throw this.rejectPublish(job, actor, problem);
+    if (input.confirm !== true) throw this.rejectPublish(job, actor, '排程發布前需要再次確認。');
+  }
+
+  /** 取消排程只降低曝光，不需核准；保留 PUBLISHED，沿用已送出稿件的規則。 */
+  async cancelSchedule(uuid: string): Promise<CancelScheduleResult> {
+    return this.ctx.trackWordPress(async () => {
+      const job = this.ctx.requireJob(uuid);
+      const target = this.ctx.targetOf(job);
+      const existing = this.ctx.repo.publishedObject(job.id, this.ctx.siteId);
+      if (!target || !existing) throw new PublishBlockedError('找不到這篇在目前站台的排程紀錄。');
+      if (this.ctx.publishing.has(uuid)) throw new PublishBlockedError('這篇正在送去 WordPress，等它完成再取消排程。');
+      const expect = parseSnapshot(existing.remote_snapshot_json, existing.wordpress_id);
+      if (!expect) throw new PublishBlockedError('這篇沒有遠端比對基準，無法安全取消排程。');
+      this.ctx.publishing.add(uuid);
+      try {
+        const { post, publicationWarning } = await cancelPostSchedule(this.ctx.requireWordPress(), target, existing.wordpress_id, {
+          expect,
+          beforeWrite: () => {
+            if (this.ctx.requireJob(uuid).state !== 'PUBLISHED') throw new PublishBlockedError('稿件狀態變動了，這次沒有取消排程。');
+          },
+        });
+        const snapshot = snapshotOf(post, taxonomyRestBaseOf(target));
+        this.ctx.repo.upsertWordPressObject({
+          siteId: this.ctx.siteId,
+          jobId: job.id,
+          objectType: target.postType,
+          wordpressId: post.id,
+          status: post.status,
+          link: post.link,
+          remoteHash: snapshot.contentHash,
+          remoteModifiedGmt: snapshot.modifiedGmt,
+          remoteSnapshotJson: JSON.stringify(snapshot),
+        });
+        if (post.status !== 'draft') {
+          const label = post.status === 'publish' ? '已公開' : post.status === 'future' ? '已排程' : '其他狀態';
+          throw new PublishBlockedError(`WordPress 回報這篇仍是${label}，沒有取消成功。請重新確認站上的狀態。`);
+        }
+        this.ctx.repo.insertEvent({
+          jobId: job.id, revisionId: null, approvalId: null, actor: 'ui',
+          eventType: 'schedule_cancelled', status: 'succeeded',
+          detail: this.ctx.scrub({ wordpressId: post.id, status: post.status, publicationWarning }),
+        });
+        return { wordpressId: post.id, status: post.status, link: post.link, dateGmt: wordpressDateUtc(post.date_gmt), publicationWarning };
+      } catch (error) {
+        this.ctx.repo.insertEvent({
+          jobId: job.id, revisionId: null, approvalId: null, actor: 'ui',
+          eventType: 'schedule_cancelled', status: 'failed',
+          detail: this.ctx.scrub({ message: error instanceof Error ? error.message : String(error) }),
+        });
+        throw error;
+      } finally {
+        this.ctx.publishing.delete(uuid);
+      }
+    });
+  }
+
   /**
    * 發布前置檢查 1–4。**純讀取、可以重跑**，這一點是刻意的：
    * 讀遠端之前跑一次、讀完之後再跑一次，才擋得住等待期間的變動。
@@ -312,6 +403,7 @@ export class PublishModule {
     actor: EventActor,
   ): PublishPlan {
     const job = this.ctx.requireJob(uuid);
+    this.assertSchedule(job, input, actor);
 
     // 1. 狀態必須是 APPROVED。
     if (job.state !== 'APPROVED') {

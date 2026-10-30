@@ -43,8 +43,8 @@ export interface CoreFixture {
 }
 
 export interface CoreFixtureOptions {
-  /** 不給就用預設的假站台；給 null 代表「WordPress 未設定」。 */
-  readonly wordpress?: 'mock' | 'none';
+  /** 預設用 HTTP 假站台；none＝沒設定；in-process＝同一個 handler 經 fetch 注入，不開 socket。 */
+  readonly wordpress?: 'mock' | 'none' | 'in-process';
   readonly adapters?: AgentAdapter[];
   readonly handler?: (request: RecordedRequest, index: number) => MockResponse;
   /** 測發布前置檢查用：換成開關不同的 target。 */
@@ -137,6 +137,7 @@ export function defaultWordPressHandler(): (request: RecordedRequest) => MockRes
         const merged = {
           ...existing,
           ...(payload['status'] === undefined ? {} : { status: String(payload['status']) }),
+          ...(payload['date_gmt'] === undefined ? {} : { date_gmt: payload['date_gmt'] }),
           ...(payload['content'] === undefined
             ? {}
             : { content: { raw: String(payload['content']), rendered: String(payload['content']) } }),
@@ -160,7 +161,26 @@ export async function createCoreFixture(options: CoreFixtureOptions = {}): Promi
   let mock: MockWordPress | null = null;
   let client: WordPressClient | null = null;
 
-  if (options.wordpress !== 'none') {
+  const requests: RecordedRequest[] = [];
+  if (options.wordpress === 'in-process') {
+    // 只給不能開 socket 的單元測試；共用原本的假站台 handler，實際 client 仍驗 schema。
+    const handler = options.handler ?? defaultWordPressHandler();
+    client = new WordPressClient({
+      baseUrl: 'http://127.0.0.1:1', username: 'tester', appPassword: APP_PASSWORD, maxRetries: 0,
+      fetchImpl: async (url, init) => {
+        const headers = new Headers(init?.headers);
+        const target = new URL(String(url));
+        const request: RecordedRequest = { method: init?.method ?? 'GET', path: target.pathname + target.search,
+          authorization: headers.get('authorization'), contentType: headers.get('content-type'), body: String(init?.body ?? '') };
+        requests.push(request);
+        const result = handler(request, requests.length - 1);
+        if (result.delayMs) await new Promise(resolve => setTimeout(resolve, result.delayMs));
+        return new Response(typeof result.body === 'string' ? result.body : JSON.stringify(result.body), {
+          status: result.status ?? 200, headers: { 'Content-Type': 'application/json', ...result.headers },
+        });
+      },
+    });
+  } else if (options.wordpress !== 'none') {
     mock = await startMockWordPress(options.handler ?? defaultWordPressHandler());
     client = new WordPressClient({
       baseUrl: mock.url,
@@ -188,7 +208,7 @@ export async function createCoreFixture(options: CoreFixtureOptions = {}): Promi
     core,
     db,
     mock,
-    requests: mock?.requests ?? [],
+    requests: mock?.requests ?? requests,
     cleanup: async () => {
       await mock?.close();
       db.cleanup();

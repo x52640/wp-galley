@@ -110,7 +110,7 @@
 .p-cover-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--shell-text-dim); }
 .p-cover-text { flex: 1; min-width: 0; font-size: .88rem; }
 
-.p-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.p-ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
 .p-way {
   display: flex;
   flex-direction: column;
@@ -152,3 +152,7 @@
 .p-go-btn { justify-content: center; width: 100%; }
 .p-go-btn[data-danger='yes']:not(:disabled) { background: var(--danger-on-shell); border-color: var(--danger-on-shell); }
 .p-why { margin: 0; font-size: .8rem; color: var(--shell-text-dim); line-height: 1.6; text-align: center; }
+
+/* 排程時間跟隨本機時區，與發布方式放在一起。 */
+.p-schedule { display: grid; gap: 8px; margin-top: 16px; font-size: 13px; }
+.p-schedule .input { width: 100%; min-width: 0; }

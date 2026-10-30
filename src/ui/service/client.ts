@@ -1,5 +1,6 @@
 import type {
   ApprovalResponse,
+  CancelScheduleResponse,
   FactCheckListResponse,
   FactCheckRequest,
   FactCheckRunResult,
@@ -371,6 +372,11 @@ const httpApi: PublisherApi = {
       input,
     );
     return body.result;
+  },
+
+  async cancelSchedule(uuid: string) {
+    const body = await sendJson<CancelScheduleResponse>(`/api/jobs/${uuid}/cancel-schedule`, 'POST');
+    return body.published;
   },
 
   async listTerms(taxonomy: string) {

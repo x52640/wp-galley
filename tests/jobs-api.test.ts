@@ -8,7 +8,7 @@ import { loadTemplateRegistry } from '../src/templates/registry.js';
 import { loadPublishTargets } from '../src/wordpress/targets.js';
 import { paths } from '../src/config/paths.js';
 import { AgentRegistry } from '../src/agents/registry.js';
-import { createCoreFixture, TINY_PNG, type CoreFixture } from './helpers/core-fixture.js';
+import { approveJob, createCoreFixture, TINY_PNG, type CoreFixture } from './helpers/core-fixture.js';
 import { FakeAdapter } from './helpers/fake-adapter.js';
 
 /**
@@ -592,5 +592,47 @@ describe('待處理清單路由', () => {
       headers,
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+
+describe('取消排程路由來源防護', () => {
+  it.each([
+    { origin: 'https://evil.example' },
+    { origin: 'http://127.0.0.1:8080' },
+    { origin: 'null' },
+    { 'sec-fetch-site': 'same-site' },
+    { 'sec-fetch-site': 'cross-site' },
+  ])('拒絕外來來源 %j', async source => {
+    const instance = await build({ wordpress: 'in-process' });
+    const uuid = await createJob(instance);
+    const response = await instance.inject({ method: 'POST', url: `/api/jobs/${uuid}/cancel-schedule`, headers: { ...headers, ...source } });
+    expect(response.statusCode).toBe(403);
+    expect(fixture!.requests).toHaveLength(0);
+  });
+  it('同源可以取消排程', async () => {
+    const instance = await build({ wordpress: 'in-process' });
+    const uuid = await createJob(instance);
+    approveJob(fixture!.core, uuid);
+    const response = await instance.inject({ method: 'POST', url: `/api/jobs/${uuid}/publish`, headers,
+      payload: { status: 'future', scheduledAt: '2099-01-01T00:00:00Z', confirm: true } });
+    expect(response.statusCode).toBe(200);
+    const cancelled = await instance.inject({ method: 'POST', url: `/api/jobs/${uuid}/cancel-schedule`,
+      headers: { ...headers, origin: 'http://127.0.0.1:3000', 'sec-fetch-site': 'same-origin' } });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json().published.status).toBe('draft');
+  });
+});
+
+
+describe('排程 HTTP 輸入驗證', () => {
+  it.each([{}, { scheduledAt: 'bad' }, { scheduledAt: null }, { scheduledAt: '2000-01-01T00:00:00Z' }])('拒絕 %j，零寫入', async input => {
+    const instance = await build({ wordpress: 'in-process' });
+    const uuid = await createJob(instance);
+    approveJob(fixture!.core, uuid);
+    const result = await instance.inject({ method: 'POST', url: `/api/jobs/${uuid}/publish`, headers,
+      payload: { status: 'future', confirm: true, ...input } });
+    expect(result.statusCode).toBe('scheduledAt' in input && input.scheduledAt === null ? 400 : 409);
+    expect(fixture!.requests).toHaveLength(0);
   });
 });

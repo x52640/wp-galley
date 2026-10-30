@@ -83,8 +83,8 @@ https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce
 `fixedObjectId` 才會更新既有文章（一般稿件發過就是 PUBLISHED，不再發第二次；見 `plan.md` Q-5）。
 
 - **只更新草稿**：遠端那篇不是草稿（`publish`、`future`、`private` 等）就在發布前拒絕、零寫入，
-  不論使用者選草稿或公開——那就是「修改已發布文章」，待裁定 Q-5（見 [state-machine.md](state-machine.md) 前置檢查第 6 項）。
-  `updateDraft` 自己也用剛讀回的遠端狀態再擋一次，請求**固定帶 `status: 'draft'`**；選「公開」的接著走 `setStatus('publish')`。
+  不論使用者選草稿、公開或排程——那就是「修改已發布文章」，待裁定 Q-5（見 [state-machine.md](state-machine.md) 前置檢查第 6 項）。
+  `updateDraft` 自己也用剛讀回的遠端狀態再擋一次，請求**固定帶 `status: 'draft'`**；選「公開」的接著走 `setStatus('publish')`；選排程則走下節的獨立寫入。
 - `updateDraft`／`setStatus` 有 `beforeWrite` 同步回呼：讀回遠端之後、送出寫入之前呼叫，丟錯就不寫。
   CoreService 拿它做最後一刻的核准檢查。
 - **封面一律送**：沒有封面送 `featured_media: 0`。
@@ -92,6 +92,25 @@ https://github.com/WordPress/gutenberg/blob/dd294ab86ceaf9f3d7d42a09b78f399238ce
   就不送這個欄位**（不因為查不到就清掉遠端分類），查不到的照樣回報在 `unknownTerms`。
   省略空封面、空分類的話 WordPress 會留著舊的，線上跟核准的內容對不上。
   **建立新稿不變**：沒有就省略（新文章本來就沒有）。
+
+## 排程與取消（D-051，P5-T052）
+
+發布一律先寫草稿。選「排程發布」時再經 `schedulePost` 送 `status: 'future'`＋UTC `date_gmt`；
+跟改公開一樣，寫入前 `assertUnchanged`，讀完後同步 `beforeWrite` 檢查核准與時間。
+時間檢查由 `contract/schedule.ts` 共用：明確 UTC、合法日期；前置檢查必須比現在晚超過五分鐘，發布中的每次寫入前至少留一分鐘，避免網路等待讓五分鐘門檻誤擋。
+回應狀態與日期照 WordPress 實際回傳保存／顯示：要求排程卻回公開、要求公開卻回排程，都不可講成原本要求的狀態。
+
+取消走 `cancelPostSchedule`：確認目前站台的既有物件、完整快照沒變、遠端仍是 `future`，才送
+`{ status: 'draft', date: null, date_gmt: null }`。不需核准、不改內容；改過、已公開或不是排程就拒絕並講現況。
+成功更新 `wordpress_objects` 狀態與快照（包含正規化 UTC 的 `dateGmt`）；回應不是草稿就保存現況並回報沒取消成功。
+快照新增日期比對，舊快照缺此欄時維持相容。
+取消回應完成時，原排程已過、剩不到兩分鐘或日期無法確認，回傳 `publicationWarning`：可能已公開、電子報／分享可能已送出，請到網站確認；不能只顯示取消成功。遠端已公開就拒絕並提醒同樣的副作用。
+
+日期重設依據：[WordPress 7.1 核心 REST controller](https://github.com/WordPress/wordpress-develop/blob/7.1/src/wp-includes/rest-api/endpoints/class-wp-rest-posts-controller.php#L1276-L1286)
+會將明確傳入 null 的日期清除。這是原始碼確認，尚未在作者站台實測；REST 可能為浮動草稿補出顯示日期，
+因此不能只用 REST 回應是否為 null 判斷是否重設成功。
+
+到時由 WordPress 的 wp-cron 公開，發布台不必開著；流量少可能晚發或錯過排程，發布台不補發。
 
 ## 作者（P5-T024，D-024）
 
@@ -473,7 +492,7 @@ WordPress 核心預設不收 SVG（可內嵌 script），要開啟只能裝外�
 **把文章從草稿改成公開的瞬間，信就寄出去了；之後刪文章救不回來**。
 
 這是唯一一個「刪掉就沒事」不成立的地方，UI 在把狀態改成公開之前應該提醒一次。
-建草稿、改草稿、上傳媒體都不會觸發。
+建草稿、改草稿、上傳媒體都不會觸發。排程會在 WordPress 到時改公開時觸發同樣的副作用，選排程前也要警告並勾「我知道」。
 
 手動建立分類項目（D-050）是**直接寫進正式站**的：建了之後每篇文章都選得到，發布台裡不能刪除或改名（要到 WordPress 後台）。
 不寄信、不公開文章，但收不回來的程度跟「建了一個沒人用的分類」一樣，所以建立前一定行內確認。

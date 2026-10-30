@@ -172,3 +172,15 @@
   打字模式先存再問位置、換篇時的 UUID 綁定（Workspace 的 `refresh`、存檔後的接續動作）、膠囊兩顆按鈕的前端行為只有純函式測試（`tests/selection-image-view.test.ts`）＋`?fixtures=1` 截圖，沒有 DOM 層的自動測試；
   示範資料的 prompt 只是一句說明（真的 prompt 只在後端組）；
   `scripts/ui-drive.mjs` 固定用 9333 埠：多個 subagent 同時截圖時會連到別人的無頭 Chrome（本 Task 實作時發生過一次，見回報）。
+
+## 排程發布（P5-T052，2026-10-30）
+
+- wp-cron 依網站造訪觸發，流量少可能晚發或錯過排程；發布台不偵測、不補發。畫面的狀態是最後保存的 WordPress 回應，
+  不會自動輪詢排程有沒有到時公開；取消時會重新讀遠端，已公開就拒絕並講明。
+- 取消時送草稿與 `date: null`、`date_gmt: null`，已查 WordPress 7.1 核心的明確 null 日期處理；
+  作者站台與外掛的實際行為尚待使用者用 2099 年時間手動驗證。REST 會為浮動草稿補顯示日期，回傳不一定是 null。
+- 取消後遠端成草稿，原 job 維持 PUBLISHED；目前編輯內容必須到 WordPress 後台。發布台內接續編輯同一篇草稿的入口是既有缺口，待另外裁定／Task。
+- 本次執行環境禁止 loopback listen（EPERM），完整 verify 中既有 HTTP 假站測試無法啟動；
+  另有既有 launcher app 的 AppleScript 編譯測試失敗（-2741，未改範圍外腳本）。新增排程測試改用既有假 handler 與 WordPressClient 的 fetch 注入，不開 socket、不連真站。截圖的 Vite／Chrome 9333 也受同一限制。
+
+- **L2：本機時鐘誤差**：五分鐘門檻只看這台電腦的時鐘，沒有向 WordPress 伺服器校時。如果本機時間比伺服器慢幾分鐘，送出的排程時間在伺服器看來可能已到，文章就可能提早公開。

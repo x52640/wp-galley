@@ -10,6 +10,7 @@ import type {
   JobDetail,
   JobSummary,
   MediaAsset,
+  CancelScheduleResult,
   PublishResult,
   RenderOutcome,
   Revision,
@@ -350,6 +351,10 @@ export class CoreService {
   }
 
   // --- publish.ts ---
+
+  cancelSchedule(uuid: string): Promise<CancelScheduleResult> {
+    return this.ctx.publish.cancelSchedule(uuid);
+  }
 
   publish(uuid: string, input: PublishInput): Promise<PublishResult> {
     return this.ctx.publish.publish(uuid, input);

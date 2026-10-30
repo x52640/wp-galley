@@ -1,3 +1,4 @@
+import { publishedStatus } from '../lib/schedule.js';
 import { useCallback, useEffect, useState, type DragEvent, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
 import type { JobSummary, PublishTargetSummary } from '../service/types.js';
@@ -282,7 +283,7 @@ export function JobList({
                     </span>
                     <span className="sent-title">{job.title ?? '未命名'}</span>
                     <span className="sent-meta">
-                      {formatRelative(job.updatedAt)}送到「{targetOf(job)?.displayName ?? job.targetKey}」
+                      {job.publishedStatus === 'future' ? `${publishedStatus('future', job.publishedDateGmt)}・` : ''}{formatRelative(job.updatedAt)}送到「{targetOf(job)?.displayName ?? job.targetKey}」
                       {job.publishedId !== null && <span className="mono"> #{job.publishedId}</span>}
                     </span>
                   </button>

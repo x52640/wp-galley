@@ -1,7 +1,7 @@
 /** 前後端共用的 HTTP 契約：HTTP 回應信封。規則見 api.ts 開頭；前端與後端一律從 `api.ts` import。 */
 
 import type { ProofMark } from './api-compare.js';
-import type { Approval, Job, JobSummary, MediaAsset, PublishResult, Revision, Term } from './api-job.js';
+import type { Approval, Job, JobSummary, MediaAsset, PublishResult, CancelScheduleResult, Revision, Term } from './api-job.js';
 import type { ImageBrief, ImageCandidate, ReviewProposal } from './api-review.js';
 
 // --- 回應信封 ----------------------------------------------------------------
@@ -109,4 +109,9 @@ export interface SelectionSpotsResponse {
   readonly contentHash: string;
   readonly spots: readonly { readonly spot: number; readonly kind: 'start' | 'between' | 'end'; readonly label: string }[];
   readonly basis: string;
+}
+
+/** 本機 UI 取消 WordPress 排程；job 狀態不變。 */
+export interface CancelScheduleResponse {
+  readonly published: CancelScheduleResult;
 }

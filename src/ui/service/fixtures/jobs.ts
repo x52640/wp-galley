@@ -26,6 +26,8 @@ export const jobsApi: Pick<PublisherApi, 'listJobs' | 'createJob' | 'getJob' | '
       revisionNumber: job.currentRevision?.number ?? null,
       approved: job.approval?.valid === true,
       publishedId: job.published?.wordpressId ?? null,
+      publishedStatus: job.published?.status ?? null,
+      publishedDateGmt: job.published?.dateGmt ?? null,
       pendingReviewCount: job.review?.pendingCount ?? 0,
     }));
   },
