@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **105 檔 / 2356 測試**全綠（2026-10-13，main @ fd49b18）
+- `npm run verify`：typecheck 通過；Vitest **109 檔 / 2539 測試**全綠（2026-10-22，main @ 23998b7）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-無。
+[P5-T052](tasks/P5-T052-schedule-publish.md) 排程發布（D-051）。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -48,18 +48,18 @@
 | [P5-T024](tasks/P5-T024-choose-author.md) | 選作者 → 存草稿 → 後台作者是本人（read-think／diary 不支援作者欄位時 WordPress 會默默忽略） |
 | [P8-T002](tasks/P8-T002-setup-wizard.md) | 精靈用作者本人的站完整跑過（含填錯密碼、填 http）？使用者沒明確回報，下次開工先問 |
 
+## 上次停在哪（2026-10-22 收官）
+
+- 合併 #37（P5-T049 打字模式插圖、圖片後 Enter 不置中，D-048）、#38（P5-T050 段落與小標對齊，D-049）、#39（P5-T051 發布台建立分類，D-050）；三個都獨立審查一輪＋Codex 三輪，**每個第三輪修正都沒經過 Codex**。
+- 站台 WordPress 7.1.3（使用者 2026-10-21 從後台確認），對齊用 7.0+ 寫法。
+- 三張的手動驗證見上表最上面三列；P5-T051 驗證會在正式站真的建一個分類項目。
+- 後端放圖不收基準版本，兩分頁衝突只靠前端核對（known-issues）。
+
 ## 上次停在哪（2026-10-13 收官）
 
 - 使用者打字模式寫的一篇沒存，休眠醒來 Vite 重連自動 reload，整篇不見（救不回）。D-047 → P5-T048 合併 #36：沒存的內容留底到 localStorage、Vite 重連不 reload。獨立審查一輪＋Codex 三輪（後三輪都是多分頁掉字的邊角），**第三輪修正沒經過 Codex**。
 - 新原則（memory `publisher-no-data-loss`）：掉資料都算 bug，不准叫使用者「記得常存檔」。
 - P5-T048 手動驗證待做（見上表）；「打字中別處存新版本」「存檔回應前又打字」只有自動測試。
-
-## 上次停在哪（2026-10-12 收官）
-
-- 合併 #33（P8-T005 啟動 502＋Galley.app）、#34（P5-T047 字數）、#35（P8-T006 Galley.app 背景跑服務，D-046 修訂 D-044）；三個都 Codex 一輪無問題、各有獨立審查一輪。
-- P8-T006 使用者 2026-10-12 手動驗證通過；P5-T047 字數還沒驗（見上表）。
-- 使用者現在用 Dock 上的 Galley.app 開發布台（服務在背景、沒有終端機）；pull 前一樣先 `lsof -iTCP:3000` 看有沒有在跑。改了 `scripts/make-app.sh` 要在主目錄重跑才生效。
-- `npm run verify` 在 P8-T006 分支第一次跑有 1 條失敗、之後連 14 次全綠，推測跟當時 subagent 收尾的測試程序撞到；再遇到先看是不是 `tests/galley-service.test.ts`。
 
 ## 上次停在哪（2026-10-05 拆檔）
 
