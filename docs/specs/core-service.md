@@ -26,7 +26,7 @@
 | `images.ts` | 用 Codex 生候選圖、用這張、在文章上請 AI 配一張、選一段用此段配圖 | `imageGenerationStatus`、`generateBriefImage`、`imageCandidateFile`、`useImageCandidate`、`requestImageAtPosition`、`selectionImageSpots`、`requestImageFromSelection` | — |
 | `media.ts` | 上傳、換圖、移除、放位置、精選圖片；上傳後自動放位置／設精選 | `addMedia`、`addMediaWithOutcome`、`replaceMedia`、`removeMedia`、`setFeaturedMedia`、`placeMedia` | `addMediaWithOutcome` |
 | `approval.ts` | 核准、撤銷；**核准失效的唯一入口 `invalidateApproval`** | `approve`、`revokeApproval` | `invalidateApproval`、`assertApprovalUnchanged` |
-| `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱 | `publish` | `rejectPublish` |
+| `publish.ts` | 發布：前置檢查、讀遠端比對、建立或更新文章、分類對名稱、排程與取消排程 | `publish`、`cancelSchedule` | `rejectPublish` |
 | `authors.ts` | 作者清單、預設作者檢查、發布時送哪位 | `listAuthors`、`assertAuthorChoosable` | `resolvePublishAuthor` |
 | `factcheck.ts` | AI 查證（D-034，P6-T004）：兩趟 Agent＋抓網頁＋核對、存結果、讀取與結案（跑的期間不鎖內容，D-036）；純函式在 `src/core/factcheck.ts` | `runFactCheck`、`listFactChecks`、`dismissFactCheck` | `cancelActive`、`cancelOrphan`（`agent.ts` 的取消轉過來）、`requireOpenFinding`、`findingToResolveByEdit`、`resolveByEdit`（`content.ts`）、`agentRunView`、`openContradictionCount`（`jobs.ts`） |
 
@@ -216,6 +216,8 @@ interface CoreService {
    * 規則見 state-machine.md「發布選項」。
    */
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
+  /** 本機 UI 取消目前站台的排程；不需核准、不改 job 狀態，更新遠端狀態、日期與快照。 */
+  cancelSchedule(uuid: string): Promise<CancelScheduleResult>;
 
   // --- 作者（authors.ts。P5-T024，D-024；站台規則見 wordpress-site.md「作者」）---
   /** 站上可以當作者的人（只有 id、名字）、發布台的帳號、預設作者與要提醒的事。 */

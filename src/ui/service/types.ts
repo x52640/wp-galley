@@ -35,6 +35,8 @@ import type {
   ImageCandidate,
   ImageGenerationStatus,
   MediaAsset,
+  CancelScheduleResult,
+  PublishedRef,
   PublishRequest,
   PublishResult,
   PublishTargetSummary,
@@ -97,6 +99,7 @@ export type {
   ProofGlyph,
   ProofMark,
   ProofMarkKind,
+  CancelScheduleResult,
   PublishedRef,
   PublishResult,
   PublishStatus,
@@ -269,6 +272,7 @@ export interface PublisherApi {
   revokeApproval(uuid: string, reason: string): Promise<void>;
 
   publish(uuid: string, input: PublishInput): Promise<PublishResult>;
+  cancelSchedule(uuid: string): Promise<CancelScheduleResult>;
 
   /** 分類項目只讀既有的；要建立新項目得使用者明確確認。 */
   listTerms(taxonomy: string): Promise<Term[]>;

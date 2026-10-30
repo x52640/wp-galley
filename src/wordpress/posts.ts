@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { wordpressDateUtc, cancelScheduleWarning } from '../contract/schedule.js';
 import type { WordPressClient } from './client.js';
 import { WordPressError, wordpressErrorCodes } from './errors.js';
 import { PostSchema, type Post } from './schemas.js';
@@ -42,6 +43,8 @@ export interface RemoteSnapshot {
    * 選填：P5-T024 之前存進 DB 的快照沒有這個欄位，那種快照不比作者，免得每次更新都誤報衝突。
    */
   readonly author?: number | null;
+  /** 舊快照沒有日期時維持相容；排程與取消必須比對日期。 */
+  readonly dateGmt?: string | null;
 }
 
 /** 兩份快照差在哪。用欄位名稱回報，訊息才講得出「被改的是什麼」。 */
@@ -55,6 +58,7 @@ export function diffSnapshots(expected: RemoteSnapshot, actual: RemoteSnapshot):
   if (actual.featuredMediaId !== expected.featuredMediaId) changed.push('精選圖片');
   if (JSON.stringify(actual.terms) !== JSON.stringify(expected.terms)) changed.push('分類');
   if (expected.author !== undefined && (actual.author ?? null) !== expected.author) changed.push('作者');
+  if (expected.dateGmt !== undefined && actual.dateGmt !== expected.dateGmt) changed.push('發布日期');
   return changed;
 }
 
@@ -116,6 +120,7 @@ export function snapshotOf(post: Post, taxonomy: string | null): RemoteSnapshot 
   return {
     id: post.id,
     status: post.status,
+    dateGmt: wordpressDateUtc(post.date_gmt),
     modifiedGmt: post.modified_gmt,
     contentHash: hashContent(post),
     title: plainTitle(post),
@@ -226,6 +231,7 @@ export interface UpdateOptions {
  */
 export function nonDraftUpdateMessage(status: string): string | null {
   if (status === 'draft') return null;
+  if (status === 'future') return '這篇已排程，要改先按「取消排程」。這次沒有送出任何修改。';
   return `這篇在站上已經是 ${status}，發布台目前不支援修改已公開的文章（待裁定 Q-5），這次沒有送出任何修改。`;
 }
 
@@ -321,4 +327,54 @@ export async function setStatus(
     maxRetries: 0,
   });
   return data;
+}
+
+/** 排程是另一個會讓內容公開的寫入；前置檢查與最後一刻核准檢查不可省略。 */
+export async function schedulePost(
+  client: WordPressClient,
+  target: PublishTarget,
+  id: number,
+  dateGmt: string,
+  options: UpdateOptions,
+): Promise<Post> {
+  await assertUnchanged(client, target, id, options.expect);
+  options.beforeWrite?.();
+  const { data } = await client.request(`/wp/v2/${target.restBase}/${id}`, {
+    method: 'POST', body: { status: 'future', date_gmt: dateGmt }, schema: PostSchema, maxRetries: 0,
+  });
+  return data;
+}
+
+/** 只接受排程；清除日期讓草稿恢復浮動日期（WordPress core REST controller）。 */
+export async function cancelPostSchedule(
+  client: WordPressClient,
+  target: PublishTarget,
+  id: number,
+  options: UpdateOptions,
+): Promise<{ readonly post: Post; readonly publicationWarning: string | null }> {
+  let scheduledDate: string | null | undefined;
+  try {
+    const actual = await assertUnchanged(client, target, id, options.expect);
+    assertScheduled(actual.status);
+    scheduledDate = actual.dateGmt;
+  } catch (error) {
+    if (error instanceof RemoteChangedError) assertScheduled(error.actual.status);
+    throw error;
+  }
+  options.beforeWrite?.();
+  const { data } = await client.request(`/wp/v2/${target.restBase}/${id}`, {
+    method: 'POST', body: { status: 'draft', date: null, date_gmt: null }, schema: PostSchema, maxRetries: 0,
+  });
+  return { post: data, publicationWarning: cancelScheduleWarning(scheduledDate) };
+}
+
+function assertScheduled(status: string): void {
+  if (status === 'future') return;
+  if (status === 'publish') {
+    throw new WordPressError(wordpressErrorCodes.INVALID_REQUEST,
+      '這篇在 WordPress 上已公開，無法取消排程；電子報或社群分享可能已送出。請到網站確認。', { retryable: false });
+  }
+  const label = status === 'draft' ? '草稿' : `其他狀態（${status}）`;
+  throw new WordPressError(wordpressErrorCodes.INVALID_REQUEST,
+    `這篇在 WordPress 上目前是${label}，無法取消排程；這次沒有修改。`, { retryable: false });
 }

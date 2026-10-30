@@ -4,7 +4,7 @@
 
 ## 主樹基準
 
-- `npm run verify`：typecheck 通過；Vitest **109 檔 / 2539 測試**全綠（2026-10-22，main @ 23998b7）
+- `npm run verify`：typecheck 通過；Vitest **111 檔 / 2597 測試**全綠（2026-10-30，P5-T052 分支）
 - 使用者資料在 `~/Library/Application Support/Galley/`（D-035）：2026-10-04 19:15 dev server 重載時自動搬家完成（標記 `done`、19 篇、絕對路徑 0 筆、integrity_check ok）；搬家前完整備份在 `~/wp-galley-backup-20261004`；舊資料仍留在程式資料夾，使用者確認後可刪。
 - migration head：`010-relative-paths`（已套到資料目錄的 DB）。git worktree 預設用自己的 `.galley-data/`，碰不到真實資料。
 - 站台設定在資料目錄的 `publish-targets.json`（不進 git）；測試讀 `config/examples/remusplus.json`。
@@ -12,7 +12,7 @@
 
 ## 進行中
 
-[P5-T052](tasks/P5-T052-schedule-publish.md) 排程發布（D-051）。
+無。
 
 ## 待使用者手動驗證（都已合併；一律只存草稿）
 
@@ -20,6 +20,7 @@
 
 | Task | 驗什麼 |
 | --- | --- |
+| [P5-T052](tasks/P5-T052-schedule-publish.md) | 發布面板選「排程發布」→ 時間改成 **2099 年**某天（不要排近的時間，到時真的會公開）→ 勾我知道 → 核准並排程 → 完成畫面寫已排程與時間 → 後台看到「已排程」→ 回發布台按「取消排程」→ 後台變草稿、日期不再是 2099 |
 | [P5-T051](tasks/P5-T051-create-terms-in-app.md) | 發布面板「分類／標籤」→ 建立新的分類項目 → 打一個跟既有相近的名稱看到提示 → 打一個新名稱 → 建立 → 確定建立 → 自動選上並套用（綠框）→ 核准並存成草稿 → 後台看到新分類且文章有勾；另點一個既有分類不存 → 發布被擋、關面板再開仍擋 → 按「儲存分類」放行；精靈「發到哪裡」寫的是資料目錄路徑（會在正式站真的建一個分類項目，不公開文章） |
 | [P5-T050](tasks/P5-T050-text-align.md) | 長文一段置中、一個小標靠右 → 存草稿 → 後台編輯器打開沒有「區塊內容無效」、對齊正確（順便確認站台是 WordPress 7.0 以上）→ 預覽前台一致；打字模式在置中段尾按 Enter → 新段靠左 |
 | [P5-T049](tasks/P5-T049-insert-image-while-typing.md) | 打字模式寫一段不存 → 段落間「在這裡插圖」→ 上傳一張 → 圖出現、剛寫的字都在、還在打字模式；按 Enter 開空段落再在它下面插圖也一樣；最後一張圖後按 → 或 ↓ 打字、按 Enter → 靠左 → 存草稿看後台 |

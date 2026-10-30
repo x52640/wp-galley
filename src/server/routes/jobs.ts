@@ -46,6 +46,7 @@ import type {
   MediaUploadRequest,
   PlaceMediaRequest,
   ProposalRefRequest,
+  CancelScheduleResponse,
   PublishRequest,
   PublishResponse,
   RemovedResponse,
@@ -247,7 +248,8 @@ const DiscardReviewBody = z
 const ApproveBody = z.object({ contentHash: z.string().regex(/^[0-9a-f]{64}$/, 'contentHash 必須是 64 位十六進位') });
 const RevokeBody = z.object({ reason: z.string().max(200).optional() }).optional();
 const PublishBody = z.object({
-  status: z.enum(['draft', 'publish']),
+  status: z.enum(['draft', 'publish', 'future']),
+  scheduledAt: z.string().optional(),
   confirm: z.boolean().optional(),
   /** 發布選項（P5-T024），不是核准的內容；在不在可選名單由 CoreService 驗。 */
   authorId: z.number().int().positive().optional(),
@@ -862,12 +864,18 @@ export async function jobRoutes(app: FastifyInstance): Promise<void> {
 
   // --- 發布 -----------------------------------------------------------------
 
+  app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/cancel-schedule', async (request): Promise<CancelScheduleResponse> => {
+    const { uuid } = parse(UuidParams, request.params);
+    return guard(async () => ({ published: await core().cancelSchedule(uuid) }));
+  });
+
   app.post<{ Params: { uuid: string } }>('/api/jobs/:uuid/publish', async (request): Promise<PublishResponse> => {
     const { uuid } = parse(UuidParams, request.params);
     const body = parse(PublishBody, request.body);
     return guard(async () => ({
       result: await core().publish(uuid, {
         status: body.status,
+        ...(body.scheduledAt === undefined ? {} : { scheduledAt: body.scheduledAt }),
         ...(body.confirm === undefined ? {} : { confirm: body.confirm }),
         ...(body.authorId === undefined ? {} : { authorId: body.authorId }),
         actor: 'ui',

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { api, describeError } from '../service/client.js';
-import type { LoadedJob, PublishResult, PublishStatus } from '../service/types.js';
+import type { LoadedJob, PublishedRef, CancelScheduleResult, PublishResult, PublishStatus } from '../service/types.js';
 import { Icon } from '../icons.js';
 import { readString, readStringArray, shortHash } from '../lib/format.js';
 import {
@@ -31,6 +31,9 @@ import {
 } from '../lib/slug-save-store.js';
 import { openContradictionNotice } from '../../contract/factcheck.js';
 import { countBodyWords } from '../../contract/word-count.js';
+import { checkSchedule } from '../../contract/schedule.js';
+import { cancelThenRefresh } from '../lib/cancel-schedule.js';
+import { defaultSchedule, scheduleUtc, scheduleTime, publishedStatus } from '../lib/schedule.js';
 import { WORD_COUNT_HINT, wordCountNumber } from '../lib/word-count.js';
 import { typeLabel } from './JobList.js';
 import { TaxonomyPanel } from './panels/TaxonomyPanel.js';
@@ -50,8 +53,8 @@ import { AuthorPicker, authorBlocker, useAuthors } from './AuthorPicker.js';
  * 2. **核准綁的是畫面上那一份。** 送出的 hash 必須等於校樣回應的 ETag；對不上就代表
  *    你在看的跟你要簽的不是同一份，這時不給按。
  *
- * **公開是唯一收不回來的動作**：站上的 MailPoet／Jetpack 可能在公開的瞬間寄出電子報、
- * 自動分享（docs/specs/security.md）。所以預設存成草稿，選公開要多勾一個「我知道」。
+ * **公開與排程是收不回來的動作**：站上的 MailPoet／Jetpack 可能在公開的瞬間寄出電子報、
+ * 自動分享（docs/specs/security.md）。所以預設存成草稿，選公開或排程要多勾一個「我知道」。
  */
 
 const NEEDS_RENDER = new Set(['SOURCE', 'REVIEWED', 'MEDIA_READY']);
@@ -82,6 +85,14 @@ export function PublishSheet({
   onGoTo: (where: 'review' | 'images') => void;
 }): JSX.Element {
   const [status, setStatus] = useState<PublishStatus>('draft');
+  const [localTime, setLocalTime] = useState(defaultSchedule);
+  const [now, setNow] = useState(Date.now);
+  const scheduledAt = scheduleUtc(localTime);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [understood, setUnderstood] = useState(false);
   const [result, setResult] = useState<PublishResult | null>(null);
   const [step, setStep] = useState<string | null>(null);
@@ -240,7 +251,7 @@ export function PublishSheet({
     );
   }
 
-  if (job.published) return <Published job={job} result={result} account={authors.data?.currentUser.name ?? null} />;
+  if (job.published) return <Published key={job.uuid} job={job} result={result} account={authors.data?.currentUser.name ?? null} refresh={refresh} />;
 
   const hash = job.currentRevision?.contentHash ?? null;
   const pending = job.review?.pendingCount ?? 0;
@@ -258,7 +269,7 @@ export function PublishSheet({
 
   const slugBlocker = slugPublishBlocker({ dirty: slugDirty, saving: slugSaving });
   const termBlocker = job.target.taxonomy === null ? null : taxonomyPublishBlocker({ dirty: termDirty, saving: termSaving });
-  const why: string | null = editingLock ?? slugBlocker ?? termBlocker ?? (needsCover
+  const why: string | null = editingLock ?? slugBlocker ?? termBlocker ?? (status === 'future' ? checkSchedule(scheduledAt, now) : null) ?? (needsCover
     ? '還缺封面圖：這個發布目標一定要有精選圖片。'
     : otherBlockers.length > 0
       ? `還不能發布：${otherBlockers.join('、')}`
@@ -268,13 +279,17 @@ export function PublishSheet({
           ? prepare.busy || NEEDS_RENDER.has(job.state) || job.state === 'RENDERED'
             ? '正在準備成品，左邊載入完就能按。'
             : `目前狀態是「${job.state}」，這一步不能發布。`
-          : status === 'publish' && !understood
+          : status !== 'draft' && !understood
             ? '要先勾上面的「我知道」。'
             : authorBlocker(authors, authorId));
 
   const publish = (): void =>
     void go.run(async () => {
       try {
+        if (status === 'future') {
+          const problem = checkSchedule(scheduledAt);
+          if (problem) throw new Error(problem);
+        }
         if (!approvedNow) {
           if (hash === null) return;
           setStep('核准中…');
@@ -284,7 +299,7 @@ export function PublishSheet({
         // confirm: true 就是「使用者剛剛在這個面板按了發布」。設了
         // requireSecondConfirmation 的目標，後端只認這個旗標。
         setResult(
-          await api.publish(job.uuid, { status, confirm: true, ...(authorId === null ? {} : { authorId }) }),
+          await api.publish(job.uuid, { status, confirm: true, ...(status === 'future' ? { scheduledAt: scheduledAt! } : {}), ...(authorId === null ? {} : { authorId }) }),
         );
       } finally {
         setStep(null);
@@ -450,14 +465,27 @@ export function PublishSheet({
             className="p-way"
             data-active={status === 'publish' ? 'yes' : 'no'}
             data-danger="yes"
-            onClick={() => setStatus('publish')}
+            onClick={() => { setStatus('publish'); setUnderstood(false); }}
           >
             <b>馬上公開</b>
             <span>立刻出現在網站上</span>
           </button>
+          <button type="button" role="radio" aria-checked={status === 'future'} className="p-way"
+            data-active={status === 'future' ? 'yes' : 'no'} data-danger="yes"
+            onClick={() => { setStatus('future'); setUnderstood(false); }}>
+            <b>排程發布</b><span>選一個時間，交給 WordPress 公開</span>
+          </button>
         </div>
 
-        {status === 'publish' && (
+        {status === 'future' && (
+          <label className="p-schedule">
+            <span>發布時間（{timezone}，這台電腦的時區）</span>
+            <input className="input" type="datetime-local" aria-label="排程發布時間" value={localTime}
+              onChange={event => setLocalTime(event.target.value)} />
+            <span className="field-hint">發布台不必開著，到時由 WordPress 公開。</span>
+          </label>
+        )}
+        {status !== 'draft' && (
           <div className="p-warn" role="alert">
             <p>
               <Icon name="alert" size={16} />
@@ -465,9 +493,10 @@ export function PublishSheet({
                 公開的瞬間可能<b>自動寄出電子報</b>、<b>分享到社群</b>。之後就算刪掉文章也收不回來。
               </span>
             </p>
+            {status === 'future' && <p>時間到才發，網站流量少時可能晚一點，也可能錯過排程。</p>}
             <label className="p-check">
               <input type="checkbox" checked={understood} onChange={(event) => setUnderstood(event.target.checked)} />
-              我知道，確定要公開
+              {status === 'future' ? '我知道，確定要排程發布' : '我知道，確定要公開'}
             </label>
           </div>
         )}
@@ -486,12 +515,12 @@ export function PublishSheet({
         <button
           type="button"
           className="btn btn-primary btn-big p-go-btn"
-          data-danger={status === 'publish' ? 'yes' : 'no'}
+          data-danger={status !== 'draft' ? 'yes' : 'no'}
           disabled={why !== null || go.busy || prepare.busy || slugSaving || termSaving || editingNow}
           onClick={publish}
         >
-          {go.busy ? <Spinner /> : <Icon name={status === 'publish' ? 'send' : 'check'} size={16} />}
-          {step ?? (approvedNow ? '' : '核准並') + (status === 'publish' ? '公開' : '存成草稿')}
+          {go.busy ? <Spinner /> : <Icon name={status !== 'draft' ? 'send' : 'check'} size={16} />}
+          {step ?? (approvedNow ? '' : '核准並') + (status === 'future' ? `排程在 ${scheduleTime(scheduledAt)} 發布` : status === 'publish' ? '公開' : '存成草稿')}
         </button>
         <p className="p-why" aria-live="polite">
           {why ?? (
@@ -701,19 +730,25 @@ function Published({
   job,
   result,
   account,
+  refresh,
 }: {
   job: LoadedJob;
   result: PublishResult | null;
   /** 發布台登入的帳號名稱；沒送作者時 WordPress 記成它，要寫出來（P5-T024 審查）。 */
   account: string | null;
+  refresh: () => Promise<void>;
 }): JSX.Element {
-  const published = job.published!;
+  const cancel = useAction();
+  const [cancelled, setCancelled] = useState<{ source: PublishedRef; current: CancelScheduleResult } | null>(null);
+  // 重讀失敗仍先顯示取消回應；讀到新快照後就以新資料為準。
+  const published = cancelled?.source === job.published ? cancelled.current : job.published!;
+  const warning = cancelled?.current.publicationWarning ?? null;
   return (
     <div className="publish">
-      <p className="note note-good">
-        <Icon name="check-circle" size={16} />
+      <p className={warning === null ? 'note note-good' : 'note note-warn'}>
+        <Icon name={warning === null ? 'check-circle' : 'alert'} size={16} />
         <span>
-          已送到「{job.target.displayName}」，狀態是{published.status === 'publish' ? '公開' : '草稿'}
+          已送到「{job.target.displayName}」，{publishedStatus(published.status, published.dateGmt)}
           <span className="mono"> #{published.wordpressId}</span>
           {result === null
             ? ''
@@ -722,6 +757,19 @@ function Published({
               : `，作者是發布台的帳號${account ? `（${account}）` : ''}`}
         </span>
       </p>
+      {published.status === 'future' && (
+        <>
+          <p className="field-hint">網站流量少時可能晚一點，也可能錯過排程。要改內容：先取消排程，目前要到 WordPress 後台改。</p>
+          <button type="button" className="btn btn-primary" disabled={cancel.busy}
+            onClick={() => void cancel.run(() => cancelThenRefresh(async () => {
+              setCancelled({ source: job.published!, current: await api.cancelSchedule(job.uuid) });
+            }, refresh))}>
+            {cancel.busy && <Spinner />}取消排程
+          </button>
+        </>
+      )}
+      {warning !== null && <p className="note note-warn" role="alert">{warning}</p>}
+      <ErrorNote message={cancel.error} />
       {result && result.unknownTerms.length > 0 && (
         <p className="note note-warn">
           <Icon name="alert" size={14} />

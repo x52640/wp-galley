@@ -7,6 +7,7 @@ import {
   type FactCheckRequest,
   type ReviewItem,
 } from '../service/types.js';
+import { publishedStatus } from '../lib/schedule.js';
 import { Icon } from '../icons.js';
 import { STATE_LABEL, isFinished, isTerminal } from '../lib/steps.js';
 import { highlightText, kindOf } from '../lib/review-kinds.js';
@@ -411,7 +412,7 @@ export function Workspace({
           </span>
           <h1 className="docbar-title">{job.title ?? '未命名'}</h1>
           <span className="docbar-state" data-state={job.state}>
-            {STATE_LABEL[job.state]}
+            {job.published ? publishedStatus(job.published.status, job.published.dateGmt) : STATE_LABEL[job.state]}
           </span>
         </div>
 
@@ -435,10 +436,9 @@ export function Workspace({
             />
           )}
           {job.published ? (
-            <a className="btn" href={job.published.link} target="_blank" rel="noreferrer">
-              <Icon name="external-link" size={15} />
-              已發布，去看看
-            </a>
+            <button type="button" className="btn" onClick={openPublish}>
+              {job.published.status === 'future' ? '查看／取消排程' : '查看發布結果'}
+            </button>
           ) : (
             !isTerminal(job.state) && (
               <button type="button" className="btn btn-primary" onClick={openPublish}>
@@ -488,7 +488,7 @@ export function Workspace({
         <div className="terminal-bar" role="status">
           <Icon name="alert" size={15} />
           <span>
-            這篇稿件{STATE_LABEL[job.state]}。
+            這篇稿件{job.published ? publishedStatus(job.published.status, job.published.dateGmt) : STATE_LABEL[job.state]}。
             {job.blockers.join('、')}
           </span>
         </div>

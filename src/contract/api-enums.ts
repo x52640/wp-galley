@@ -41,8 +41,8 @@ export type AgentTask = 'review' | 'images';
  */
 export type AgentRunTask = AgentTask | 'generate-image' | 'suggest-slug' | 'factcheck';
 
-/** 存成草稿與直接公開是兩個不同的決定。 */
-export type PublishStatus = 'draft' | 'publish';
+/** 草稿、馬上公開、交給 WordPress 排程公開。 */
+export type PublishStatus = 'draft' | 'publish' | 'future';
 
 export type ReviewItemType = 'change' | 'observation';
 export type ReviewItemState = 'pending' | 'applied' | 'skipped' | 'unappliable';

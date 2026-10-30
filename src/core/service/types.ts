@@ -116,7 +116,9 @@ export type FactCheckFetcherFactory = (input: {
 }) => SourceFetcher;
 
 export interface PublishInput {
-  readonly status: 'draft' | 'publish';
+  readonly status: 'draft' | 'publish' | 'future';
+  /** 排程發布的 ISO 8601 UTC 時間；future 時必填。 */
+  readonly scheduledAt?: string;
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
   readonly confirm?: boolean | undefined;
   /**

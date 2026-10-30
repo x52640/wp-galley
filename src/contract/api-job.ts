@@ -22,6 +22,8 @@ export interface JobSummary extends Job {
   readonly revisionNumber: number | null;
   readonly approved: boolean;
   readonly publishedId: number | null;
+  readonly publishedStatus?: string | null;
+  readonly publishedDateGmt?: string | null;
   /** 未結案的校稿提案還剩幾項沒處理；沒有提案就是 0。列表靠它說「還有 N 項建議」。 */
   readonly pendingReviewCount: number;
 }
@@ -118,6 +120,8 @@ export interface AgentRun {
 }
 
 export interface PublishedRef {
+  /** WordPress 實際回傳的日期，正規化為 UTC；舊資料可能沒有。 */
+  readonly dateGmt?: string | null;
   readonly wordpressId: number;
   readonly status: string;
   readonly link: string;
@@ -192,10 +196,7 @@ export interface AgentRunResult {
   readonly review: ReviewProposal | null;
 }
 
-export interface PublishResult {
-  readonly wordpressId: number;
-  readonly status: string;
-  readonly link: string;
+export interface PublishResult extends PublishedRef {
   readonly created: boolean;
   /** 對不上既有分類項目的名稱。不自動建立，交給使用者處理（D-004）。 */
   readonly unknownTerms: string[];
@@ -259,4 +260,9 @@ export interface PublishTargetSummary extends JobTarget {
    * 已經用它的舊稿件照常。停用的**照樣列出來**，總覽靠它顯示舊稿件的類型名稱。
    */
   readonly disabled: boolean;
+}
+
+/** 取消排程的回應：回到草稿也可能已觸發過公開副作用。 */
+export interface CancelScheduleResult extends PublishedRef {
+  readonly publicationWarning: string | null;
 }

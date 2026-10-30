@@ -199,6 +199,8 @@ export interface RevokeApprovalRequest {
 
 export interface PublishRequest {
   readonly status: PublishStatus;
+  /** 排程發布的 ISO 8601 UTC 時間；future 時必填。 */
+  readonly scheduledAt?: string;
   /** requireSecondConfirmation 的 target 需要 UI 再確認一次。 */
   readonly confirm?: boolean;
   /**
